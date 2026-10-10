@@ -1,0 +1,47 @@
+{
+  "name": "feast-agent",
+  "version": "0.1.0",
+  "description": "TypeScript SDK and agent for Feast (feast.meme): launch a stock-paired meme coin, trade it, read its on-chain fee split, and price it against the paired tokenized stock with the Binance Web3 API.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "bin": {
+    "feast-agent": "src/agent/bin.mjs"
+  },
+  "exports": {
+    ".": "./src/sdk/index.ts",
+    "./binance": "./src/binance/index.ts"
+  },
+  "scripts": {
+    "agent": "tsx src/agent/cli.ts",
+    "faucet": "tsx src/agent/cli.ts faucet",
+    "demo:sandbox": "tsx src/agent/cli.ts demo",
+    "mcp": "tsx src/agent/mcp.ts",
+    "test": "vitest run",
+    "test:sandbox": "FEAST_AGENT_SANDBOX=1 vitest run src/agent/sandbox.integration.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "feast",
+    "bnb-chain",
+    "bstock",
+    "tokenized-stocks",
+    "binance-web3-api",
+    "viem",
+    "mcp",
+    "agent"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "tsx": "^4.23.15",
+    "viem": "^2.57.4",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.3"
+  }
+}
