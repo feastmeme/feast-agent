@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://web3.binance.com/build/api/v1/dex/market/rwa/search?keyword=AAPL&platformId=bstock",
+    "at": "2026-10-10T02:32:23.606Z"
+  },
+  "status": 429,
+  "headers": {
+    "content-type": "application/json",
+    "retry-after": "1"
+  },
+  "body": {
+    "code": 42900,
+    "timestamp": 1791599543616,
+    "msg": "Rate limit exceeded",
+    "data": ""
+  }
+}

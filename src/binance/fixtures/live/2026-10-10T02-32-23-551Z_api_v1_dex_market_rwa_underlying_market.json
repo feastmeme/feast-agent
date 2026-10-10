@@ -1,0 +1,49 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://web3.binance.com/build/api/v1/dex/market/rwa/underlying-market?binanceChainId=56&tokenContractAddress=0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+    "at": "2026-10-10T02:32:23.551Z"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8",
+    "x-oc-ratelimit-limit": "5",
+    "x-oc-ratelimit-remaining": "1",
+    "x-oc-used-weight": "4"
+  },
+  "body": {
+    "code": 0,
+    "msg": "success",
+    "data": {
+      "binanceChainId": "56",
+      "tokenContractAddress": "0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+      "platformId": "bstock",
+      "assetType": 1,
+      "statusInfo": {
+        "openState": true,
+        "marketStatus": null,
+        "reasonCode": "TRADING",
+        "reasonMsg": null,
+        "nextOpenTime": null,
+        "nextCloseTime": null
+      },
+      "marketData": {
+        "referencePrice": null,
+        "high52W": "345.3400",
+        "low52W": "243.4200",
+        "volumeShares24H": "32600796",
+        "avgDailyVolume1Y": null,
+        "totalShares": null,
+        "marketCap": "4968150755600.00",
+        "turnoverRate": null,
+        "amplitude": null,
+        "dividendYield": "0.00310000",
+        "latestDividend": "0.270000",
+        "peRatioTTM": "38.5300",
+        "pbRatio": "46.2100"
+      }
+    },
+    "timestamp": 1791599543573,
+    "success": true
+  }
+}
