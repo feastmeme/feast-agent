@@ -131,6 +131,7 @@ On the sandbox (chain 56096) the agent trades through `FeastSandboxRouter` `0xa8
 npm test                 # 72 offline tests: encoders and decoders, config, signing, Binance client on fixtures, MCP
 npm run typecheck        # tsc --noEmit, strict
 npm run test:sandbox     # FEAST_AGENT_SANDBOX=1: the whole loop against the live sandbox
+npm run test:mainnet-read  # FEAST_AGENT_MAINNET=1: chain 56 read path (factory code, quotes, predictCoin); sends nothing
 ```
 
 ## Limits

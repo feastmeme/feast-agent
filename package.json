@@ -21,7 +21,8 @@
     "mcp": "tsx src/agent/mcp.ts",
     "test": "vitest run",
     "test:sandbox": "FEAST_AGENT_SANDBOX=1 vitest run src/agent/sandbox.integration.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:mainnet-read": "FEAST_AGENT_MAINNET=1 vitest run src/sdk/mainnet.read.test.ts"
   },
   "keywords": [
     "feast",
