@@ -346,6 +346,31 @@ export class FeastClient {
     throw new FeastError(`${stock.symbol}'s price pool pairs it with ${first.other}, which is neither USDT nor WBNB`, "unpriceable");
   }
 
+  /**
+   * The referrer the hook has bound to a wallet, or null. A wallet's first trade that
+   * names a referrer binds it, and from then on the hook pays that referrer on every
+   * trade the wallet makes, whatever later trades name.
+   */
+  async referrerOf(wallet: Address): Promise<Address | null> {
+    const bound = await this.publicClient.readContract({
+      address: this.network.contracts.hook,
+      abi: hookAbi,
+      functionName: "referrerOf",
+      args: [wallet],
+    });
+    return bound === zeroAddress ? null : bound;
+  }
+
+  /** BNB's dollar price from the USDT/WBNB PancakeSwap v3 pool the address book names. */
+  async bnbUsdPrice(): Promise<number> {
+    const { usdtNativePool, wrappedNative } = this.network.contracts;
+    const [slot0, token0] = await Promise.all([
+      this.publicClient.readContract({ address: usdtNativePool, abi: v3PoolAbi, functionName: "slot0" }),
+      this.publicClient.readContract({ address: usdtNativePool, abi: v3PoolAbi, functionName: "token0" }),
+    ]);
+    return priceInPool(slot0[0], token0, wrappedNative);
+  }
+
   async nativeBalance(owner?: Address): Promise<bigint> {
     return this.publicClient.getBalance({ address: owner ?? this.requireAccount().address });
   }
@@ -644,8 +669,8 @@ export class FeastClient {
   private assertWritable(): void {
     if (this.network.realMoney) {
       throw new FeastError(
-        `refusing to send a transaction on ${this.network.chainName} (chain ${this.network.chainId}): this release sends only on the sandbox. ` +
-          `Use prepareLaunch / --dry-run to see the calldata.`,
+        `refusing to send a transaction on ${this.network.chainName} (chain ${this.network.chainId}): this release sends transactions only on the sandbox. ` +
+          `On mainnet, prepareLaunch (CLI: launch --dry-run) shows the calldata without sending it.`,
         "mainnet_writes_disabled",
       );
     }
