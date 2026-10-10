@@ -5,7 +5,6 @@ import {
   getAddress,
   http,
   isAddress,
-  parseEventLogs,
   zeroAddress,
   type Account,
   type Address,
@@ -24,6 +23,7 @@ import { coinPicture, pinImage, pinMetadata } from "./metadata.ts";
 import type { FeastNetwork, Hop, StockQuote } from "./networks.ts";
 import { allowanceSlot, permitTypedData, splitPermitSignature, uint256Word } from "./permit.ts";
 import { coinPriceE18, e18ToNumber, priceInPool } from "./price.ts";
+import { creationsOf, fillsOf } from "./receipts.ts";
 import { feeSplitOf, type FeeSplit, type PoolInfo } from "./split.ts";
 
 /** Calls are simulated and sent with every refusal any contract on the path can raise, so a revert has a name. */
@@ -462,11 +462,7 @@ export class FeastClient {
     );
     const txHash = await this.requireWallet().writeContract(request);
     const receipt = await this.receipt(txHash);
-    const created = parseEventLogs({ abi: factoryAbi, logs: receipt.logs, eventName: "CoinCreated" }).filter(
-      (log) =>
-        log.address.toLowerCase() === this.network.contracts.factory.toLowerCase() &&
-        log.args.creator.toLowerCase() === account.address.toLowerCase(),
-    );
+    const created = creationsOf(receipt, { factory: this.network.contracts.factory, creator: account.address });
     const [event] = created;
     if (created.length !== 1 || !event) {
       throw new FeastError(`transaction ${txHash} was mined but holds ${created.length} creations by this factory for this creator`, "no_creation");
@@ -611,13 +607,7 @@ export class FeastClient {
     bound: { side: "buy" | "sell"; coin: Address; router: Address; amountIn: bigint; minOut: bigint; referrer: Address },
   ): Promise<TradeResult> {
     const receipt = await this.receipt(txHash);
-    const trader = this.requireAccount().address.toLowerCase();
-    const fills = parseEventLogs({ abi: routerAbi, logs: receipt.logs, eventName: "Traded" }).filter(
-      (log) =>
-        log.address.toLowerCase() === bound.router.toLowerCase() &&
-        log.args.trader.toLowerCase() === trader &&
-        log.args.coin.toLowerCase() === bound.coin.toLowerCase(),
-    );
+    const fills = fillsOf(receipt, { router: bound.router, trader: this.requireAccount().address, coin: bound.coin });
     const [fill] = fills;
     if (fills.length !== 1 || !fill) {
       throw new FeastError(`transaction ${txHash} was mined but holds ${fills.length} router fills for this trader and coin`, "no_fill");
