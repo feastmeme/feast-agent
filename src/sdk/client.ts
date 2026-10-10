@@ -171,7 +171,7 @@ export class FeastClient {
     this.fetchImpl = options.fetch ?? fetch;
     this.pollingInterval = options.pollingInterval ?? 1_000;
     const chain = chainOf(this.network);
-    // JSON-RPC batching keeps a page of reads to one HTTPS request; the sandbox door takes batches of up to 50.
+    // JSON-RPC batching keeps a page of reads to one HTTPS request; the sandbox RPC accepts batches of up to 50.
     const transport = http(this.network.rpcUrl, { batch: { batchSize: 25, wait: 10 }, retryCount: 2, retryDelay: 750 });
     this.publicClient = createPublicClient({ chain, transport, pollingInterval: this.pollingInterval }) as PublicClient;
     this.wallet = this.account ? createWalletClient({ chain, transport, account: this.account }) : undefined;
@@ -220,7 +220,7 @@ export class FeastClient {
     };
   }
 
-  /** The address `create` will mint for this salt and ticket — asked of the factory itself. */
+  /** The address `create` will mint for this salt, name and symbol — asked of the factory itself. */
   async predictCoin(input: { salt: Hex; name: string; symbol: string; supply?: bigint }): Promise<Address> {
     return this.publicClient.readContract({
       address: this.network.contracts.factory,

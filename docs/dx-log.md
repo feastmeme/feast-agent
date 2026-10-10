@@ -9,7 +9,7 @@ Raw material for the team's Developer Experience Report: observations, one per l
 
 ## 1. Timeline: from opening the docs to the first call
 
-- 01:00:17 — work on the project starts.
+- 01:00:17 — the operator session starts (the empty repository was created at 00:59:15).
 - 01:01:14 — first request to Binance: `GET https://web3.binance.com/en/dev-portal` (curl, browser UA) returns HTTP 202, a 2,102-byte AWS WAF JavaScript challenge, and no portal content.
 - 01:01:15 — the same URL with curl's default UA returns HTTP 202 with an empty body.
 - 01:01:16–01:01:35 — `/llms.txt`, `/llms-full.txt`, `/en/dev-docs` and `/en/dev-docs/llms.txt` all return HTTP 202 WAF challenges to curl, with both UAs.
@@ -21,7 +21,7 @@ Raw material for the team's Developer Experience Report: observations, one per l
 - 01:07:33 — the real docs index for LLMs is at `/en/dev-docs/llms.txt`, not at the site root. It is readable through the Fetch tool and still a WAF 202 for curl.
 - 01:11:22 — RWA parameter names confirmed against the official JS connector source (`binance/binance-web3-connector-js`, `clients/web3-wallet/src/rest-api/modules/rwadata-api.ts`, commit `a234ece`).
 - 01:12:01 — first attempted API call: `GET https://web3.binance.com/build/api/v1/dex/market/rwa/tokens?binanceChainId=56&platformId=bstock` without credentials. It returned HTTP 401 (verbatim in §4). Elapsed since opening the docs: 10 min 47 s.
-- 01:12:13 — first successful Binance data call, without a key: the `binance-tokenized-securities-info` Wallet Skill's token list (`/bapi/defi/v1/public/wallet-direct/buw/wallet/market/token/rwa/stock/detail/list/ai`). HTTP 200, 363,398 bytes, 1,938 items. On chain 56 there were 91 items of `type` 3 (bStock).
+- 01:12:13 — first successful Binance data call, without a key: the `binance-tokenized-securities-info` Wallet Skill's token list (`/bapi/defi/v1/public/wallet-direct/buw/wallet/market/token/rwa/stock/detail/list/ai`). HTTP 200, 363,398 bytes, 1,938 items. On chain 56 there were 91 items of `type` 3 (bStock). The bStock subset is kept in `src/binance/fixtures/skill-bstock-list.bsc.live.json`.
 - 01:18:09 — the Wallet Skill's "RWA Dynamic V2" call for AAPLB (`0x431a…9b7a`) returns HTTP 200 with `tokenInfo.price` "336.54311776947818998044", `stockInfo.price` null and `statusInfo.reasonCode` "TRADING", on a Saturday.
 - 01:19:31 — the RWA Data client (signing, six endpoints, fixtures) is committed. It has not been called with credentials, because the team's key did not exist yet.
 - No authenticated call has been made so far. Run `npm run agent -- binance-check --record` once the key exists; it records every response.
@@ -88,7 +88,7 @@ Raw material for the team's Developer Experience Report: observations, one per l
 - None hit. The calls were:
   - one unauthenticated API call;
   - one keyless Wallet Skill list call;
-  - about fifteen keyless RWA Dynamic calls, one per `quote` and two per demo run, never more than one a second;
+  - keyless RWA Dynamic calls, one per `quote` and two per demo run (not separately counted);
   - documentation fetches.
 - Documented (Authentication page, Rate Limits):
   - 1,200 requests / 60 s per IP;

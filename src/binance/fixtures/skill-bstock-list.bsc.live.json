@@ -1,0 +1,552 @@
+{
+ "_fixture": "Trimmed from a live, keyless response: GET https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/market/token/rwa/stock/detail/list/ai (the binance-tokenized-securities-info Wallet Skill's token list) at 2026-10-10T01:12:13Z, HTTP 200, 1938 items in all. Kept: the 91 items with chainId \"56\" and type 3 (bStock), four fields each.",
+ "totalItems": 1938,
+ "bstocksOnBsc": [
+  {
+   "symbol": "AAOIB",
+   "ticker": "AAOI",
+   "contractAddress": "0x10343ef7da3301493d7ecb647d68a288c6c1db2f",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "AAPLB",
+   "ticker": "AAPL",
+   "contractAddress": "0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+   "multiplier": "1.000603906075632366"
+  },
+  {
+   "symbol": "ADBEB",
+   "ticker": "ADBE",
+   "contractAddress": "0x65c0249d49e3231540fd0db0a1ae9259e6eaaf57",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "AGPUB",
+   "ticker": "AGPU",
+   "contractAddress": "0xa455ae0f04a2b86eee47adca98985e61d14cbefb",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "ALABB",
+   "ticker": "ALAB",
+   "contractAddress": "0x1282493ede6a22753d45cb2c0fdbd8d35e97555a",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "AMATB",
+   "ticker": "AMAT",
+   "contractAddress": "0xa304bd78e739c0f777202b3eb73ac3736d1df801",
+   "multiplier": "1.000748400440519121"
+  },
+  {
+   "symbol": "AMCB",
+   "ticker": "AMC",
+   "contractAddress": "0x96e7d606e229448ef817a7f35fd7394c3e15d00c",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "AMDB",
+   "ticker": "AMD",
+   "contractAddress": "0x75fd4cf6f8392e41e70391d60c90c0d5211603a1",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "AMZNB",
+   "ticker": "AMZN",
+   "contractAddress": "0x1a4b499833a79a09ad7cf1d42d7dacf71e92eb00",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "ARMB",
+   "ticker": "ARM",
+   "contractAddress": "0xd42a79ebb7f527f40faecd196ffb47ad5e8d6f8c",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "ASMLB",
+   "ticker": "ASML",
+   "contractAddress": "0xfbfb4f79cfb4c34dcd7c82bdee5a0fa199b2e7f9",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "ASTSB",
+   "ticker": "ASTS",
+   "contractAddress": "0x58b6f5feeb8436489f5bf4a56619092b1fa8e777",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "AVGOB",
+   "ticker": "AVGO",
+   "contractAddress": "0x76682c454467b3a1150ad8b6a92fc5ee2c21d7ed",
+   "multiplier": "1.001269208611258122"
+  },
+  {
+   "symbol": "AXTIB",
+   "ticker": "AXTI",
+   "contractAddress": "0x9bdc8b470dbf89dbcb123587c6f5e49cca3463be",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "BABAB",
+   "ticker": "BABA",
+   "contractAddress": "0x4ef9d3062c7f6eba4aae4990c5036598c6eff4ec",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "BEB",
+   "ticker": "BE",
+   "contractAddress": "0x5519de00f5388c17d886b97cb5d2d43a812a82bc",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "BMNRB",
+   "ticker": "BMNR",
+   "contractAddress": "0x3548da95a9effe481e8604664d75e95821e557f5",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "BNCB",
+   "ticker": "BNC",
+   "contractAddress": "0x4902c5ebc598265ed2212b559b042de8a5eeec3f",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "CBRSB",
+   "ticker": "CBRS",
+   "contractAddress": "0xe81c6bb0266cd68b4f17278531dd03ea1f12da4e",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "COHRB",
+   "ticker": "COHR",
+   "contractAddress": "0x5131859a059b2446abeefe0f5d313b3c54ff3d36",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "COINB",
+   "ticker": "COIN",
+   "contractAddress": "0x585bde7c54abb5ccd7791f923d6c2187635f3952",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "CRCLB",
+   "ticker": "CRCL",
+   "contractAddress": "0x80f3d493ebce97e343c53d29a137942416b4ffc0",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "CRDOB",
+   "ticker": "CRDO",
+   "contractAddress": "0x6e7d451f9d30327d32020f116fa79c23b24e9c8d",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "CRMB",
+   "ticker": "CRM",
+   "contractAddress": "0x8c433eca1be0e2a357015602f63751c768f6f643",
+   "multiplier": "1.001229509379034956"
+  },
+  {
+   "symbol": "CRWDB",
+   "ticker": "CRWD",
+   "contractAddress": "0x814981cf5df4a14d4d7328f9abf0d02e9ed54cd1",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "CRWVB",
+   "ticker": "CRWV",
+   "contractAddress": "0x33e7317e17838fee56b10fe8d0b9ca6ca3090c95",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "CYPHB",
+   "ticker": "CYPH",
+   "contractAddress": "0x0393c28065c54e48b45bdb05eff5c401cf891da1",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "DELLB",
+   "ticker": "DELL",
+   "contractAddress": "0x0e7a51966c66648999d506e1372efdea1b78cb0b",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "DJTB",
+   "ticker": "DJT",
+   "contractAddress": "0xf2ec508422174ee564de98187db9359d318afb6b",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "DRAMB",
+   "ticker": "DRAM",
+   "contractAddress": "0x93862d63fd9fd488b1328e9b47717d75e994a84b",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "EWYB",
+   "ticker": "EWY",
+   "contractAddress": "0xbe82f76637dba2c114c41df856c2c51e522e2cb8",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "FLNCB",
+   "ticker": "FLNC",
+   "contractAddress": "0x4af1d41cd9dd950dca43984b43aaa2a8702714ac",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "FWDIB",
+   "ticker": "FWDI",
+   "contractAddress": "0x83f1a739fae6517c4672c5e10c8ea918925eb584",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "GLWB",
+   "ticker": "GLW",
+   "contractAddress": "0x740e075cbbea22a082b9d6679e65e82767875b6a",
+   "multiplier": "1.00129026931256489"
+  },
+  {
+   "symbol": "GMEB",
+   "ticker": "GME",
+   "contractAddress": "0x46ceefda28dd7207059ed19b0acdc026955bb15c",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "GOOGLB",
+   "ticker": "GOOGL",
+   "contractAddress": "0x3f53de71c126bdabae20f9cd64848d317f6c3238",
+   "multiplier": "1.000478058978107511"
+  },
+  {
+   "symbol": "GPROB",
+   "ticker": "GPRO",
+   "contractAddress": "0x1ecfda023c46ca216b5c620ef357a6d0c03951e6",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "GSB",
+   "ticker": "GS",
+   "contractAddress": "0x20cce6656e5f7f79f280e2d0f5db55b401bdbfce",
+   "multiplier": "1.003406278840750514"
+  },
+  {
+   "symbol": "HIMSB",
+   "ticker": "HIMS",
+   "contractAddress": "0xee6f4bcc88c2c8583d5a65c7d0c877b464100711",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "HOODB",
+   "ticker": "HOOD",
+   "contractAddress": "0xa394dcea3fd3847fd793afbfd163e2e3858b7c65",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "HPEB",
+   "ticker": "HPE",
+   "contractAddress": "0xd56eb30d2ea7b5866dc0066d33bbaab36f7e8860",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "IBMB",
+   "ticker": "IBM",
+   "contractAddress": "0xfa273b076feb8c0fb34e554ae341082323d016a3",
+   "multiplier": "1.005005801623174456"
+  },
+  {
+   "symbol": "INTCB",
+   "ticker": "INTC",
+   "contractAddress": "0xe614e2fc6c787035ff51f452e8e826bfd32d5283",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "INTWB",
+   "ticker": "INTW",
+   "contractAddress": "0x0735d9904b7e34e6fe39b0f66e00c111b3f2b681",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "IRENB",
+   "ticker": "IREN",
+   "contractAddress": "0xfdc2f2cab77b28f7ef6c819a404706cfa9bca33b",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "JPMB",
+   "ticker": "JPM",
+   "contractAddress": "0xbd49d695ba2cc46c8c603eb62afcd7fff4698281",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "KORUB",
+   "ticker": "KORU",
+   "contractAddress": "0x1ffad32d69c5fead99f88c25ca0191edc3757636",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "LITEB",
+   "ticker": "LITE",
+   "contractAddress": "0x64748bea17b6d19e242adf20425de2440c656142",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "LLYB",
+   "ticker": "LLY",
+   "contractAddress": "0x5407912f1aa4b9e05cbe6abeb9721547a643ec6b",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "METAB",
+   "ticker": "META",
+   "contractAddress": "0x7425889fe94f9d693e8daefe88bcced6acfef4c0",
+   "multiplier": "1.00054829041074495"
+  },
+  {
+   "symbol": "MRNAB",
+   "ticker": "MRNA",
+   "contractAddress": "0x5fd86da9b05abe396fe9d02a4a213a7c00556503",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "MRVLB",
+   "ticker": "MRVL",
+   "contractAddress": "0x16cd4fe7e8880ecc3ba222795229e20489fc2c76",
+   "multiplier": "1.000153284671603306"
+  },
+  {
+   "symbol": "MSFTB",
+   "ticker": "MSFT",
+   "contractAddress": "0x80106cb3ead06659a5ad19df39d9b4733863b9b0",
+   "multiplier": "1.001313964833366845"
+  },
+  {
+   "symbol": "MSTRB",
+   "ticker": "MSTR",
+   "contractAddress": "0xe87afb3076aeb0f9b14e368de8145ae6a2826a14",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "MUB",
+   "ticker": "MU",
+   "contractAddress": "0xcdf2f3e0fa43c47a6662a91c9e4a7c5f69762699",
+   "multiplier": "1.000107512568805603"
+  },
+  {
+   "symbol": "MUUB",
+   "ticker": "MUU",
+   "contractAddress": "0x0bb3fa77e0809f42948e435f04883c25415e8263",
+   "multiplier": "1.003951968068627743"
+  },
+  {
+   "symbol": "MVLLB",
+   "ticker": "MVLL",
+   "contractAddress": "0x7c26a12f20507e2cee22ceebed9e88fda47f866c",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "NBISB",
+   "ticker": "NBIS",
+   "contractAddress": "0xe256bc2a4f5297f8ba6f043f180a46300ecbcbb1",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "NFLXB",
+   "ticker": "NFLX",
+   "contractAddress": "0xd6829ea836b6fa224d099d40e54b31262f874631",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "NOKB",
+   "ticker": "NOK",
+   "contractAddress": "0x7c4d7a180d737dd5a70d8065a90e6746a69c37ea",
+   "multiplier": "1.002349416320445721"
+  },
+  {
+   "symbol": "NVDAB",
+   "ticker": "NVDA",
+   "contractAddress": "0x02fca66c1d1afb4e2a7884261eb00f63598a7436",
+   "multiplier": "1.000778223752807865"
+  },
+  {
+   "symbol": "ORCLB",
+   "ticker": "ORCL",
+   "contractAddress": "0x4684d9887fc1c71cba7bab8e88835cec217eb598",
+   "multiplier": "1.002571827467211643"
+  },
+  {
+   "symbol": "PDDB",
+   "ticker": "PDD",
+   "contractAddress": "0x95b0409679b55c31772daa2fb4bee7b125b77521",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "PLTRB",
+   "ticker": "PLTR",
+   "contractAddress": "0x0ca5d51d0277bd006fd9607d3e560785ebad8222",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "PYPLB",
+   "ticker": "PYPL",
+   "contractAddress": "0x2806a561fc1f9259b2d54a281796bde0d92762ae",
+   "multiplier": "1.001771778812964209"
+  },
+  {
+   "symbol": "QCOMB",
+   "ticker": "QCOM",
+   "contractAddress": "0x5f7a56e877b9130608bf8be962621011182fefe1",
+   "multiplier": "1.003804323223530061"
+  },
+  {
+   "symbol": "QNTB",
+   "ticker": "QNT",
+   "contractAddress": "0xd721c192d612db77621df57a9fab38418033c02e",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "QQQB",
+   "ticker": "QQQ",
+   "contractAddress": "0x205812cdbed920aff76c6580abd681a46d11efc7",
+   "multiplier": "1.000724838657573033"
+  },
+  {
+   "symbol": "RDDTB",
+   "ticker": "RDDT",
+   "contractAddress": "0x41622a9125a22767df8c1dc79fc17299bac4bd0b",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "RKLBB",
+   "ticker": "RKLB",
+   "contractAddress": "0xc8da12cbcce7c45180692a6420b0076e03a5179a",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "SECZB",
+   "ticker": "SECZ",
+   "contractAddress": "0x32c980f38907ace4fac643c3765d9b32842af60f",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "SHAZB",
+   "ticker": "SHAZ",
+   "contractAddress": "0x0f31e21b7881f5583ea94ddbcb0bcaf22b1abeab",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "SKHYB",
+   "ticker": "SKHY",
+   "contractAddress": "0xca750ef65f295bbecd685abf54e82caf297bdb61",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "SMCIB",
+   "ticker": "SMCI",
+   "contractAddress": "0x387dea1d2772d716d081a29116f3effa0ffe1f36",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "SMHB",
+   "ticker": "SMH",
+   "contractAddress": "0xbe1fced7047fdce935f45700727845df2c76877a",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "SNDKB",
+   "ticker": "SNDK",
+   "contractAddress": "0x3ee4df61bd4f867e349beae8bfe07bc31b4850fb",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "SNXXB",
+   "ticker": "SNXX",
+   "contractAddress": "0x9e82e3da8f1115b73d24bb24113ab836ffdab6b6",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "SOXLB",
+   "ticker": "SOXL",
+   "contractAddress": "0xd97d097a89113fa59b76c572e5b2eb647e8eefaf",
+   "multiplier": "1.000441939278863313"
+  },
+  {
+   "symbol": "SOXSB",
+   "ticker": "SOXS",
+   "contractAddress": "0xe28cd11c99af2df76bb8ada4cd0ef3904378280f",
+   "multiplier": "1.009026219854107205"
+  },
+  {
+   "symbol": "SPCXB",
+   "ticker": "SPCX",
+   "contractAddress": "0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "SPYB",
+   "ticker": "SPY",
+   "contractAddress": "0x7138b48df7d98d7e3cc221bfe7192d0a178182d8",
+   "multiplier": "1.001729792036835231"
+  },
+  {
+   "symbol": "SQQQB",
+   "ticker": "SQQQ",
+   "contractAddress": "0x25e572b466d152604d9e6c3e53b432b978825342",
+   "multiplier": "1.009841016242566331"
+  },
+  {
+   "symbol": "STXB",
+   "ticker": "STX",
+   "contractAddress": "0x2e065f65f1699964f4092de1d39a8efe6c8d6f32",
+   "multiplier": "1.00055924717844473"
+  },
+  {
+   "symbol": "TQQQB",
+   "ticker": "TQQQ",
+   "contractAddress": "0x462b5f13b7c7748279358962925c5de83bb9e598",
+   "multiplier": "1.001347622058686173"
+  },
+  {
+   "symbol": "TSLAB",
+   "ticker": "TSLA",
+   "contractAddress": "0x5b1910eaad6450e50f816082aa078c41f10c292f",
+   "multiplier": "1.000000000000000000"
+  },
+  {
+   "symbol": "TSMB",
+   "ticker": "TSM",
+   "contractAddress": "0xab78b89b5bb00236be0b4b20704cbfa04efc711c",
+   "multiplier": "1.002110464141050983"
+  },
+  {
+   "symbol": "USARB",
+   "ticker": "USAR",
+   "contractAddress": "0xcd345d4450e04cdef422a60b97d9265d24e0bcee",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "USDEB",
+   "ticker": "USDE",
+   "contractAddress": "0xdfd3ba51d4591f243481a6f26059d1a5ee95252f",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "WDCB",
+   "ticker": "WDC",
+   "contractAddress": "0xebe29695f8047c13d36e7a790ca8c1b239ffad1c",
+   "multiplier": "1.000224983929808861"
+  },
+  {
+   "symbol": "WENB",
+   "ticker": "WEN",
+   "contractAddress": "0xded1c5fb38c262beb9cff1e1116eff3c5bf278cd",
+   "multiplier": "1"
+  },
+  {
+   "symbol": "ZMB",
+   "ticker": "ZM",
+   "contractAddress": "0xf4ddb292fe88e476eddd9869d386705e6bfab7a2",
+   "multiplier": "1"
+  }
+ ]
+}

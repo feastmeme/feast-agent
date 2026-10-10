@@ -15,10 +15,14 @@ describe("networkFromEnv", () => {
     expect(network.realMoney).toBe(true);
     expect(network.faucetUrl).toBeNull();
   });
-  it("takes an RPC override without touching anything else", () => {
-    const network = networkFromEnv({ FEAST_NETWORK: "sandbox", FEAST_RPC_URL: "http://127.0.0.1:8546" });
+  it("takes a per-network RPC override without touching anything else", () => {
+    const network = networkFromEnv({ FEAST_NETWORK: "sandbox", FEAST_SANDBOX_RPC_URL: "http://127.0.0.1:8546" });
     expect(network.rpcUrl).toBe("http://127.0.0.1:8546");
     expect(network.contracts).toEqual(SANDBOX.contracts);
+  });
+  it("never serves one network's reads from the other's override", () => {
+    expect(networkFromEnv({ FEAST_NETWORK: "mainnet", FEAST_SANDBOX_RPC_URL: "http://127.0.0.1:8546" }).rpcUrl).toBe(MAINNET.rpcUrl);
+    expect(networkFromEnv({ FEAST_NETWORK: "sandbox", FEAST_MAINNET_RPC_URL: "https://example.invalid/key" }).rpcUrl).toBe(SANDBOX.rpcUrl);
   });
   it("refuses a network it does not know", () => {
     expect(() => networkFromEnv({ FEAST_NETWORK: "testnet" })).toThrow(/sandbox" or "mainnet/);

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { BaseError, type Address } from "viem";
+import type { Address } from "viem";
 
-import { BinanceApiError, BinanceNotConfigured } from "../binance/index.ts";
-import { FeastError } from "../sdk/index.ts";
+import { FeastError, safeMessage } from "../sdk/index.ts";
 import {
   buyCommand,
   contextFromEnv,
@@ -19,9 +18,11 @@ import {
   renderQuotes,
   renderSplit,
   renderTrade,
+  sayError,
   sellCommand,
   splitCommand,
   walletCommand,
+  type AgentContext,
 } from "./commands.ts";
 import { runDemo } from "./demo.ts";
 import { binanceCheck } from "./binance-check.ts";
@@ -44,9 +45,12 @@ Usage: feast-agent <command> [arguments] [--network sandbox|mainnet] [--json]
   demo [--stock AAPLB]                faucet → launch → buy → sell → split, transcript saved to demo/
   binance-check [--record]            one call to each RWA Data endpoint with the configured credentials
 
-Environment: FEAST_NETWORK, FEAST_RPC_URL, FEAST_AGENT_PRIVATE_KEY,
+Environment: FEAST_NETWORK, FEAST_SANDBOX_RPC_URL, FEAST_MAINNET_RPC_URL, FEAST_AGENT_PRIVATE_KEY,
              BINANCE_WEB3_API_KEY, BINANCE_WEB3_API_SECRET (see .env.example).
 Mainnet is read-only in this release: launch --dry-run, quote, split and payouts work; nothing is sent.`;
+
+/** Set once the context exists, so a failure can be reported with a private RPC URL redacted. */
+let context: AgentContext | null = null;
 
 async function main(argv: string[]): Promise<number> {
   // `.env` in the working directory, if there is one; real environment variables win.
@@ -81,6 +85,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   const ctx = contextFromEnv(process.env, { network: values.network });
+  context = ctx;
   const print = (data: unknown, human: () => string) => console.log(values.json ? json(data) : human());
   const need = (value: string | undefined, what: string): string => {
     if (!value) throw new FeastError(`missing ${what}; see feast-agent --help`, "usage");
@@ -118,15 +123,16 @@ async function main(argv: string[]): Promise<number> {
     }
     case "buy": {
       const coin = need(args[0], "a coin address");
-      const result = await buyCommand(ctx, coin, need(args[1], "an amount of BNB"), tradeOptions);
+      // Read before the trade: a read failing after a mined trade must not hide its hash.
       const quote = (await ctx.feast.coin(coin)).quote.symbol;
+      const result = await buyCommand(ctx, coin, need(args[1], "an amount of BNB"), tradeOptions);
       print(result, () => renderTrade(result, native, quote));
       return 0;
     }
     case "sell": {
       const coin = need(args[0], "a coin address");
-      const result = await sellCommand(ctx, coin, need(args[1], "an amount (coins, 50% or all)"), tradeOptions);
       const quote = (await ctx.feast.coin(coin)).quote.symbol;
+      const result = await sellCommand(ctx, coin, need(args[1], "an amount (coins, 50% or all)"), tradeOptions);
       print(result, () => renderTrade(result, native, quote));
       return 0;
     }
@@ -149,7 +155,7 @@ async function main(argv: string[]): Promise<number> {
       const drip = await faucetCommand(ctx);
       print(drip, () =>
         [
-          drip.keyCreated ? `created a throwaway sandbox wallet ${drip.address}; its key is in .env (git-ignored) and was not printed` : `wallet ${drip.address}`,
+          drip.keyCreated ? `created a throwaway sandbox wallet ${drip.address}; its key was written to .env in this directory (git-ignored in this repository) and not printed` : `wallet ${drip.address}`,
           `faucet: +${amount(drip.added)} ${native}, balance ${amount(drip.balance)} ${native}`,
         ].join("\n"),
       );
@@ -174,13 +180,7 @@ async function main(argv: string[]): Promise<number> {
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (error: unknown) => {
-    if (error instanceof FeastError || error instanceof BinanceNotConfigured || error instanceof BinanceApiError) {
-      console.error(`feast-agent: ${error.message}`);
-    } else if (error instanceof BaseError) {
-      console.error(`feast-agent: ${error.shortMessage}`);
-    } else {
-      console.error(error);
-    }
+    console.error(`feast-agent: ${context ? sayError(context, error) : safeMessage(error)}`);
     process.exit(1);
   },
 );

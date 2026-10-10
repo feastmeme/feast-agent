@@ -80,6 +80,24 @@ export function decodeRefusalData(data: Hex): Refusal {
   }
 }
 
+/**
+ * A one-line message safe to show a person or a model: viem's short message (its
+ * long one carries the RPC URL and the request body), with every string in
+ * `secrets` — a keyed RPC URL, say — replaced.
+ */
+export function safeMessage(error: unknown, secrets: readonly string[] = []): string {
+  let text =
+    error instanceof FeastError
+      ? error.message
+      : error instanceof BaseError
+        ? error.shortMessage
+        : error instanceof Error
+          ? error.message
+          : String(error);
+  for (const secret of secrets) if (secret) text = text.split(secret).join("<redacted>");
+  return text;
+}
+
 /** Turn whatever a viem call threw into a refusal with the contract's own error name. */
 export function refusalOf(error: unknown): Refusal {
   if (error instanceof BaseError) {

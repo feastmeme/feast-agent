@@ -18,6 +18,7 @@ import {
   type TradeResult,
 } from "../sdk/index.ts";
 import { gap } from "../sdk/price.ts";
+import { NETWORKS, safeMessage } from "../sdk/index.ts";
 import { SEATS } from "../sdk/split.ts";
 import { amount, pct, sig, table, usd } from "./format.ts";
 
@@ -43,6 +44,13 @@ export function contextFromEnv(env: Env = process.env, overrides: { network?: st
   }
   const account = key ? privateKeyToAccount(key as Hex) : undefined;
   return { feast: new FeastClient({ network, account }), binance: BinanceWeb3Client.fromEnv(env), env };
+}
+
+/** An error as one line, with a private RPC URL (which may carry a key) redacted. */
+export function sayError(ctx: AgentContext, error: unknown): string {
+  const { network } = ctx.feast;
+  const custom = network.rpcUrl !== NETWORKS[network.name].rpcUrl ? [network.rpcUrl] : [];
+  return safeMessage(error, custom);
 }
 
 // --- wallet & faucet ----------------------------------------------------------------
@@ -148,7 +156,7 @@ export async function quoteCommand(ctx: AgentContext, target: string): Promise<Q
   if (stock) {
     // The sandbox forks BNB Smart Chain, so its bStock contracts ARE the chain-56 ones and Binance prices them there.
     [dex, binance] = await Promise.all([feast.stockUsdPrice(stock).catch(() => null), stockReference(ctx.binance, stock.address)]);
-    if (binance.state !== "ok" && ctx.env.FEAST_AGENT_NO_SKILL !== "1") {
+    if ((binance.state !== "ok" || !(binance.tokenPriceUsd > 0)) && ctx.env.FEAST_AGENT_NO_SKILL !== "1") {
       skill = await skillRwaDynamic(stock.address).catch(() => null);
     }
   } else {
@@ -156,8 +164,9 @@ export async function quoteCommand(ctx: AgentContext, target: string): Promise<Q
     dex = bnb === null ? null : { usd: bnb, via: [feast.network.contracts.usdtNativePool] };
   }
 
-  const binanceUsd = binance?.state === "ok" ? binance.tokenPriceUsd : null;
-  const skillUsd = skill?.tokenPriceUsd ?? null;
+  // A price that is not above zero is no price: it falls through to the next source.
+  const binanceUsd = binance?.state === "ok" && binance.tokenPriceUsd > 0 ? binance.tokenPriceUsd : null;
+  const skillUsd = skill?.tokenPriceUsd && skill.tokenPriceUsd > 0 ? skill.tokenPriceUsd : null;
   const quoteUsd = binanceUsd ?? skillUsd ?? dex?.usd ?? null;
   const coinUsd = coin && quoteUsd !== null ? coin.priceInQuote * quoteUsd : null;
   return {
@@ -172,6 +181,12 @@ export async function quoteCommand(ctx: AgentContext, target: string): Promise<Q
     marketCapUsd: coin && coinUsd !== null ? Number(coin.supply / 10n ** 18n) * coinUsd : null,
     dexVsBinance: (binanceUsd ?? skillUsd) !== null && dex ? gap(dex.usd, (binanceUsd ?? skillUsd) as number) : null,
   };
+}
+
+/** A millisecond timestamp the API sent (number or numeric string) as ISO 8601, or "n/a". */
+function when(ms: number | string | null | undefined): string {
+  const n = Number(ms);
+  return Number.isFinite(n) && n > 0 ? new Date(n).toISOString() : "n/a";
 }
 
 export function renderQuote(view: QuoteView): string {
@@ -203,7 +218,7 @@ export function renderQuote(view: QuoteView): string {
         lines.push(`    gap, pool vs Binance: ${pct(view.dexVsBinance, 3)}`);
       }
     } else {
-      lines.push(`  Binance RWA token price:         ${usd(b.tokenPriceUsd, 6)} (${b.platformId}, updated ${new Date(b.tokenPriceUpdatedAt).toISOString()})`);
+      lines.push(`  Binance RWA token price:         ${usd(b.tokenPriceUsd, 6)} (${b.platformId}, updated ${when(b.tokenPriceUpdatedAt)})`);
       lines.push(`  Binance RWA reference (${view.stock.underlying} share): ${usd(b.referencePriceUsd, 6)}${b.underlyingReferenceUsd !== null ? ` (underlying-market: ${usd(b.underlyingReferenceUsd, 6)})` : ""}`);
       lines.push(`  gap, token vs reference:         ${pct(b.gap, 3)}`);
       lines.push(`  gap, pool vs Binance token price: ${pct(view.dexVsBinance, 3)}`);
@@ -249,7 +264,19 @@ export function renderLaunch(result: PreparedLaunch | LaunchResult): string {
 // --- trade -------------------------------------------------------------------------------
 
 export async function buyCommand(ctx: AgentContext, coin: string, bnb: string, options: { slippageBps?: number; referrer?: Address } = {}) {
-  return ctx.feast.buy(coin, parseEther(bnb), options);
+  return ctx.feast.buy(coin, positive(bnb), options);
+}
+
+/** A decimal amount of an 18-decimal token, refused unless it is above zero. */
+export function positive(text: string): bigint {
+  let value: bigint;
+  try {
+    value = parseUnits(text.trim(), 18);
+  } catch {
+    throw new FeastError(`"${text}" is not an amount`, "bad_amount");
+  }
+  if (value <= 0n) throw new FeastError("an amount must be above zero", "bad_amount");
+  return value;
 }
 
 /** `50%`, `all`, or a number of whole coins. */
@@ -260,9 +287,11 @@ export async function resolveSellAmount(ctx: AgentContext, coin: string, spec: s
     const balance = await ctx.feast.coinBalance(coin);
     const percent = trimmed === "all" ? 100 : Number(trimmed.slice(0, -1));
     if (!(percent > 0 && percent <= 100)) throw new FeastError("a percentage is between 0 and 100", "bad_amount");
-    return (balance * BigInt(Math.round(percent * 100))) / 10_000n;
+    const coins = (balance * BigInt(Math.round(percent * 100))) / 10_000n;
+    if (coins <= 0n) throw new FeastError("the wallet holds none of this coin", "bad_amount");
+    return coins;
   }
-  return parseUnits(trimmed, 18);
+  return positive(trimmed);
 }
 
 export async function sellCommand(ctx: AgentContext, coin: string, spec: string, options: { slippageBps?: number; referrer?: Address } = {}) {

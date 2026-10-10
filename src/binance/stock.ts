@@ -72,8 +72,17 @@ export async function stockReference(client: BinanceWeb3Client, tokenAddress: st
       // The price is still worth showing without the market status.
       if (!(error instanceof BinanceApiError)) throw error;
     }
-    const token = num(row.tokenPrice) ?? 0;
+    const token = num(row.tokenPrice);
     const reference = num(row.referencePrice) ?? 0;
+    if (token === null || token <= 0) {
+      return {
+        state: "unavailable",
+        message: `the RWA price endpoint returned no usable tokenPrice for ${tokenAddress} (got ${JSON.stringify(row.tokenPrice)})`,
+        endpoint: "/api/v1/dex/market/rwa/price",
+        httpStatus: 200,
+        code: 0,
+      };
+    }
     return {
       state: "ok",
       tokenAddress: row.tokenContractAddress,
@@ -84,7 +93,7 @@ export async function stockReference(client: BinanceWeb3Client, tokenAddress: st
       gap: reference > 0 ? (token - reference) / reference : null,
       marketStatus,
       marketOpen,
-      tokenPriceUpdatedAt: row.tokenPriceUpdatedAt,
+      tokenPriceUpdatedAt: Number(row.tokenPriceUpdatedAt),
       endpoints,
     };
   } catch (error) {

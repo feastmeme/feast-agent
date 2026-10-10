@@ -16,6 +16,7 @@ import {
   renderQuote,
   renderSplit,
   renderTrade,
+  sayError,
   sellCommand,
   splitCommand,
   walletCommand,
@@ -41,15 +42,14 @@ function answer(summary: string, data: unknown) {
   return { content: [{ type: "text" as const, text: `${summary}\n\n${json(data)}` }] };
 }
 
-async function guarded(run: () => Promise<{ content: Array<{ type: "text"; text: string }> }>) {
-  try {
-    return await run();
-  } catch (error) {
-    return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }] };
-  }
-}
-
 export function buildServer(ctx: AgentContext): McpServer {
+  const guarded = async (run: () => Promise<{ content: Array<{ type: "text"; text: string }> }>) => {
+    try {
+      return await run();
+    } catch (error) {
+      return { isError: true, content: [{ type: "text" as const, text: sayError(ctx, error) }] };
+    }
+  };
   const server = new McpServer({ name: "feast-agent", version: "0.1.0" });
   const network = ctx.feast.network;
   const native = network.nativeSymbol;
@@ -111,8 +111,10 @@ export function buildServer(ctx: AgentContext): McpServer {
       },
     },
     ({ coin, amount, slippageBps, referrer }) => guarded(async () => {
+      // The quote's name is read BEFORE the trade: a read failing after a mined trade must not hide its hash.
+      const quote = (await ctx.feast.coin(coin)).quote.symbol;
       const result = await buyCommand(ctx, coin, amount, { slippageBps, referrer: referrer as Address | undefined });
-      return answer(renderTrade(result, native, (await ctx.feast.coin(coin)).quote.symbol), result);
+      return answer(renderTrade(result, native, quote), result);
     }),
   );
 
@@ -128,8 +130,9 @@ export function buildServer(ctx: AgentContext): McpServer {
       },
     },
     ({ coin, amount, slippageBps }) => guarded(async () => {
+      const quote = (await ctx.feast.coin(coin)).quote.symbol;
       const result = await sellCommand(ctx, coin, amount, { slippageBps });
-      return answer(renderTrade(result, native, (await ctx.feast.coin(coin)).quote.symbol), result);
+      return answer(renderTrade(result, native, quote), result);
     }),
   );
 

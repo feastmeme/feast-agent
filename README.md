@@ -22,7 +22,7 @@ The full transcript of that run is [`demo/transcript-2026-10-10T012729Z.md`](dem
 
 ## Quickstart (five commands, about a minute)
 
-Requires Node.js 20.12 or newer. Everything runs on the **Feast sandbox**, a public fork of BNB Smart Chain (chain 56096). Test BNB there is free, and nothing touches real money.
+Requires Node.js 22.12 or newer. Everything runs on the **Feast sandbox**, a public fork of BNB Smart Chain (chain 56096). Test BNB there is free, and nothing touches real money.
 
 ```bash
 git clone <repository-url> feast-agent && cd feast-agent
@@ -69,7 +69,9 @@ Every command takes `--json`. After `npm install`, `npx feast-agent …` works t
 claude mcp add feast-agent -- npx tsx /absolute/path/to/feast-agent/src/agent/mcp.ts
 ```
 
-The tools are `feast_quotes`, `feast_quote`, `feast_launch`, `feast_buy`, `feast_sell`, `feast_split`, `feast_payouts` and `feast_wallet`. They read `.env` from the working directory and follow the same rule as the CLI: they send transactions on the sandbox only.
+The tools are `feast_quotes`, `feast_quote`, `feast_launch`, `feast_buy`, `feast_sell`, `feast_split`, `feast_payouts` and `feast_wallet`. They follow the same rule as the CLI: they send transactions on the sandbox only.
+
+The server reads `.env` from the directory it is started in, which is usually your Claude session's project, not this repository. Pass the variables explicitly instead, for example `claude mcp add feast-agent -e FEAST_AGENT_PRIVATE_KEY=0x… -- npx tsx …`, with a throwaway sandbox key.
 
 ## Binance Web3 API: what it calls
 
@@ -90,7 +92,7 @@ The full record of endpoints, parameters and response fields is in [`docs/binanc
 - the API's answer to a request without a key: HTTP 401, code 40101;
 - the keyless Wallet Skill's answer for AAPLB.
 
-**Tokenized stocks it touches.** These are the bStocks Feast pairs coins with: AAPLB, BABAB, BNCB, CRCLB, GOOGLB, NVDAB, QQQB, SKHYB, SPCXB and TSLAB on BNB Smart Chain, plus MSFTB and MSTRB on the sandbox. All twelve are in Binance's bStock list.
+**Tokenized stocks it touches.** These are the bStocks Feast pairs coins with: AAPLB, BABAB, BNCB, CRCLB, GOOGLB, NVDAB, QQQB, SKHYB, SPCXB and TSLAB on BNB Smart Chain, plus MSFTB and MSTRB on the sandbox. All twelve are in Binance's own bStock list, read live on 2026-10-10 and kept as a fixture: [`src/binance/fixtures/skill-bstock-list.bsc.live.json`](src/binance/fixtures/skill-bstock-list.bsc.live.json), checked by `src/binance/bstock-list.test.ts`.
 
 ## Feast contracts it touches (BNB Smart Chain, chain 56)
 
@@ -115,7 +117,7 @@ The full record of endpoints, parameters and response fields is in [`docs/binanc
 
 On the sandbox (chain 56096) the agent trades through `FeastSandboxRouter` `0xa8c7180912D4464fa66713758Fa7eB3418b81D01`. Its other addresses are in [`src/sdk/networks.ts`](src/sdk/networks.ts).
 
-**Mainnet is read-only in this release.** `quotes`, `quote`, `split`, `payouts` and `launch --dry-run` work against chain 56. That read path has been verified: the factory has code, the pricer lists eleven quotes, and the factory's `predictCoin` matches the SDK's local CREATE2 port. Any write on chain 56 is refused in the SDK, and no flag changes that.
+**Mainnet is read-only in this release.** `quotes`, `quote`, `split`, `payouts` and `launch --dry-run` work against chain 56. That read path was verified on 2026-10-10: the factory has code, the pricer listed eleven quotes (WBNB and ten bStocks), and the factory's `predictCoin` matches the SDK's local CREATE2 port. `npm run test:mainnet-read` repeats the check. Any write on chain 56 is refused in the SDK, and no flag changes that.
 
 ## No private keys, ever
 
@@ -128,7 +130,7 @@ On the sandbox (chain 56096) the agent trades through `FeastSandboxRouter` `0xa8
 ## Checks
 
 ```bash
-npm test                 # 72 offline tests: encoders and decoders, config, signing, Binance client on fixtures, MCP
+npm test                 # offline: encoders and decoders, config, signing, Binance client on fixtures, MCP
 npm run typecheck        # tsc --noEmit, strict
 npm run test:sandbox     # FEAST_AGENT_SANDBOX=1: the whole loop against the live sandbox
 npm run test:mainnet-read  # FEAST_AGENT_MAINNET=1: chain 56 read path (factory code, quotes, predictCoin); sends nothing

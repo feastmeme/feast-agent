@@ -11,6 +11,7 @@ import {
   renderQuote,
   renderSplit,
   renderTrade,
+  sayError,
   splitCommand,
   type AgentContext,
   type QuoteView,
@@ -87,7 +88,7 @@ export async function runDemo(ctx: AgentContext, options: { stock: string; outDi
 
   t.markdown(`# feast-agent demo — ${started.toISOString()}`);
   t.text(
-    `Network: **${network.chainName}** (chain ${network.chainId}), RPC ${network.rpcUrl === NETWORKS[network.name].rpcUrl ? network.rpcUrl : "from FEAST_RPC_URL (not printed)"}. ` +
+    `Network: **${network.chainName}** (chain ${network.chainId}), RPC ${network.rpcUrl === NETWORKS[network.name].rpcUrl ? network.rpcUrl : "from FEAST_SANDBOX_RPC_URL (not printed)"}. ` +
       `Every transaction below is on the sandbox, a public fork of BNB Smart Chain where test BNB is free; nothing touches chain 56.`,
   );
 
@@ -146,7 +147,7 @@ export async function runDemo(ctx: AgentContext, options: { stock: string; outDi
         size = candidate;
         break;
       } catch (error) {
-        const refusal = error instanceof FeastError ? error.message : String(error);
+        const refusal = sayError(ctx, error);
         t.text(`- ${candidate} ${network.nativeSymbol}: refused in simulation (${refusal.replace(/^the chain refused the call: /, "")})`);
         if (!/PurchaseCapExceeded/.test(refusal)) throw error;
       }
@@ -196,7 +197,7 @@ export async function runDemo(ctx: AgentContext, options: { stock: string; outDi
           `Fees just accrued are not payouts yet: they settle when the creator claims, the burn seat buys back, or the platform share is released.`,
       );
     } catch (error) {
-      t.text(`The read API did not answer: ${error instanceof Error ? error.message : String(error)}`);
+      t.text(`The read API did not answer: ${sayError(ctx, error)}`);
     }
 
     // Summary ----------------------------------------------------------------------------------
@@ -215,7 +216,7 @@ export async function runDemo(ctx: AgentContext, options: { stock: string; outDi
   } catch (error) {
     result.failedAt = step;
     t.heading(`Stopped at step "${step}"`);
-    t.block(error instanceof Error ? error.message : String(error));
+    t.block(sayError(ctx, error));
     const path = save();
     echo(`\ntranscript saved: ${path}`);
     throw error;

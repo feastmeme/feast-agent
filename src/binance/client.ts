@@ -185,11 +185,16 @@ export function sign(preHashString: string, secretKey: string): string {
   return createHmac("sha256", secretKey).update(preHashString, "utf8").digest("base64");
 }
 
-/** `k=v&k=v` with encodeURIComponent (spaces as %20, never +), in the order given — the order is part of the signature. */
+/** encodeURIComponent, plus the five characters it leaves alone that a URL parser may re-encode on the wire. */
+function encode(value: string): string {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/** `k=v&k=v` percent-encoded (spaces as %20, never +), in the order given — the exact string is both signed and sent. */
 export function queryString(params: Record<string, string | number | undefined>): string {
   return Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== "")
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .map(([k, v]) => `${encode(k)}=${encode(String(v))}`)
     .join("&");
 }
 

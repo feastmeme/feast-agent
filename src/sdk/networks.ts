@@ -40,7 +40,7 @@ export type FeastNetwork = {
   chainId: number;
   chainName: string;
   nativeSymbol: string;
-  /** A public JSON-RPC endpoint. Override with `FEAST_RPC_URL`. */
+  /** A public JSON-RPC endpoint. Override with `FEAST_SANDBOX_RPC_URL` / `FEAST_MAINNET_RPC_URL`. */
   rpcUrl: string;
   /** The Feast site for this chain: its `/api/pin` pins coin metadata, its `/api/v1` is the public read API. */
   siteUrl: string;

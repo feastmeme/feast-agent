@@ -59,7 +59,7 @@ Recorded live for AAPLB at 2026-10-10T01:18:09Z: `src/binance/fixtures/skill-rwa
 
 ## Tokenized stocks this touches
 
-Every stock Feast pairs a coin with (its other quote is WBNB) is a Binance bStock on BNB Smart Chain. All twelve appear in Binance's keyless bStock listing (`type=3`, chain 56) as read on 2026-10-10. The sandbox is a fork of BSC, so the same contracts serve both, and Binance prices them under `binanceChainId=56`.
+Every stock Feast pairs a coin with (its other quote is WBNB) is a Binance bStock on BNB Smart Chain. All twelve appear in Binance's keyless bStock listing (`type=3`, chain 56) as read on 2026-10-10 (fixture `src/binance/fixtures/skill-bstock-list.bsc.live.json`). The sandbox is a fork of BSC, so the same contracts serve both, and Binance prices them under `binanceChainId=56`.
 
 | bStock | Underlying | BSC address | Feast mainnet quote | Feast sandbox quote |
 | --- | --- | --- | --- | --- |

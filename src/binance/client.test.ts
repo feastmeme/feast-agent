@@ -40,6 +40,12 @@ describe("signing, as the Authentication page specifies it", () => {
   it("encodes a space as %20, not +, and keeps the given parameter order", () => {
     expect(queryString({ symbol: "ETH USDT", chainId: 1, skip: undefined })).toBe("symbol=ETH%20USDT&chainId=1");
   });
+  it("signs exactly the query the URL will carry, apostrophes included", () => {
+    const query = queryString({ keyword: "McDonald's (MCD)!" });
+    expect(query).toBe("keyword=McDonald%27s%20%28MCD%29%21");
+    // What a URL parser puts on the wire is what was signed.
+    expect(new URL(`https://web3.binance.com/build/x?${query}`).search).toBe(`?${query}`);
+  });
   it("signs the path WITH the /build prefix and sends it on the URL too", async () => {
     const fetchMock = fakeFetch({ "/build/api/v1/dex/market/rwa/price": { body: fixture("rwa-price.aaplb.json") } });
     const client = new BinanceWeb3Client({ credentials: CREDENTIALS, fetch: fetchMock, now: () => NOW, minSpacingMs: 0 });
@@ -98,6 +104,14 @@ describe("RWA Data API against fixtures", () => {
     const reference = await stockReference(client, AAPLB);
     expect(reference.state).toBe("ok");
     if (reference.state === "ok") expect(reference.marketStatus).toBeNull();
+  });
+  it("treats a missing tokenPrice as unavailable, never as $0", async () => {
+    const body = JSON.parse(fixture("rwa-price.aaplb.json")) as { data: Array<Record<string, unknown>> };
+    body.data[0]!.tokenPrice = null;
+    const fetchMock = fakeFetch({ "/build/api/v1/dex/market/rwa/price": { body: JSON.stringify(body) } });
+    const client = new BinanceWeb3Client({ credentials: CREDENTIALS, fetch: fetchMock, now: () => NOW, minSpacingMs: 0 });
+    const reference = await stockReference(client, AAPLB);
+    expect(reference.state).toBe("unavailable");
   });
   it("surfaces the API's own code and message on a refusal (HTTP 401, code 40102)", async () => {
     const fetchMock = fakeFetch({ "/build/api/v1/dex/market/rwa/price": { status: 401, body: fixture("error-invalid-signature.json") } });
