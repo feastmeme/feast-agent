@@ -1,0 +1,8 @@
+{
+  "_fixture": "Code 42900 from the Authentication page's error table (HTTP 429 with Retry-After), read 2026-10-10.",
+  "code": 42900,
+  "msg": "Rate limit exceeded",
+  "data": null,
+  "timestamp": 1791594001000,
+  "success": false
+}

@@ -1,0 +1,7 @@
+{
+  "_fixture": "Recorded live, no credentials: GET https://web3.binance.com/build/api/v1/dex/market/rwa/tokens at 2026-10-10T01:12:01Z answered HTTP 401 with header 'x-oc-blocked-by: AuthenticationFilter/40101' and exactly this body (note data is an empty string and there is no 'success' field).",
+  "msg": "API Key is required",
+  "data": "",
+  "code": 40101,
+  "timestamp": 1791594721678
+}

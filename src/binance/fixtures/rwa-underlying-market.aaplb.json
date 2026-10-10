@@ -1,0 +1,36 @@
+{
+  "_fixture": "Response shape copied from the documented example of GET /api/v1/dex/market/rwa/underlying-market (read 2026-10-10), with AAPLB's BSC address. The figures are illustrative, not recorded from the live API.",
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "binanceChainId": "56",
+    "tokenContractAddress": "0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+    "platformId": "bstock",
+    "assetType": 1,
+    "statusInfo": {
+      "openState": false,
+      "marketStatus": "closed",
+      "reasonCode": "MARKET_CLOSED",
+      "reasonMsg": "Weekend or Holiday",
+      "nextOpenTime": 1791898200000,
+      "nextCloseTime": null
+    },
+    "marketData": {
+      "referencePrice": "250.15",
+      "high52W": "260.10",
+      "low52W": "169.21",
+      "volumeShares24H": "41250000",
+      "avgDailyVolume1Y": "52000000",
+      "totalShares": "14840000000",
+      "marketCap": "3712226000000",
+      "turnoverRate": "0.28",
+      "amplitude": "1.12",
+      "peRatioTTM": "37.9",
+      "pbRatio": "56.2",
+      "dividendYield": "0.42",
+      "latestDividend": "0.26"
+    }
+  },
+  "timestamp": 1791594001000,
+  "success": true
+}

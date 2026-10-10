@@ -1,0 +1,8 @@
+{
+  "_fixture": "The unified error format and code 40102 from https://web3.binance.com/en/dev-docs/authentication (Error Codes), read 2026-10-10; served with HTTP 401 per that page's table.",
+  "code": 40102,
+  "msg": "Invalid signature",
+  "data": null,
+  "timestamp": 1791594001000,
+  "success": false
+}

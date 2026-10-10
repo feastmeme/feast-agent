@@ -1,0 +1,17 @@
+{
+  "_fixture": "Response shape copied from the documented example of GET /api/v1/dex/market/rwa/price (https://web3.binance.com/en/dev-docs/catalog/web3-wallet/api/rest-api/rwa-data, read 2026-10-10), with AAPLB's BSC address. The prices are illustrative, not recorded from the live API.",
+  "code": 0,
+  "msg": "success",
+  "data": [
+    {
+      "binanceChainId": "56",
+      "tokenContractAddress": "0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+      "platformId": "bstock",
+      "tokenPrice": "251.40",
+      "referencePrice": "250.15",
+      "tokenPriceUpdatedAt": 1791594000000
+    }
+  ],
+  "timestamp": 1791594001000,
+  "success": true
+}
