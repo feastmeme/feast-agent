@@ -1,0 +1,35 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://web3.binance.com/build/api/v1/dex/market/rwa/search?keyword=AAPL&platformId=bstock",
+    "at": "2026-10-10T02:37:37.838Z"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8",
+    "x-oc-ratelimit-limit": "5",
+    "x-oc-ratelimit-remaining": "1",
+    "x-oc-used-weight": "4"
+  },
+  "body": {
+    "code": 0,
+    "msg": "success",
+    "data": [
+      {
+        "ticker": "AAPL",
+        "companyName": "Apple Inc.",
+        "assets": [
+          {
+            "platformId": "bstock",
+            "binanceChainId": "56",
+            "tokenContractAddress": "0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+            "tokenSymbol": "AAPLB",
+            "assetType": 1
+          }
+        ]
+      }
+    ],
+    "timestamp": 1791599858033,
+    "success": true
+  }
+}

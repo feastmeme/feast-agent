@@ -87,10 +87,11 @@ The full record of endpoints, parameters and response fields is in [`docs/binanc
 | `GET /api/v1/dex/market/rwa/platforms` | bStocks platform summary (`binance-check`) |
 | Wallet Skill `binance-tokenized-securities-info`, RWA Dynamic V2 (keyless) | The labelled fallback when no credentials are set |
 
-**Status.** The RWA Data endpoints are tested against fixtures. They had not been called with credentials when this was written, because the team's key did not exist yet. Two responses are recorded live:
+**Status.** All six RWA Data endpoints have been called live with the team's key, on 2026-10-10. The responses, recorded without credentials, are in [`src/binance/fixtures/live/`](src/binance/fixtures/live/). A demo run with Binance prices is [`demo/transcript-2026-10-10T023224Z.md`](demo/transcript-2026-10-10T023224Z.md). Also recorded live: the API's answer without a key (HTTP 401, code 40101) and the keyless Wallet Skill's answer for AAPLB.
 
-- the API's answer to a request without a key: HTTP 401, code 40101;
-- the keyless Wallet Skill's answer for AAPLB.
+What the live responses showed, in detail in [`docs/dx-log.md`](docs/dx-log.md):
+- `referencePrice` is `tokenPrice` divided by the token-to-share ratio, so `quote` labels that gap as the ratio. It shows the listed share price from the Wallet Skill when one is published.
+- The 5-requests-a-second limit is shared across endpoints, so the client spaces calls 250 ms apart and retries a 429 once.
 
 **Tokenized stocks it touches.** These are the bStocks Feast pairs coins with: AAPLB, BABAB, BNCB, CRCLB, GOOGLB, NVDAB, QQQB, SKHYB, SPCXB and TSLAB on BNB Smart Chain, plus MSFTB and MSTRB on the sandbox. All twelve are in Binance's own bStock list, read live on 2026-10-10 and kept as a fixture: [`src/binance/fixtures/skill-bstock-list.bsc.live.json`](src/binance/fixtures/skill-bstock-list.bsc.live.json), checked by `src/binance/bstock-list.test.ts`.
 
@@ -140,7 +141,7 @@ npm run test:mainnet-read  # FEAST_AGENT_MAINNET=1: chain 56 read path (factory 
 
 - On BNB Smart Chain, trading goes through PancakeSwap Infinity's Universal Router with Permit2. This release does not drive that route. The Feast read API's `/api/v1/quote` prices mainnet trades.
 - `payouts` reads the Feast public read API. It reports only settled payouts (claims, buy-back-and-burns, platform releases), and only as far as its index has caught up.
-- `referencePrice` is documented as derived from the on-chain token price, not quoted by an exchange. The gap the agent prints is therefore Binance's own number, not a market arbitrage.
+- `referencePrice` is derived from the on-chain token price (live: exactly `tokenPrice ÷ tokenToShareRatio`), not quoted by an exchange. A gap to the listed share appears only when the Wallet Skill publishes `stockInfo.price`, during US trading hours.
 
 ## License
 

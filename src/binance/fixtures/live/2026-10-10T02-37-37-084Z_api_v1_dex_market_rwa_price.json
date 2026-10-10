@@ -1,0 +1,86 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://web3.binance.com/build/api/v1/dex/market/rwa/price?binanceChainId=56&tokenContractAddresses=0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a%2C0x4902c5ebc598265ed2212b559b042de8a5eeec3f%2C0x80106cb3ead06659a5ad19df39d9b4733863b9b0%2C0xe87afb3076aeb0f9b14e368de8145ae6a2826a14%2C0x02fca66c1d1afb4e2a7884261eb00f63598a7436%2C0x205812cdbed920aff76c6580abd681a46d11efc7%2C0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1%2C0x5b1910eaad6450e50f816082aa078c41f10c292f",
+    "at": "2026-10-10T02:37:37.084Z"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8",
+    "x-oc-ratelimit-limit": "5",
+    "x-oc-ratelimit-remaining": "2",
+    "x-oc-used-weight": "3"
+  },
+  "body": {
+    "code": 0,
+    "msg": "success",
+    "data": [
+      {
+        "binanceChainId": "56",
+        "tokenContractAddress": "0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+        "platformId": "bstock",
+        "tokenPrice": "336.30000000",
+        "referencePrice": "336.097029",
+        "tokenPriceUpdatedAt": 1791599771696
+      },
+      {
+        "binanceChainId": "56",
+        "tokenContractAddress": "0x4902c5ebc598265ed2212b559b042de8a5eeec3f",
+        "platformId": "bstock",
+        "tokenPrice": "5.28000000",
+        "referencePrice": "5.28",
+        "tokenPriceUpdatedAt": 1791599853736
+      },
+      {
+        "binanceChainId": "56",
+        "tokenContractAddress": "0x80106cb3ead06659a5ad19df39d9b4733863b9b0",
+        "platformId": "bstock",
+        "tokenPrice": "535.26000000",
+        "referencePrice": "534.55761",
+        "tokenPriceUpdatedAt": 1791599848652
+      },
+      {
+        "binanceChainId": "56",
+        "tokenContractAddress": "0xe87afb3076aeb0f9b14e368de8145ae6a2826a14",
+        "platformId": "bstock",
+        "tokenPrice": "154.58000000",
+        "referencePrice": "154.58",
+        "tokenPriceUpdatedAt": 1791599845643
+      },
+      {
+        "binanceChainId": "56",
+        "tokenContractAddress": "0x02fca66c1d1afb4e2a7884261eb00f63598a7436",
+        "platformId": "bstock",
+        "tokenPrice": "230.32000000",
+        "referencePrice": "230.140899",
+        "tokenPriceUpdatedAt": 1791599853630
+      },
+      {
+        "binanceChainId": "56",
+        "tokenContractAddress": "0x205812cdbed920aff76c6580abd681a46d11efc7",
+        "platformId": "bstock",
+        "tokenPrice": "753.05000000",
+        "referencePrice": "752.504556",
+        "tokenPriceUpdatedAt": 1791599854656
+      },
+      {
+        "binanceChainId": "56",
+        "tokenContractAddress": "0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1",
+        "platformId": "bstock",
+        "tokenPrice": "162.99000000",
+        "referencePrice": "162.99",
+        "tokenPriceUpdatedAt": 1791599839633
+      },
+      {
+        "binanceChainId": "56",
+        "tokenContractAddress": "0x5b1910eaad6450e50f816082aa078c41f10c292f",
+        "platformId": "bstock",
+        "tokenPrice": "383.01000000",
+        "referencePrice": "383.01",
+        "tokenPriceUpdatedAt": 1791599803632
+      }
+    ],
+    "timestamp": 1791599857109,
+    "success": true
+  }
+}

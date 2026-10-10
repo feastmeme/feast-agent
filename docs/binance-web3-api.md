@@ -20,7 +20,7 @@ Docs: https://web3.binance.com/en/dev-docs/authentication
 | `X-OC-TIMESTAMP` | `new Date().toISOString()`, ISO 8601 with milliseconds |
 | `X-OC-SIGN` | `Base64(HMAC-SHA256(timestamp + "GET" + "/build" + path + "?" + query, secret))` |
 | Query encoding | `encodeURIComponent` per key and value, joined with `&`, in a fixed order; the same string is signed and sent |
-| Pacing | Each endpoint is called no more often than every 220 ms (the documented per-endpoint limit is 5 per second) |
+| Pacing | Every call at least 250 ms after the previous one, whatever the endpoint; a 429 is retried once after its `Retry-After`. Live, the 5-per-second budget turned out to be shared across endpoints (see below). |
 | Success | Envelope `code === 0`. Any other code is an error, whatever the HTTP status (the docs disagree on the status; see `dx-log.md`) |
 
 ## RWA Data endpoints used
@@ -39,13 +39,30 @@ Docs: https://web3.binance.com/en/dev-docs/catalog/web3-wallet/api/rest-api/rwa-
 Response envelope, as documented: `{ code: number, msg: string, data: T, timestamp: number, success: boolean }`.
 Error envelope, as **observed live** without a key: HTTP 401, header `x-oc-blocked-by: AuthenticationFilter/40101`, body `{"msg":"API Key is required","data":"","code":40101,"timestamp":1791594721678}`. Fixture: `src/binance/fixtures/rwa-nokey-401.live.json`.
 
-The six endpoints have **not** been called with credentials yet: the key did not exist when this was written. The fixtures `rwa-price.aaplb.json` and `rwa-underlying-market.aaplb.json` copy the documented example shapes with illustrative values. Once the key exists, run:
+### Called live with credentials (2026-10-10, 02:32Z and 02:37Z)
 
-```bash
-BINANCE_WEB3_API_KEY=… BINANCE_WEB3_API_SECRET=… npm run agent -- binance-check --record
-```
+All six endpoints were called with the team's key, through `npm run agent -- binance-check --record`. The responses, without credentials, are in `src/binance/fixtures/live/`. Run at 02:32 with no pacing, the sixth call got HTTP 429. Re-run at 02:37 with 250 ms pacing, all six answered HTTP 200 with `code` 0.
 
-That calls each endpoint once and writes the live responses, without credentials, to `src/binance/fixtures/live/`.
+Observed response shapes, where they differ from the reference page:
+
+| Endpoint | Observed |
+| --- | --- |
+| all | Headers `x-oc-ratelimit-limit: 5`, `x-oc-ratelimit-remaining`, `x-oc-used-weight`. `remaining` falls by one per call **across** endpoints. |
+| `/rwa/price` | As documented. `tokenPrice` has 8 decimals ("336.30000000"); `referencePrice` equals `tokenPrice ÷ tokenToShareRatio` to 6 decimals, so it is a per-share conversion, not a listed-share quote. |
+| `/rwa/underlying-market` | `statusInfo.marketStatus` null, `openState` true, `reasonCode` "TRADING" on a Saturday; `marketData.referencePrice` null, as are several other `marketData` fields. |
+| `/rwa/tokens` | 46 items for `binanceChainId=56&platformId=bstock`, against `tickerCount` 91 from `/rwa/platforms`. AAPLB and BNCB are missing though `/rwa/price` prices them. `decimals` is the string "18". `marketStatus` is null on all 46. |
+| `/rwa/underlying-profile` | `underlyingFullName` "Apple (bStocks)"; `companyInfo.description` instead of `descriptionEn`; `protections.collateralReport` with an extra `description` field. |
+| `/rwa/search` | As documented: `companyName` "Apple Inc.", one bStock asset (AAPLB). |
+| 429 | `{"code":42900,"timestamp":…,"msg":"Rate limit exceeded","data":""}`, header `retry-after: 1`, no `x-oc-ratelimit-*` headers. |
+
+What `quote` shows, as a result:
+
+- the coin in USD at Binance's `tokenPrice`;
+- `referencePrice` as the per-share price;
+- the "token vs reference" gap, labelled as the token-to-share ratio it is;
+- the listed share price from the keyless Wallet Skill (`stockInfo.price`) when one is published, which is null outside US trading hours.
+
+The fixtures `rwa-price.aaplb.json` and `rwa-underlying-market.aaplb.json` are the earlier, documented-shape stand-ins. Tests use both sets.
 
 ## The keyless Wallet Skill call
 

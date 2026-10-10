@@ -1,0 +1,34 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://web3.binance.com/build/api/v1/dex/market/rwa/platforms?platformId=bstock",
+    "at": "2026-10-10T02:37:36.583Z"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8",
+    "x-oc-ratelimit-limit": "5",
+    "x-oc-ratelimit-remaining": "4",
+    "x-oc-used-weight": "1"
+  },
+  "body": {
+    "code": 0,
+    "msg": "success",
+    "data": [
+      {
+        "platformId": "bstock",
+        "tickerCount": 91,
+        "chainDistribution": [
+          {
+            "binanceChainId": "56",
+            "tokenCount": 91
+          }
+        ],
+        "website": "https://www.binance.com/zh-CN/bstocks-landing",
+        "logoUrl": "https://public.bnbstatic.com/images/w3w/openapi/bstocks.png"
+      }
+    ],
+    "timestamp": 1791599856695,
+    "success": true
+  }
+}

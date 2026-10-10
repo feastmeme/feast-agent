@@ -24,7 +24,10 @@ Raw material for the team's Developer Experience Report: observations, one per l
 - 01:12:13 — first successful Binance data call, without a key: the `binance-tokenized-securities-info` Wallet Skill's token list (`/bapi/defi/v1/public/wallet-direct/buw/wallet/market/token/rwa/stock/detail/list/ai`). HTTP 200, 363,398 bytes, 1,938 items. On chain 56 there were 91 items of `type` 3 (bStock). The bStock subset is kept in `src/binance/fixtures/skill-bstock-list.bsc.live.json`.
 - 01:18:09 — the Wallet Skill's "RWA Dynamic V2" call for AAPLB (`0x431a…9b7a`) returns HTTP 200 with `tokenInfo.price` "336.54311776947818998044", `stockInfo.price` null and `statusInfo.reasonCode` "TRADING", on a Saturday.
 - 01:19:31 — the RWA Data client (signing, six endpoints, fixtures) is committed. It has not been called with credentials, because the team's key did not exist yet.
-- No authenticated call has been made so far. Run `npm run agent -- binance-check --record` once the key exists; it records every response.
+- 02:32:23.320 — first authenticated call, made by the team with the owner's newly issued key and secret: `GET /build/api/v1/dex/market/rwa/platforms?platformId=bstock` returns HTTP 200, `code` 0, bStock `tickerCount` 91. The signing built from the Authentication page was accepted on the first try (no 40102). Elapsed since opening the docs: 1 h 31 min 9 s, nearly all of it waiting for the key to be issued.
+- 02:32:23.320–.606 — `binance-check` makes six calls to six endpoints in 286 ms. The first five return HTTP 200; the sixth, `/rwa/search`, returns HTTP 429 (verbatim in §4).
+- 02:37:36.583–37.838 — the same six calls, re-run 250 ms apart: all six HTTP 200, no 429.
+- Both runs are recorded, without credentials, in `src/binance/fixtures/live/` (prefixes `2026-10-10T02-32-23` and `2026-10-10T02-37-3`).
 
 ## 2. llms.txt and llms-full.txt (the route the DX form asks about)
 
@@ -71,6 +74,21 @@ Raw material for the team's Developer Experience Report: observations, one per l
 | Node.js minimums | various | Node 18+ (Agentic Wallet install page; npm `@binance/agentic-wallet` engines), Node 22+ (skills-hub README), Node ≥ 22.12.0 (JS connector). | One stated minimum per tool, consistent across pages. |
 | Search results | – | "Binance Web3 API Specification V0.0.6 (2024-01-09)" (`developers.binance.com/docs/zh-CN/binance-web3-api/apis`) still ranks, and now lands on the generic Binance API hub. | Redirect old spec URLs to `/en/dev-docs`. |
 
+### Contradicted by the live responses (02:32 and 02:37)
+
+| Page | Section | Documented | Observed live | Fixture |
+| --- | --- | --- | --- | --- |
+| `/en/dev-docs/authentication` | Rate Limits | Four dimensions: 1,200 / 60 s per IP (header `X-OC-RateLimit-Limit`), 1,200 / 60 s per key, 6,000 / 60 s per user, and 5 RPS **per endpoint**. | `x-oc-ratelimit-limit: 5` on every response. `x-oc-ratelimit-remaining` went 4, 3, 2, 1, 0 and `x-oc-used-weight` 1 to 5 across **five different endpoints** in 260 ms. The sixth call, to a sixth endpoint, got 429. The 5 per second is shared across endpoints, and the limit header reports it, not 1,200. | `…02-32-23-*` |
+| RWA Data reference | `/rwa/underlying-market` → `statusInfo.marketStatus` | `string (enum)`: premarket, regular, postmarket, overnight, closed, pause. | `null` for AAPLB, with `openState` true, `reasonCode` "TRADING" and `nextOpenTime` null, on a Saturday (US market closed). `marketStatus` was also null on all 46 items `/rwa/tokens` returned. | `…underlying_market.json`, `…rwa_tokens.json` |
+| RWA Data reference | `/rwa/underlying-market` → `marketData.referencePrice` | `string`, "Underlying reference price (USD)". | `null` for AAPLB. `avgDailyVolume1Y`, `totalShares`, `turnoverRate` and `amplitude` were null too. The field name is right; `binance-check` printed "?" only because the value was null. | `…underlying_market.json` |
+| RWA Data reference | `/rwa/tokens` | No pagination parameters or fields documented; `platformId=bstock` returns "List of RWA tokenized assets". | `binanceChainId=56&platformId=bstock` returned 46 items with `code` 0 and no paging fields. `/rwa/platforms` reported `tickerCount` 91 and chain-56 `tokenCount` 91 at the same moment. AAPLB (`0x431a…9b7a`) and BNCB (`0x4902…ec3f`) are absent from the 46, yet `/rwa/price` priced both and `/rwa/search?keyword=AAPL&platformId=bstock` returned AAPLB as a bStock asset. | `…rwa_tokens.json`, `…rwa_platforms.json`, `…rwa_price.json`, `…02-37-37-838Z_…rwa_search.json` |
+| RWA Data reference | `/rwa/price` → `referencePrice` | "A per-share converted price derived from the on-chain token price" (and the example's 61.89 / 1.003701 does not give 61.746364). | For all eight tokens priced, `referencePrice` = `tokenPrice` ÷ `tokenToShareRatio` to six decimals: AAPLB 336.30000000 / 1.000603906075632366 = 336.097029; MSFTB 535.26 / 1.001313964833366845 = 534.55761. Where the ratio is 1, the two are equal (BNCB, MSTRB, SPCXB, TSLAB). The "reference" carries no information beyond the token price and the ratio. | `…rwa_price.json` (02:32), checked by `src/binance/client.test.ts` |
+| RWA Data reference | `/rwa/price` → `tokenPrice` / `referencePrice` | Both `string`. | Formatted differently: `tokenPrice` "336.30000000" (8 decimals), `referencePrice` "336.097029" (6) or "5.29" (trimmed). | `…rwa_price.json` |
+| RWA Data reference | `/rwa/underlying-profile` | `underlyingFullName` e.g. "SolarEdge Technologies, Inc."; `companyInfo.descriptionEn` / `descriptionZh`; `protections[key]` = `{supported, url}`; known keys daily/monthly attestation, collateral report. | `underlyingFullName` "Apple (bStocks)", a platform-suffixed label, while `/rwa/search` gave `companyName` "Apple Inc.". `companyInfo.description` (not `descriptionEn`) and `descriptionZh`. `protections` has only `collateralReport`, with an undocumented `description` field and `url` null. | `…underlying_profile.json` |
+| RWA Data reference | `/rwa/tokens` → `decimals` | Typed `string`; example shows the number `18`. | `"18"`, a string, matching the type and not the example. | `…rwa_tokens.json` |
+| RWA Data reference | examples | Logo URLs on `static.onchainos.com`. | `onchainos.bnbstatic.com` (tokens) and `public.bnbstatic.com` (platforms). | `…rwa_tokens.json`, `…rwa_platforms.json` |
+| `/en/dev-docs/authentication` | Error Codes, unified format | `{"code", "msg", "data": null, "timestamp"}`; the RWA reference adds `success`. | The 429 body was `{"code":42900,"timestamp":1791599543616,"msg":"Rate limit exceeded","data":""}`: `data` an empty string, no `success`. The 429 carried `retry-after: 1` but no `x-oc-ratelimit-*` headers. | `…02-32-23-606Z_…rwa_search.json` |
+
 ## 4. Error messages, verbatim
 
 - `GET https://web3.binance.com/build/api/v1/dex/market/rwa/tokens?binanceChainId=56&platformId=bstock` with no `X-OC-*` headers, at 01:12:01:
@@ -79,32 +97,37 @@ Raw material for the team's Developer Experience Report: observations, one per l
   - `x-oc-blocked-by: AuthenticationFilter/40101`
   - `x-oc-trace-id: unknown-gateway-434ef6a5df574a0588a3322d208ba125`
   - body `{"msg":"API Key is required","data":"","code":40101,"timestamp":1791594721678}`
+- `GET https://web3.binance.com/build/api/v1/dex/market/rwa/search?keyword=AAPL&platformId=bstock`, signed, at 02:32:23.606, the sixth call in 286 ms:
+  - HTTP 429
+  - `content-type: application/json`
+  - `retry-after: 1`
+  - body `{"code":42900,"timestamp":1791599543616,"msg":"Rate limit exceeded","data":""}`
+- The 429 does not say which limit was exceeded (per endpoint, per key, per IP, per user), and it carries no `x-oc-ratelimit-*` headers, though every 200 before it did.
 - That message names the missing key but not the missing signature headers. Nothing in the response says that `X-OC-TIMESTAMP` and `X-OC-SIGN` (and therefore a secret) are also required.
 - The response has no `success` field, which the RWA Data reference lists in every response.
 - Every docs URL fetched with curl answered HTTP 202 with `x-amzn-waf-action: challenge`: an HTML challenge with a browser UA, an empty body with curl's default UA. A 202 with an empty body says nothing about why the content is missing.
 
 ## 5. Rate limits
 
-- None hit. The calls were:
-  - one unauthenticated API call;
-  - one keyless Wallet Skill list call;
-  - keyless RWA Dynamic calls, one per `quote` and two per demo run (not separately counted);
-  - documentation fetches.
+- Hit once, at 02:32:23.606: six signed calls to six different endpoints within 286 ms; the sixth got HTTP 429 code 42900 (§4).
+- The 200 responses carry `x-oc-ratelimit-limit: 5`, `x-oc-ratelimit-remaining` and `x-oc-used-weight`. Across one run the remaining count fell by one per call whatever the endpoint, so the 5 per second is one shared budget (§3).
+- Re-run at 02:37:36 with calls spaced 250 ms apart: all six HTTP 200. The fifth call left `remaining: 0` (1.0 s after the first). The sixth, 250 ms later, saw `remaining: 1`.
+- Before the key existed, the calls were: one unauthenticated API call, one keyless Wallet Skill list call, keyless RWA Dynamic calls (one per `quote`, two per demo run, not separately counted), and documentation fetches. None was rate-limited.
 - Documented (Authentication page, Rate Limits):
   - 1,200 requests / 60 s per IP;
   - 1,200 requests / 60 s per API key;
   - 6,000 / 60 s per user;
   - 5 requests a second per endpoint by default;
   - HTTP 429 with `Retry-After`.
-- The client spaces calls to one endpoint at least 220 ms apart, to stay under 5 a second.
+- The client now spaces every call at least 250 ms apart, whatever the endpoint, and retries a 429 once after its `Retry-After`.
 
 ## 6. Did the code examples run as written?
 
 - The Wallet Skill's curl example for RWA Dynamic V2 (`SKILL.md`, "API 5") ran as written with the AAPLB address and returned HTTP 200 (01:18:09).
 - The Wallet Skill's token-list call ran as written and returned HTTP 200 (01:12:13).
-- The Authentication page's Node.js signing example was not run: no key yet. It signs a GET form of `/dex/market/price` that the index lists as POST (§3).
-- The RWA Data reference's curl examples were not run with credentials: no key yet. Run without headers, the `/rwa/tokens` call gave the 401 in §4.
-- This project's signing follows the Authentication page: pre-hash = timestamp + method + `/build` path + raw query + body, then HMAC-SHA256, then Base64. It is unit-tested against Node's own HMAC. Without a published test vector, it is unverified against the gateway until the key exists.
+- The RWA Data reference's six endpoints were called with credentials through this project's client at 02:32 and 02:37 with the documented paths and parameter names, and all returned `code` 0 (bar the one 429). Run without headers, the `/rwa/tokens` call gave the 401 in §4.
+- This project's signing follows the Authentication page: pre-hash = timestamp + method + `/build` path + raw query + body, then HMAC-SHA256, then Base64. The gateway accepted it on the first authenticated call; no 40102 was ever returned.
+- The Authentication page's own Node.js example was not run as written: it signs a GET form of `/dex/market/price`, which the index lists as POST (§3).
 
 ## 7. Looked for, and could not find
 
@@ -115,6 +138,8 @@ Raw material for the team's Developer Experience Report: observations, one per l
 - Any statement of whether `referencePrice` is ever the listed share's exchange price, rather than a conversion of the token price (§3).
 - A trading-hours or holiday calendar for the underlying US market. Only `statusInfo.nextOpenTime` / `nextCloseTime` exist per token.
 - A sandbox or testnet for the Web3 API, so a client can be exercised before a key is issued.
+- Pagination for `/rwa/tokens`, or a statement that the list is capped: 46 items came back while `/rwa/platforms` counted 91 (§3).
+- Which limit a 429 enforced: the body says only "Rate limit exceeded".
 
 ## 8. Agentic Wallet and Wallet Skills
 
@@ -129,7 +154,9 @@ Using the wallet needs a Binance account, its MPC wallet and a QR sign-in in the
 ## 9. What we would change
 
 - Let curl and other non-browser clients fetch `/en/dev-docs/llms.txt`, `/en/dev-docs/llms-full.txt` and the `.md` pages (exempt them from the WAF challenge), and make root `/llms.txt` point to them.
-- Say "API key + secret key" everywhere the API key is mentioned, including the hackathon registration copy.
+- Say "API key + secret key" everywhere the API key is mentioned.
+- Document the shared 5-per-second budget the headers show, and say in the 429 which limit it was.
+- Return every bStock from `/rwa/tokens` (or page it), and populate `marketStatus` and `marketData.referencePrice`, or document when they are null.
 - Publish one complete signature test vector, and an OpenAPI file per product.
 - Make the 401 for a missing key list every missing header.
 - Make the error-code pages agree with each other and with the gateway, on both status codes and `msg` strings.

@@ -1,0 +1,45 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "https://web3.binance.com/build/api/v1/dex/market/rwa/underlying-profile?binanceChainId=56&tokenContractAddress=0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+    "at": "2026-10-10T02:37:37.586Z"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8",
+    "x-oc-ratelimit-limit": "5",
+    "x-oc-ratelimit-remaining": "0",
+    "x-oc-used-weight": "5"
+  },
+  "body": {
+    "code": 0,
+    "msg": "success",
+    "data": {
+      "binanceChainId": "56",
+      "tokenContractAddress": "0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a",
+      "platformId": "bstock",
+      "underlyingTicker": "AAPL",
+      "underlyingFullName": "Apple (bStocks)",
+      "assetType": 1,
+      "tokenToShareRatio": "1.000603906075632366",
+      "protections": {
+        "collateralReport": {
+          "supported": true,
+          "description": null,
+          "url": null
+        }
+      },
+      "companyInfo": {
+        "ceo": "John Ternus",
+        "website": "https://www.apple.com",
+        "industry": "Technology",
+        "conceptsEn": [],
+        "conceptsCn": [],
+        "description": "Apple is among the largest companies in the world, with a broad portfolio of hardware and software products targeted at consumers and businesses. Apple's iPhone makes up a majority of the firm sales, and Apple's other products like Mac, iPad, and Watch are designed around the iPhone as the focal point of an expansive software ecosystem. Apple has progressively worked to add new applications, like streaming video, subscription bundles, and augmented reality. The firm designs its own software and semiconductors while working with subcontractors like Foxconn and TSMC to build its products and chips. Slightly less than half of Apple's sales come directly through its flagship stores, with a majority of sales coming indirectly through partnerships and distribution.",
+        "descriptionZh": "苹果是世界上最大的公司之一，拥有面向消费者和企业的广泛硬件和软件产品组合。苹果的iPhone占公司销售额的大部分，苹果的其他产品如Mac、iPad和Watch都是围绕iPhone设计的，iPhone作为一个庞大软件生态系统的核心。苹果不断努力增加新应用，如流媒体视频、订阅捆绑和增强现实。公司设计自己的软件和半导体，同时与富士康和台积电等分包商合作制造产品和芯片。苹果不到一半的销售额直接通过其旗舰店实现，大部分销售通过合作伙伴和分销渠道间接完成。"
+      }
+    },
+    "timestamp": 1791599857605,
+    "success": true
+  }
+}
