@@ -25,7 +25,7 @@ The full transcript of that run is [`demo/transcript-2026-10-10T012729Z.md`](dem
 Requires Node.js 22.12 or newer. Everything runs on the **Feast sandbox**, a public fork of BNB Smart Chain (chain 56096). Test BNB there is free, and nothing touches real money.
 
 ```bash
-git clone <repository-url> feast-agent && cd feast-agent
+git clone https://github.com/feastmeme/feast-agent.git feast-agent && cd feast-agent
 npm install
 cp .env.example .env
 npm run faucet          # creates a throwaway sandbox wallet in .env (never printed) and drips 100 test BNB
