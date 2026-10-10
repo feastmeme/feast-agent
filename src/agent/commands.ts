@@ -191,13 +191,13 @@ export function renderQuote(view: QuoteView): string {
     if (!b || b.state !== "ok") {
       lines.push(
         !b || b.state === "not_configured"
-          ? `  Binance Web3 API (RWA Data): not configured — ${b?.message ?? "no client"}`
-          : `  Binance Web3 API (RWA Data): unavailable — ${b.message}`,
+          ? `  ${b?.message ?? "Binance Web3 API not configured."}`
+          : `  Binance Web3 API (RWA Data) unavailable: ${b.message}`,
       );
       const k = view.skill;
       if (k) {
         lines.push(`  Binance Wallet Skill (keyless, binance-tokenized-securities-info):`);
-        lines.push(`    ${k.symbol} token price:   ${usd(k.tokenPriceUsd, 6)} (${k.sharesMultiplier ?? "?"} ${k.ticker} shares per token → ${usd(k.impliedSharePriceUsd, 6)} a share)`);
+        lines.push(`    ${k.symbol} token price:   ${usd(k.tokenPriceUsd, 6)} (${k.sharesMultiplier === null ? "?" : sig(k.sharesMultiplier, 7)} ${k.ticker} shares per token → ${usd(k.impliedSharePriceUsd, 6)} a share)`);
         lines.push(`    ${k.ticker} share price:    ${k.stockPriceUsd === null ? "not published right now (null outside US trading hours)" : usd(k.stockPriceUsd, 6)}`);
         lines.push(`    gap, token vs share:  ${k.gap === null ? "n/a until a share price is published" : pct(k.gap, 3)}`);
         lines.push(`    gap, pool vs Binance: ${pct(view.dexVsBinance, 3)}`);
@@ -211,6 +211,9 @@ export function renderQuote(view: QuoteView): string {
     }
   } else if (view.dex) {
     lines.push(`  BNB (USDT/WBNB pool): ${usd(view.dex.usd, 6)}`);
+  }
+  if (view.stock && view.network === "sandbox" && view.dexVsBinance !== null) {
+    lines.push(`  (the sandbox's pools are a fork of BSC that moves only with sandbox trades, so its pool price drifts from the live one Binance reports)`);
   }
   return lines.join("\n");
 }
