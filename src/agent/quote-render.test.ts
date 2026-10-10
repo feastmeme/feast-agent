@@ -21,6 +21,7 @@ const base: QuoteView = {
     gap: (251.4 - 250.15) / 250.15,
     marketStatus: "closed",
     marketOpen: false,
+    reasonCode: "MARKET_CLOSED",
     tokenPriceUpdatedAt: 1791594000000,
     endpoints: ["/api/v1/dex/market/rwa/price", "/api/v1/dex/market/rwa/underlying-market"],
   },
@@ -36,11 +37,12 @@ describe("renderQuote", () => {
     const text = renderQuote(base);
     expect(text).toContain("0.000000005 AAPLB per coin");
     expect(text).toContain("$0.000001257  via binance-rwa");
-    expect(text).toContain("Binance RWA token price:         $251.4 (bstock");
-    expect(text).toContain("reference (AAPL share): $250.15");
-    expect(text).toContain("gap, token vs reference:         +0.500%");
+    expect(text).toContain("Binance RWA token price:          $251.4 (bstock");
+    expect(text).toContain("reference (per AAPL share): $250.15");
+    expect(text).toContain("gap, token vs reference:          +0.500% — that is the 1.004997 shares-per-token ratio");
     expect(text).toContain("gap, pool vs Binance token price: -0.557%");
-    expect(text).toContain("AAPL market: closed (closed)");
+    expect(text).toContain("AAPL market: marketStatus closed, openState false, reasonCode MARKET_CLOSED");
+    expect(text).toContain("listed AAPL share (Wallet Skill): not published right now");
   });
   it("says 'not configured' in the API's terms when there are no credentials", () => {
     const text = renderQuote({

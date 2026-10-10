@@ -125,7 +125,7 @@ export type QuoteView = {
   dex: { usd: number; via: Address[] } | null;
   /** What the Binance Web3 API's RWA Data endpoints say about the paired token. */
   binance: StockReference | null;
-  /** The keyless Binance Wallet Skill's answer, asked only when the API is not configured. */
+  /** The keyless Binance Wallet Skill's answer: the fallback price, and the listed share price when one is published. */
   skill: SkillRwaDynamic | null;
   /** The coin's USD price, and which price of the paired token it used. */
   coinUsd: number | null;
@@ -156,7 +156,9 @@ export async function quoteCommand(ctx: AgentContext, target: string): Promise<Q
   if (stock) {
     // The sandbox forks BNB Smart Chain, so its bStock contracts ARE the chain-56 ones and Binance prices them there.
     [dex, binance] = await Promise.all([feast.stockUsdPrice(stock).catch(() => null), stockReference(ctx.binance, stock.address)]);
-    if ((binance.state !== "ok" || !(binance.tokenPriceUsd > 0)) && ctx.env.FEAST_AGENT_NO_SKILL !== "1") {
+    // The keyless skill is asked either way: it is the fallback price without credentials, and with them it is
+    // the only source of the LISTED share price (the RWA Data reference price is derived from the token price).
+    if (ctx.env.FEAST_AGENT_NO_SKILL !== "1") {
       skill = await skillRwaDynamic(stock.address).catch(() => null);
     }
   } else {
@@ -218,11 +220,27 @@ export function renderQuote(view: QuoteView): string {
         lines.push(`    gap, pool vs Binance: ${pct(view.dexVsBinance, 3)}`);
       }
     } else {
-      lines.push(`  Binance RWA token price:         ${usd(b.tokenPriceUsd, 6)} (${b.platformId}, updated ${when(b.tokenPriceUpdatedAt)})`);
-      lines.push(`  Binance RWA reference (${view.stock.underlying} share): ${usd(b.referencePriceUsd, 6)}${b.underlyingReferenceUsd !== null ? ` (underlying-market: ${usd(b.underlyingReferenceUsd, 6)})` : ""}`);
-      lines.push(`  gap, token vs reference:         ${pct(b.gap, 3)}`);
+      const ratio = b.referencePriceUsd > 0 ? b.tokenPriceUsd / b.referencePriceUsd : null;
+      lines.push(`  Binance RWA token price:          ${usd(b.tokenPriceUsd, 6)} (${b.platformId}, updated ${when(b.tokenPriceUpdatedAt)})`);
+      lines.push(
+        `  Binance RWA reference (per ${view.stock.underlying} share): ${usd(b.referencePriceUsd, 6)}` +
+          `${b.underlyingReferenceUsd !== null ? ` (underlying-market: ${usd(b.underlyingReferenceUsd, 6)})` : " (underlying-market: null)"}`,
+      );
+      lines.push(
+        `  gap, token vs reference:          ${pct(b.gap, 3)}` +
+          `${ratio !== null ? ` — that is the ${sig(ratio, 7)} shares-per-token ratio: Binance derives referencePrice from tokenPrice` : ""}`,
+      );
+      const k = view.skill;
+      if (k?.stockPriceUsd) {
+        lines.push(`  listed ${view.stock.underlying} share (Wallet Skill): ${usd(k.stockPriceUsd, 6)}; per-share token price vs listed share: ${pct(b.referencePriceUsd > 0 ? (b.referencePriceUsd - k.stockPriceUsd) / k.stockPriceUsd : null, 3)}`);
+      } else {
+        lines.push(`  listed ${view.stock.underlying} share (Wallet Skill): not published right now (null outside US trading hours)`);
+      }
       lines.push(`  gap, pool vs Binance token price: ${pct(view.dexVsBinance, 3)}`);
-      lines.push(`  ${view.stock.underlying} market: ${b.marketStatus ?? "n/a"}${b.marketOpen === null ? "" : b.marketOpen ? " (open)" : " (closed)"}`);
+      lines.push(
+        `  ${view.stock.underlying} market: marketStatus ${b.marketStatus ?? "null"}` +
+          `${b.marketOpen === null ? "" : `, openState ${b.marketOpen}`}${b.reasonCode ? `, reasonCode ${b.reasonCode}` : ""}`,
+      );
     }
   } else if (view.dex) {
     lines.push(`  BNB (USDT/WBNB pool): ${usd(view.dex.usd, 6)}`);

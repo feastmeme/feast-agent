@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -132,5 +132,96 @@ describe("RWA Data API against fixtures", () => {
     const fetchMock = vi.fn(async () => new Response("", { status: 202, headers: { "x-amzn-waf-action": "challenge" } }));
     const client = new BinanceWeb3Client({ credentials: CREDENTIALS, fetch: fetchMock as unknown as typeof fetch, now: () => NOW, minSpacingMs: 0 });
     await expect(client.rwaTokens({ platformId: "bstock", binanceChainId: "56" })).rejects.toThrow(/HTTP 202: not a JSON envelope: \(empty body\)/);
+  });
+});
+
+describe("live responses recorded with the owner's key (2026-10-10T02:32Z)", () => {
+  const live = (suffix: string) => {
+    const dir = new URL("./fixtures/live/", import.meta.url);
+    const name = readdirSync(dir).find((f) => f.startsWith("2026-10-10T02-32-23") && f.endsWith(`${suffix}.json`));
+    return JSON.parse(readFileSync(new URL(name ?? "missing", dir), "utf8")) as { status: number; headers: Record<string, string>; body: unknown };
+  };
+
+  it("prices AAPLB from /rwa/price, and copes with underlying-market's null marketStatus and null referencePrice", async () => {
+    const price = live("_rwa_price");
+    const market = live("_rwa_underlying_market");
+    const fetchMock = fakeFetch({
+      "/build/api/v1/dex/market/rwa/price": { body: JSON.stringify(price.body) },
+      "/build/api/v1/dex/market/rwa/underlying-market": { body: JSON.stringify(market.body) },
+    });
+    const client = new BinanceWeb3Client({ credentials: CREDENTIALS, fetch: fetchMock, now: () => NOW, minSpacingMs: 0 });
+    const reference = await stockReference(client, AAPLB);
+    expect(reference.state).toBe("ok");
+    if (reference.state !== "ok") return;
+    expect(reference.tokenPriceUsd).toBe(336.3);
+    expect(reference.referencePriceUsd).toBe(336.097029);
+    expect(reference.underlyingReferenceUsd).toBeNull();
+    expect(reference.marketStatus).toBeNull();
+    expect(reference.marketOpen).toBe(true);
+    expect(reference.reasonCode).toBe("TRADING");
+    expect(reference.tokenPriceUpdatedAt).toBe(1791599510696);
+  });
+
+  it("shows referencePrice is tokenPrice divided by the token-to-share ratio, for every token priced", () => {
+    const price = live("_rwa_price").body as { data: Array<{ tokenContractAddress: string; tokenPrice: string; referencePrice: string }> };
+    const skill = JSON.parse(readFileSync(new URL("./fixtures/skill-bstock-list.bsc.live.json", import.meta.url), "utf8")) as {
+      bstocksOnBsc: Array<{ contractAddress: string; multiplier: string }>;
+    };
+    const ratio = new Map(skill.bstocksOnBsc.map((b) => [b.contractAddress, Number(b.multiplier)]));
+    expect(price.data).toHaveLength(8);
+    for (const row of price.data) {
+      expect(Number(row.tokenPrice) / (ratio.get(row.tokenContractAddress) ?? Number.NaN)).toBeCloseTo(Number(row.referencePrice), 5);
+    }
+  });
+
+  it("recorded the 429: code 42900, Retry-After 1, data as an empty string, no success field", () => {
+    const search = live("_rwa_search");
+    expect(search.status).toBe(429);
+    expect(search.headers["retry-after"]).toBe("1");
+    expect(search.body).toEqual({ code: 42900, timestamp: 1791599543616, msg: "Rate limit exceeded", data: "" });
+  });
+
+  it("recorded /rwa/tokens listing 46 bStocks, without AAPLB and BNCB, while /rwa/platforms reported 91", () => {
+    const tokens = live("_rwa_tokens").body as { data: Array<{ tokenContractAddress: string }> };
+    const platforms = live("_rwa_platforms").body as { data: Array<{ tickerCount: number }> };
+    const listed = new Set(tokens.data.map((t) => t.tokenContractAddress));
+    expect(tokens.data).toHaveLength(46);
+    expect(platforms.data[0]?.tickerCount).toBe(91);
+    expect(listed.has("0x431a3bee82e2ca41e49895cbece5bb0f76a89b7a")).toBe(false);
+    expect(listed.has("0x4902c5ebc598265ed2212b559b042de8a5eeec3f")).toBe(false);
+  });
+});
+
+describe("politeness", () => {
+  it("retries an HTTP 429 once, after Retry-After, signing the retry afresh", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      return calls === 1
+        ? new Response(fixture("error-rate-limited.json"), { status: 429, headers: { "retry-after": "0.05" } })
+        : new Response(fixture("rwa-price.aaplb.json"), { status: 200 });
+    });
+    const client = new BinanceWeb3Client({ credentials: CREDENTIALS, fetch: fetchMock as unknown as typeof fetch, minSpacingMs: 0 });
+    const rows = await client.rwaPrice([AAPLB]);
+    expect(rows).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it("gives up after one retry and surfaces the 429", async () => {
+    const fetchMock = vi.fn(async () => new Response(fixture("error-rate-limited.json"), { status: 429, headers: { "retry-after": "0.01" } }));
+    const client = new BinanceWeb3Client({ credentials: CREDENTIALS, fetch: fetchMock as unknown as typeof fetch, minSpacingMs: 0 });
+    await expect(client.rwaPrice([AAPLB])).rejects.toThrow(/HTTP 429, code 42900/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it("spaces calls across endpoints, not per endpoint", async () => {
+    const at: number[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      at.push(Date.now());
+      const path = new URL(String(input)).pathname;
+      return new Response(path.endsWith("/price") ? fixture("rwa-price.aaplb.json") : fixture("rwa-underlying-market.aaplb.json"));
+    });
+    const client = new BinanceWeb3Client({ credentials: CREDENTIALS, fetch: fetchMock as unknown as typeof fetch, minSpacingMs: 120 });
+    await client.rwaPrice([AAPLB]);
+    await client.rwaUnderlyingMarket(AAPLB);
+    expect((at[1] ?? 0) - (at[0] ?? 0)).toBeGreaterThanOrEqual(110);
   });
 });

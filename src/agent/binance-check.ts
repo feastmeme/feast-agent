@@ -3,8 +3,10 @@ import type { AgentContext } from "./commands.ts";
 
 /**
  * One call to each RWA Data endpoint the agent uses, with the configured
- * credentials, timed — the live check to run once a key exists. With `record`,
+ * credentials, timed — the live check to run once a key exists. The client paces
+ * calls 250 ms apart and retries a 429 once after its Retry-After. With `record`,
  * every response is written (without credentials) to src/binance/fixtures/live/.
+ * Fields the API returns as null are printed as null, never as a guess.
  */
 export async function binanceCheck(ctx: AgentContext, options: { record?: boolean } = {}) {
   const lines: string[] = [];
@@ -35,20 +37,37 @@ export async function binanceCheck(ctx: AgentContext, options: { record?: boolea
       lines.push(`FAIL  ${endpoint} (${ms} ms): ${error instanceof Error ? error.message : String(error)}`);
     }
   };
-  await attempt("/api/v1/dex/market/rwa/platforms", () => client.rwaPlatforms("bstock"), (d: Array<{ platformId: string; tickerCount: number }>) =>
-    d.map((p) => `${p.platformId}: ${p.tickerCount} tickers`).join(", "),
-  );
+  let tickerCount: number | null = null;
+  let listed: Set<string> | null = null;
+  await attempt("/api/v1/dex/market/rwa/platforms", () => client.rwaPlatforms("bstock"), (d: Array<{ platformId: string; tickerCount: number }>) => {
+    tickerCount = d.find((p) => p.platformId === "bstock")?.tickerCount ?? null;
+    return d.map((p) => `${p.platformId}: ${p.tickerCount} tickers`).join(", ");
+  });
   await attempt("/api/v1/dex/market/rwa/tokens", () => client.rwaTokens({ binanceChainId: "56", platformId: "bstock" }), (d: Array<{ tokenContractAddress: string; tokenSymbol: string }>) => {
-    const listed = new Set(d.map((t) => t.tokenContractAddress.toLowerCase()));
-    const ours = stocks.map((s) => `${s.symbol}${listed.has(s.address.toLowerCase()) ? "" : " (NOT LISTED)"}`);
-    return `${d.length} bStock tokens on BSC; Feast's quotes: ${ours.join(", ")}`;
+    listed = new Set(d.map((t) => t.tokenContractAddress.toLowerCase()));
+    const seen = listed;
+    const missing = stocks.filter((s) => !seen.has(s.address.toLowerCase())).map((s) => s.symbol);
+    return (
+      `${d.length} bStock tokens on BSC${tickerCount !== null ? ` (platforms reported ${tickerCount} tickers)` : ""}; ` +
+      `Feast quotes not in this list: ${missing.length ? missing.join(", ") : "none"}`
+    );
   });
   await attempt("/api/v1/dex/market/rwa/price", () => client.rwaPrice(stocks.map((s) => s.address)), (d: Array<{ tokenContractAddress: string; tokenPrice: string; referencePrice: string }>) =>
-    d.map((p) => `${stocks.find((s) => s.address.toLowerCase() === p.tokenContractAddress.toLowerCase())?.symbol ?? p.tokenContractAddress} $${p.tokenPrice} (ref $${p.referencePrice})`).join("; "),
+    d
+      .map((p) => {
+        const symbol = stocks.find((s) => s.address.toLowerCase() === p.tokenContractAddress.toLowerCase())?.symbol ?? p.tokenContractAddress;
+        const unlisted = listed && !listed.has(p.tokenContractAddress.toLowerCase()) ? " [priced, but absent from /rwa/tokens]" : "";
+        return `${symbol} $${p.tokenPrice} (ref $${p.referencePrice})${unlisted}`;
+      })
+      .join("; "),
   );
   if (first) {
-    await attempt("/api/v1/dex/market/rwa/underlying-market", () => client.rwaUnderlyingMarket(first.address), (d: { statusInfo?: { marketStatus?: string }; marketData?: { referencePrice?: string } }) =>
-      `${first.symbol}: ${d.statusInfo?.marketStatus ?? "?"}, reference $${d.marketData?.referencePrice ?? "?"}`,
+    await attempt(
+      "/api/v1/dex/market/rwa/underlying-market",
+      () => client.rwaUnderlyingMarket(first.address),
+      (d: { statusInfo?: { marketStatus?: string | null; openState?: boolean | null; reasonCode?: string | null }; marketData?: { referencePrice?: string | null } }) =>
+        `${first.symbol}: marketStatus ${String(d.statusInfo?.marketStatus ?? null)}, openState ${String(d.statusInfo?.openState ?? null)}, ` +
+        `reasonCode ${String(d.statusInfo?.reasonCode ?? null)}; marketData.referencePrice ${String(d.marketData?.referencePrice ?? null)}`,
     );
     await attempt("/api/v1/dex/market/rwa/underlying-profile", () => client.rwaUnderlyingProfile(first.address), (d: { underlyingTicker?: string; tokenToShareRatio?: string }) =>
       `${first.symbol}: ${d.underlyingTicker ?? "?"}, ${d.tokenToShareRatio ?? "?"} shares per token`,

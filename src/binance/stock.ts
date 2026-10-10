@@ -30,6 +30,7 @@ export type StockReference =
       gap: number | null;
       marketStatus: MarketStatus | null;
       marketOpen: boolean | null;
+      reasonCode: string | null;
       tokenPriceUpdatedAt: number;
       /** The endpoints this answer was assembled from. */
       endpoints: string[];
@@ -62,11 +63,13 @@ export async function stockReference(client: BinanceWeb3Client, tokenAddress: st
     let underlyingReferenceUsd: number | null = null;
     let marketStatus: MarketStatus | null = null;
     let marketOpen: boolean | null = null;
+    let reasonCode: string | null = null;
     try {
       const market = await client.rwaUnderlyingMarket(tokenAddress);
       underlyingReferenceUsd = num(market.marketData?.referencePrice);
       marketStatus = market.statusInfo?.marketStatus ?? null;
       marketOpen = market.statusInfo?.openState ?? null;
+      reasonCode = market.statusInfo?.reasonCode ?? null;
       endpoints.push("/api/v1/dex/market/rwa/underlying-market");
     } catch (error) {
       // The price is still worth showing without the market status.
@@ -93,6 +96,7 @@ export async function stockReference(client: BinanceWeb3Client, tokenAddress: st
       gap: reference > 0 ? (token - reference) / reference : null,
       marketStatus,
       marketOpen,
+      reasonCode,
       tokenPriceUpdatedAt: Number(row.tokenPriceUpdatedAt),
       endpoints,
     };

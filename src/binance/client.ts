@@ -27,9 +27,10 @@ export type Envelope<T> = { code: number; msg: string; data: T; timestamp?: numb
 
 export type MarketStatus = "premarket" | "regular" | "postmarket" | "overnight" | "closed" | "pause";
 
+/** As documented, `marketStatus` is never null; live (2026-10-10, a Saturday) it was null on every bStock. */
 export type StatusInfo = {
-  openState: boolean;
-  marketStatus: MarketStatus;
+  openState: boolean | null;
+  marketStatus: MarketStatus | null;
   reasonCode: string | null;
   reasonMsg: string | null;
   nextOpenTime: number | null;
@@ -79,7 +80,8 @@ export type RwaUnderlyingMarket = {
   assetType: number;
   statusInfo: StatusInfo;
   marketData: {
-    referencePrice: string;
+    /** Documented as a string; live it was null for AAPLB (2026-10-10). */
+    referencePrice: string | null;
     high52W?: string;
     low52W?: string;
     volumeShares24H?: string;
@@ -104,7 +106,8 @@ export type RwaUnderlyingProfile = {
   underlyingFullName: string;
   assetType: number;
   tokenToShareRatio: string;
-  protections: Record<string, { supported: boolean; url: string | null }>;
+  /** Live entries also carry `description` (undocumented). */
+  protections: Record<string, { supported: boolean; url: string | null; description?: string | null }>;
   companyInfo: Record<string, unknown> | null;
 };
 
@@ -160,8 +163,14 @@ export type BinanceClientOptions = {
   recvWindowMs?: number;
   /** When set, every response is written here as JSON (no credentials), for fixtures and for the DX log. */
   recordDir?: string;
-  /** Minimum spacing between two calls to one endpoint; the documented default limit is 5 requests a second. */
+  /**
+   * Minimum spacing between any two calls, whatever the endpoint. The docs give 5 requests a second
+   * PER ENDPOINT; live, `x-oc-ratelimit-limit: 5` counted down across five different endpoints and the
+   * sixth call got 429 (see docs/dx-log.md), so the budget is treated as shared. Default 250 ms.
+   */
   minSpacingMs?: number;
+  /** Retry an HTTP 429 once, after its Retry-After (capped at 10 s). Default true. */
+  retryRateLimited?: boolean;
 };
 
 /** Read credentials from the environment; null fields name what is missing. */
@@ -207,7 +216,8 @@ export class BinanceWeb3Client {
   private readonly recvWindowMs: number | undefined;
   private readonly recordDir: string | undefined;
   private readonly minSpacingMs: number;
-  private readonly lastCall = new Map<string, number>();
+  private readonly retryRateLimited: boolean;
+  private lastCallAt: number | null = null;
 
   constructor(options: BinanceClientOptions & { missing?: string[] }) {
     this.credentials = options.credentials;
@@ -217,7 +227,8 @@ export class BinanceWeb3Client {
     this.now = options.now ?? (() => new Date());
     this.recvWindowMs = options.recvWindowMs;
     this.recordDir = options.recordDir;
-    this.minSpacingMs = options.minSpacingMs ?? 220;
+    this.minSpacingMs = options.minSpacingMs ?? 250;
+    this.retryRateLimited = options.retryRateLimited ?? true;
   }
 
   /** `BINANCE_WEB3_API_KEY`, `BINANCE_WEB3_API_SECRET`, optional `BINANCE_WEB3_BASE_URL` and `BINANCE_WEB3_RECORD_DIR`. */
@@ -261,11 +272,10 @@ export class BinanceWeb3Client {
     return headers;
   }
 
-  private async spacing(path: string): Promise<void> {
-    const last = this.lastCall.get(path);
-    const wait = last === undefined ? 0 : last + this.minSpacingMs - Date.now();
+  private async spacing(): Promise<void> {
+    const wait = this.lastCallAt === null ? 0 : this.lastCallAt + this.minSpacingMs - Date.now();
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    this.lastCall.set(path, Date.now());
+    this.lastCallAt = Date.now();
   }
 
   /** One signed GET, unwrapped from its envelope. */
@@ -273,12 +283,23 @@ export class BinanceWeb3Client {
     if (!this.credentials) throw new BinanceNotConfigured(this.missing);
     const query = queryString(params);
     const pathWithQuery = query ? `${path}?${query}` : path;
-    await this.spacing(path);
-    const headers = this.signedHeaders("GET", pathWithQuery);
-    const startedAt = new Date();
-    const response = await this.fetchImpl(`${this.baseUrl}${pathWithQuery}`, { method: "GET", headers });
-    const text = await response.text();
-    this.record(path, pathWithQuery, startedAt, response, text);
+    const send = async () => {
+      await this.spacing();
+      // Signed afresh on every attempt: a replayed timestamp + signature is refused (40103).
+      const headers = this.signedHeaders("GET", pathWithQuery);
+      const startedAt = new Date();
+      const response = await this.fetchImpl(`${this.baseUrl}${pathWithQuery}`, { method: "GET", headers });
+      const text = await response.text();
+      this.record(path, pathWithQuery, startedAt, response, text);
+      return { response, text };
+    };
+    let { response, text } = await send();
+    if (response.status === 429 && this.retryRateLimited) {
+      const seconds = Number(response.headers.get("retry-after"));
+      const waitMs = Math.min(Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 1000, 10_000);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      ({ response, text } = await send());
+    }
 
     let envelope: Envelope<T> | null = null;
     try {
