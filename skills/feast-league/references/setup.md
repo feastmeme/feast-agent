@@ -29,12 +29,14 @@ The agent's runtime is this repository, installed at a pinned release into the u
 
 ```bash
 git clone --depth 1 --branch league-v2 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
-npm --prefix "$HOME/.feast-league/runtime" ci --omit=dev
+(cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)
 ```
+
+Run `npm ci` from inside the folder. With npm 11 (Node 24), `npm --prefix <dir> ci` refuses this lock file: it names the project after the folder (measured 2026-10-22, npm 11.17.0).
 
 To check the install, run `node "$HOME/.feast-league/runtime/src/league/bin.mjs" doctor`.
 
-A runtime installed at `league-v1` has no `register`: move it to `league-v2` with `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v2 && git -C "$HOME/.feast-league/runtime" checkout league-v2 && npm --prefix "$HOME/.feast-league/runtime" ci --omit=dev`.
+A runtime installed at `league-v1` has no `register`: move it to `league-v2` with `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v2 && git -C "$HOME/.feast-league/runtime" checkout league-v2 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)`.
 
 `FEAST_LEAGUE_RUNTIME` points the skill at another checkout. That is useful when testing the runtime itself.
 
