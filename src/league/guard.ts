@@ -69,6 +69,12 @@ export type GuardInput = {
   book: BookView;
   /** The league's lifetime gross spend from this wallet, every agent (the ledger). */
   walletSpentWei: bigint;
+  /**
+   * Claimed creator fees the agent holds and has not yet spent on buybacks, BNB in
+   * wei, filled by the runtime from its own receipts. A buy labelled claim-funded
+   * is exempt from the budget only up to this, and never when a script asks.
+   */
+  claimFundsWei: bigint;
   /** The script's warm-up state; null for presets and graduated scripts. */
   warmup: WarmupState | null;
   /** A buy's price impact once it is quoted (L10); absent before quoting. */
@@ -169,7 +175,9 @@ export function guard(input: GuardInput): GuardVerdict {
   if (book.spent24hWei + sizeWei > bnbToWei(limits.maxDailySpendBnb)) {
     return refuse("L2", `${bnb(book.spent24hWei)} spent in the last 24 h; ${asked} BNB more would pass the ${limits.maxDailySpendBnb} BNB limit`);
   }
-  if (intent.fundedBy !== "claim" && input.walletSpentWei + sizeWei > bnbToWei(limits.budgetBnb)) {
+  // The label alone exempts nothing: only claimed proceeds the runtime has recorded, and never a script's or a manual buy.
+  const claimFunded = intent.fundedBy === "claim" && intent.source !== "script" && intent.source !== "manual" && sizeWei <= input.claimFundsWei;
+  if (!claimFunded && input.walletSpentWei + sizeWei > bnbToWei(limits.budgetBnb)) {
     return refuse("L3", `the league has put ${bnb(input.walletSpentWei)} in from this wallet; ${asked} BNB more would pass the ${limits.budgetBnb} BNB budget`);
   }
   // L12, L13.

@@ -38,6 +38,7 @@ function input(intent: Intent, over: Partial<GuardInput> = {}, book: Partial<Boo
     coinIsFeast: true,
     book: { ...emptyBook, ...book },
     walletSpentWei: 0n,
+    claimFundsWei: 0n,
     warmup: null,
     ...over,
   };
@@ -118,7 +119,17 @@ describe("each limit refuses a buy that breaks it, at its edge", () => {
   it("L3 the budget, across the wallet; a buyback paid from claims does not draw on it", () => {
     expect(refusedBy(input(buy(0.02), { walletSpentWei: wei(0.2301) }))).toBe("L3");
     expect(refusedBy(input(buy(0.02), { walletSpentWei: wei(0.23) }))).toBe("ok");
-    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), { walletSpentWei: wei(0.25) }))).toBe("ok");
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), { walletSpentWei: wei(0.25), claimFundsWei: wei(0.02) }))).toBe("ok");
+  });
+
+  it("L3 cannot be dodged by calling a buy claim-funded: only claimed proceeds actually held count, and never for a script", () => {
+    // No claimed proceeds held: the label buys nothing.
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), { walletSpentWei: wei(0.25) }))).toBe("L3");
+    // More than the claimed proceeds held: counted against the budget.
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), { walletSpentWei: wei(0.25), claimFundsWei: wei(0.0199) }))).toBe("L3");
+    // A script's intent never carries the exemption, whatever it says.
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim", source: "script" }), { walletSpentWei: wei(0.25), claimFundsWei: wei(1) }))).toBe("L3");
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim", source: "manual" }), { walletSpentWei: wei(0.25), claimFundsWei: wei(1) }))).toBe("L3");
   });
 
   it("L12 trades per hour", () => {
