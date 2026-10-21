@@ -574,7 +574,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
               now,
             ),
           );
-          const needBoard = agent.track === "script" || ["momentum", "dca", "copy"].includes(agent.preset ?? "");
+          // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
+          const needBoard = agent.track === "script" || agent.preset === "momentum" || (agent.preset === "dca" && agent.params.targets === "topHolders");
           const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: loaded.meta.watch, feast, needBoard });
           await runStrategy("onTick", snapshot);
         } catch (error) {

@@ -238,6 +238,13 @@ describe("③ copy", () => {
     expect(run("copy", snap({ now: T + 6_000 }), s3, { wallets: [LEADER] })).toHaveLength(0);
   });
 
+  it("reads the current price from the last trade on the stream when the coin has no row", () => {
+    const state = {};
+    run("copy", snap(), state, { wallets: [LEADER] }, leaderTrade("buy"));
+    const trades = [{ coin: COIN, side: "buy" as const, payer: CREATOR, bnb: 0.01, coins: 1, priceBnb: 1.02, at: T + 3_000, txHash: "0x" }];
+    expect(run("copy", snap({ now: T + 6_000, trades }), state, { wallets: [LEADER] })).toMatchObject([{ kind: "buy", coin: COIN }]);
+  });
+
   it("sells a copied coin when its leader sells", () => {
     const state: Record<string, unknown> = { mine: { [COIN.toLowerCase()]: T - MIN } };
     const out = run("copy", snap({ positions: [position()] }), state, { wallets: [LEADER] }, leaderTrade("sell"));

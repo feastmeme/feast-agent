@@ -173,8 +173,10 @@ function copy(): Strategy {
         continue;
       }
       if (now - item.due > 10 * MINUTE || api.read.position(item.coin)) continue;
-      // Fail closed: copy only when the chase can be measured and is inside the limit.
-      const price = api.read.coin(item.coin)?.priceBnb ?? null;
+      // Fail closed: copy only when the chase can be measured and is inside the limit. The price is the coin's
+      // row, or else the last trade on the event stream.
+      const lastTrade = api.read.trades(item.coin, { limit: 1 }).at(-1);
+      const price = api.read.coin(item.coin)?.priceBnb ?? lastTrade?.priceBnb ?? null;
       if (!item.leaderPrice || item.leaderPrice <= 0 || !price || price <= 0) {
         api.log("copy: skipped, the price move since the leader's fill cannot be measured");
         continue;
