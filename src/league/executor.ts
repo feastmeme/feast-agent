@@ -179,6 +179,33 @@ export class Executor {
     return { ok: true, txHash: executed.txHash, receipt, gasWei };
   }
 
+  /**
+   * Preview only (PLAN.md §8.2): the same allowlist, stop file and lock, then the
+   * wallet's preview and what the gate would say of it. There is no execute on
+   * this path at all, so nothing can be sent from it.
+   */
+  async previewOnly(what: string, call: Call): Promise<{ ok: true; summary: ReturnType<typeof summarizePreview>; gate: ReturnType<typeof gatePreview> } | { ok: false; stage: Stage; reason: string }> {
+    const refused = callRefusal(call, this.targets());
+    if (refused) return { ok: false, stage: "allowlist", reason: refused };
+    const stop = this.deps.stopReason();
+    if (stop) return { ok: false, stage: "stopped", reason: stop };
+    try {
+      if ((await this.deps.signer.txLock()) !== "UNLOCKED") return { ok: false, stage: "busy", reason: "the wallet is busy" };
+      const answer = await this.deps.signer.preview({ from: this.deps.wallet, to: call.to, value: call.value, data: call.data });
+      const summary = summarizePreview(answer);
+      const gate = gatePreview(summary, this.now());
+      this.deps.log("preview.only", { what, to: this.label(call), valueWei: call.value, ...summary, gate });
+      return { ok: true, summary, gate };
+    } catch (error) {
+      return { ok: false, stage: "preview", reason: say(error) };
+    }
+  }
+
+  /** Make a token approvable for Permit2 (a coin the factory made, or a pool's quote), for the preview-only checks. */
+  async learn(coin: Address): Promise<CoinInfo | null> {
+    return this.known(coin);
+  }
+
   private async deadline(): Promise<bigint> {
     return (await this.deps.chain.chainTime()) + BigInt(this.deps.deadlineSeconds ?? 300);
   }

@@ -8,7 +8,8 @@
     "node": ">=22.12"
   },
   "bin": {
-    "feast-agent": "src/agent/bin.mjs"
+    "feast-agent": "src/agent/bin.mjs",
+    "feast-league": "src/league/bin.mjs"
   },
   "exports": {
     ".": "./src/sdk/index.ts",
@@ -22,7 +23,8 @@
     "test": "vitest run",
     "test:sandbox": "FEAST_AGENT_SANDBOX=1 vitest run src/agent/sandbox.integration.test.ts",
     "typecheck": "tsc --noEmit",
-    "test:mainnet-read": "FEAST_AGENT_MAINNET=1 vitest run src/sdk/mainnet.read.test.ts"
+    "test:mainnet-read": "FEAST_AGENT_MAINNET=1 vitest run src/sdk/mainnet.read.test.ts",
+    "league": "tsx src/league/cli.ts"
   },
   "keywords": [
     "feast",
