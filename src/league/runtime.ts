@@ -8,7 +8,7 @@ import { loadAgent, type AgentConfig } from "./agent.ts";
 import { sha256Of } from "./audit/static.ts";
 import { auditRefusal } from "./audit/verdict.ts";
 import { BawError, type Signer } from "./baw.ts";
-import { bookView, emptyBook, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
+import { bookView, emptyBook, pendingBuysWei, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { IndexerPoller } from "./events.ts";
 import { Executor } from "./executor.ts";
@@ -283,45 +283,51 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     };
     /**
      * A transaction that was broadcast but whose receipt never came: it may still land. Its hash is
-     * kept, entries pause, and every tick asks for the receipt again — a late fill is booked like any
-     * other, so a position never exists on chain without the book (and its exits) knowing.
+     * kept in the book (so a restart remembers it), entries pause, a pending buy counts against the
+     * spend limits, and the runtime asks for the receipt again every 15 s — a late fill is booked like
+     * any other, so a position never exists on chain without the book (and its exits) knowing.
      */
-    type Unresolved = { txHash: Hex; kind: "buy" | "sell"; at: number; buy?: Parameters<typeof executor.verifyBuy>[1]; sell?: Parameters<typeof executor.verifySell>[1]; intent: Intent };
-    const unresolved: Unresolved[] = [];
     const resolvePending = async () => {
-      for (const item of [...unresolved]) {
+      for (const item of [...book.unresolved]) {
         const receipt = await chain.client.getTransactionReceipt({ hash: item.txHash }).catch(() => null);
         if (!receipt) continue;
-        unresolved.splice(unresolved.indexOf(item), 1);
+        book = { ...book, unresolved: book.unresolved.filter((u) => u.txHash !== item.txHash) };
         const gasWei = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
+        const info = { coin: item.coin, quote: item.quote, symbol: item.symbol, creator: item.coin, poolId: "0x" as Hex, coinIsCurrency0: true, name: item.symbol };
         if (receipt.status !== "success") {
           log("unresolved.reverted", { txHash: item.txHash });
           notify("trade", `${item.txHash} reverted after its receipt was late; nothing was traded`);
-        } else if (item.kind === "buy" && item.buy) {
-          const fills = executor.verifyBuy(receipt, item.buy);
+        } else if (item.kind === "buy") {
+          const fills = executor.verifyBuy(receipt, { call: { to: item.coin, data: "0x", value: 0n }, info, quotedOut: 0n, minOut: 0n, impactPct: 0, sizeWei: item.sizeWei, payIn: item.payIn });
           if (fills.ok) {
-            const bnbIn = item.buy.payIn === "native" ? item.buy.sizeWei : await chain.quoteToBnbWei(item.buy.info.quote, fills.quoteIn);
-            book = recordBuy(book, { coin: item.buy.info.coin, symbol: item.buy.info.symbol, quote: item.buy.info.quote, coinsOut: fills.coinsOut, bnbInWei: bnbIn, gasWei, at: clock(), fundedBy: item.intent.fundedBy ?? "wallet", ownLaunch: false, source: item.intent.source });
-            if ((item.intent.fundedBy ?? "wallet") === "wallet") addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: item.txHash });
-            log("buy.filled", { id: item.intent.id, txHash: item.txHash, late: true, coinsOut: fills.coinsOut, bnbInWei: bnbIn, payerIsWallet: true });
-            notify("trade", `a late receipt: bought ${item.buy.info.symbol} for ${weiToBnb(bnbIn)} BNB (${item.txHash})`);
-            enqueue([{ id: `arm-${clock()}`, kind: "arm", coin: item.buy.info.coin, reason: "arm the exit", source: "runtime", createdAt: clock() }]);
+            const bnbIn = item.payIn === "native" ? item.sizeWei : await chain.quoteToBnbWei(item.quote, fills.quoteIn);
+            book = recordBuy(book, { coin: item.coin, symbol: item.symbol, quote: item.quote, coinsOut: fills.coinsOut, bnbInWei: bnbIn, gasWei, at: clock(), fundedBy: item.fundedBy, ownLaunch: false, source: item.source });
+            if (item.fundedBy === "wallet") addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: item.txHash });
+            log("buy.filled", { id: item.intentId, txHash: item.txHash, late: true, coinsOut: fills.coinsOut, bnbInWei: bnbIn, payerIsWallet: true });
+            notify("trade", `a late receipt: bought ${item.symbol} for ${weiToBnb(bnbIn)} BNB (${item.txHash})`);
+            enqueue([{ id: `arm-${clock()}`, kind: "arm", coin: item.coin, reason: "arm the exit", source: "runtime", createdAt: clock() }]);
           } else halt(`receipt mismatch on ${item.txHash}: ${fills.reason}`);
-        } else if (item.kind === "sell" && item.sell) {
-          const fills = executor.verifySell(receipt, item.sell);
+        } else {
+          const fills = executor.verifySell(receipt, { call: { to: item.coin, data: "0x", value: 0n }, info, coinsIn: item.sizeWei, quotedOut: 0n, minOut: 0n, quotedBy: "quoter" });
           if (fills.ok) {
-            book = recordSell(book, { coin: item.sell.info.coin, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, gasWei, at: clock() });
-            log("sell.filled", { id: item.intent.id, txHash: item.txHash, late: true, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, payerIsWallet: true });
-            notify("trade", `a late receipt: sold ${item.sell.info.symbol} for ${weiToBnb(fills.bnbOutWei)} BNB (${item.txHash})`);
+            book = recordSell(book, { coin: item.coin, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, gasWei, at: clock() });
+            log("sell.filled", { id: item.intentId, txHash: item.txHash, late: true, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, payerIsWallet: true });
+            notify("trade", `a late receipt: sold ${item.symbol} for ${weiToBnb(fills.bnbOutWei)} BNB (${item.txHash})`);
           } else halt(`receipt mismatch on ${item.txHash}: ${fills.reason}`);
         }
-        if (unresolved.length === 0 && book.paused?.startsWith("unresolved")) book = { ...book, paused: null };
+        if (book.unresolved.length === 0 && book.paused?.startsWith("unresolved")) book = { ...book, paused: null };
         save();
       }
     };
-    const unresolvedSend = (intent: Intent, txHash: Hex, kind: "buy" | "sell", prepared: { buy?: Unresolved["buy"]; sell?: Unresolved["sell"] }) => {
-      unresolved.push({ txHash, kind, at: clock(), intent, ...prepared });
-      book = { ...book, paused: `unresolved transaction ${txHash}: its receipt has not come yet` };
+    const unresolvedSend = (intent: Intent, txHash: Hex, kind: "buy" | "sell", what: { info: { coin: Address; quote: Address; symbol: string }; payIn: "native" | "quote"; sizeWei: bigint }) => {
+      book = {
+        ...book,
+        unresolved: [
+          ...book.unresolved,
+          { txHash, kind, at: clock(), intentId: intent.id, source: intent.source, fundedBy: intent.fundedBy ?? "wallet", coin: what.info.coin, symbol: what.info.symbol, quote: what.info.quote, payIn: what.payIn, sizeWei: what.sizeWei },
+        ],
+        paused: `unresolved transaction ${txHash}: its receipt has not come yet`,
+      };
       log("unresolved", { id: intent.id, txHash, kind });
       notify("paused", `${txHash} was sent but its receipt has not come; entries pause until it resolves (the runtime keeps asking)`);
       save();
@@ -390,7 +396,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         stopped: stopReason(deps.home, deps.name) !== null,
         coinIsFeast,
         book: bookView(book, intent.coin, now),
-        walletSpentWei: readLedger(deps.home).spentWei,
+        walletSpentWei: readLedger(deps.home).spentWei + pendingBuysWei(book, "wallet"),
         claimFundsWei: book.claimFundsWei,
         warmup: agent!.track === "script" ? book.warmup : null,
       };
@@ -409,7 +415,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (!again.ok) return refused(approved, again);
         log("buy.prepared", { id: approved.id, coin, sizeWei: prepared.value.sizeWei, payIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, impactPct: prepared.value.impactPct });
         const sent = await executor.send(`buy ${prepared.value.info.symbol}`, prepared.value.call);
-        if (!sent.ok && sent.stage === "receipt" && sent.txHash) return unresolvedSend(approved, sent.txHash, "buy", { buy: prepared.value });
+        if (!sent.ok && sent.stage === "receipt" && sent.txHash) return unresolvedSend(approved, sent.txHash, "buy", { info: prepared.value.info, payIn, sizeWei: prepared.value.sizeWei });
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const fills = executor.verifyBuy(sent.receipt, prepared.value);
         if (!fills.ok) {
@@ -451,7 +457,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (!prepared.ok) return failed(approved, "prepare", prepared.reason);
         log("sell.prepared", { id: approved.id, coin, coinsIn: prepared.value.coinsIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, quotedBy: prepared.value.quotedBy });
         const sent = await executor.send(`sell ${prepared.value.info.symbol}`, prepared.value.call);
-        if (!sent.ok && sent.stage === "receipt" && sent.txHash) return unresolvedSend(approved, sent.txHash, "sell", { sell: prepared.value });
+        if (!sent.ok && sent.stage === "receipt" && sent.txHash) return unresolvedSend(approved, sent.txHash, "sell", { info: prepared.value.info, payIn: "native", sizeWei: prepared.value.coinsIn });
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const fills = executor.verifySell(sent.receipt, prepared.value);
         if (!fills.ok) {
@@ -615,7 +621,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           log("events.failed", { reason: String((error as Error).message).slice(0, 200) });
         }
       }
-      if (unresolved.length > 0 && now >= nextUnresolvedCheck) {
+      if (book.unresolved.length > 0 && now >= nextUnresolvedCheck) {
         nextUnresolvedCheck = now + (deps.unresolvedCheckMs ?? 15_000);
         await resolvePending().catch((error: unknown) => log("unresolved.check.failed", { reason: String((error as Error).message) }));
       }

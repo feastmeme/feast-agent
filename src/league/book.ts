@@ -53,7 +53,27 @@ export type Book = {
   launched: { coin: Address; poolId: Hex; at: number; txHash: Hex } | null;
   /** The event stream's cursor. */
   cursor: string | null;
+  /**
+   * Transactions sent whose receipt has not come: kept across restarts, re-checked until they
+   * resolve, and a pending buy's size counts against the spend limits meanwhile.
+   */
+  unresolved: Unresolved[];
   counters: { buys: number; sells: number; launches: number; claims: number; arms: number; refusals: number; failures: number };
+};
+
+export type Unresolved = {
+  txHash: Hex;
+  kind: "buy" | "sell";
+  at: number;
+  intentId: string;
+  source: string;
+  fundedBy: "wallet" | "claim";
+  coin: Address;
+  symbol: string;
+  quote: Address;
+  payIn: "native" | "quote";
+  /** A buy's size, BNB in wei (or the quote paid, for a buy paid in the quote). */
+  sizeWei: bigint;
 };
 
 const DAY = 24 * 60 * 60 * 1_000;
@@ -79,6 +99,7 @@ export function emptyBook(): Book {
     warmup: null,
     launched: null,
     cursor: null,
+    unresolved: [],
     counters: { buys: 0, sells: 0, launches: 0, claims: 0, arms: 0, refusals: 0, failures: 0 },
   };
 }
@@ -217,15 +238,21 @@ export function withEquity(book: Book, marks: Record<string, bigint | null>): Bo
 }
 
 /** The figures the guard needs for one intent's coin. */
+/** What pending (unresolved) buys may have spent, BNB in wei: counted as spent until they resolve. */
+export function pendingBuysWei(book: Book, fundedBy?: "wallet" | "claim"): bigint {
+  return (book.unresolved ?? []).filter((u) => u.kind === "buy" && u.payIn === "native" && (fundedBy === undefined || u.fundedBy === fundedBy)).reduce((sum, u) => sum + u.sizeWei, 0n);
+}
+
 export function bookView(book: Book, coin: Address | undefined, now: number): BookView {
   const live = pruned(book, now);
   const positions = Object.values(live.positions);
   const lossWei = live.realized.reduce((sum, r) => (r.pnlWei < 0n ? sum - r.pnlWei : sum), 0n);
+  const pending = pendingBuysWei(live);
   return {
     openPositions: positions.length,
     hasPosition: coin !== undefined && live.positions[key(coin)] !== undefined,
-    exposureWei: positions.reduce((sum, p) => sum + p.costWei, 0n),
-    spent24hWei: live.spends.reduce((sum, s) => sum + s.wei, 0n),
+    exposureWei: positions.reduce((sum, p) => sum + p.costWei, 0n) + pending,
+    spent24hWei: live.spends.reduce((sum, s) => sum + s.wei, 0n) + pending,
     realizedLoss24hWei: lossWei,
     trades1h: live.trades.length,
     lastEntryAt: coin !== undefined ? live.lastEntryAt[key(coin)] ?? null : null,
@@ -244,5 +271,5 @@ export function serializeBook(book: Book): string {
 export function parseBook(text: string): Book {
   const parsed = JSON.parse(text, (_k, v) => (typeof v === "string" && /^-?\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v)) as Book;
   if (parsed.version !== 1) throw new Error(`state.json version ${String(parsed.version)} is not one this runtime reads`);
-  return { ...emptyBook(), ...parsed, counters: { ...emptyBook().counters, ...parsed.counters } };
+  return { ...emptyBook(), ...parsed, unresolved: parsed.unresolved ?? [], counters: { ...emptyBook().counters, ...parsed.counters } };
 }

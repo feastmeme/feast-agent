@@ -81,7 +81,7 @@ describe("the runtime loop", () => {
 });
 
 describe("a sent transaction whose receipt is late", () => {
-  it("pauses entries, keeps asking, and books the late fill — position, ledger and arming — when it lands", async () => {
+  it("pauses entries, counts the pending buy as spent, survives a restart, and books the late fill when it lands", async () => {
     const { encodeAbiParameters, encodeEventTopics } = await import("viem");
     const { hookAbi } = await import("../sdk/abi.ts");
     const { wrappedNativeAbi } = await import("../sdk/venue-abi.ts");
@@ -137,21 +137,36 @@ describe("a sent transaction whose receipt is late", () => {
       allowance: async () => 2n ** 256n - 1n,
       permit2Allowance: async () => ({ amount: 2n ** 160n - 1n, expiration: 2 ** 47 }),
     } as unknown as LeagueChain;
-    const running = runAgent({ home, name: "late", signer, chain, fetch: (async () => new Response(JSON.stringify({ data: [] }))) as unknown as typeof fetch, loopMs: 50, unresolvedCheckMs: 100, pollMs: 10_000_000 });
+    const run = () => runAgent({ home, name: "late", signer, chain, fetch: (async () => new Response(JSON.stringify({ data: [] }))) as unknown as typeof fetch, loopMs: 50, unresolvedCheckMs: 100, pollMs: 10_000_000 });
     const until = async (check: () => boolean) => {
       for (let i = 0; i < 100 && !check(); i += 1) await new Promise((r) => setTimeout(r, 50));
     };
     const state = () => (() => { try { return parseBook(readFileSync(agentPaths(home, "late").state, "utf8")); } catch { return null; } })();
+    const { bookView } = await import("./book.ts");
+    const { rmSync } = await import("node:fs");
+
+    // First run: the buy is sent, its receipt never comes.
+    const first = run();
     await until(() => state()?.paused?.startsWith("unresolved") === true);
-    expect(state()?.paused).toMatch(/unresolved transaction/);
-    expect(Object.keys(state()?.positions ?? {})).toHaveLength(0);
+    writeStop(agentPaths(home, "late").stop, "stop requested by the user");
+    await first;
+    const paused = state()!;
+    expect(paused.unresolved).toHaveLength(1);
+    expect(Object.keys(paused.positions)).toHaveLength(0);
+    // Meanwhile the pending buy counts against the spend limits.
+    expect(bookView(paused, undefined, Date.now()).spent24hWei).toBe(2n * 10n ** 15n);
+
+    // Second run, after a restart: the runtime remembers the transaction, and books it when it lands.
+    rmSync(agentPaths(home, "late").stop, { force: true });
     landed = true;
+    const second = run();
     await until(() => Object.keys(state()?.positions ?? {}).length === 1 && state()?.positions[FEAST.toLowerCase()]?.armed === true);
     writeStop(agentPaths(home, "late").stop, "stop requested by the user");
-    await running;
+    await second;
     const book = state()!;
     expect(book.positions[FEAST.toLowerCase()]).toMatchObject({ coins, costWei: 2n * 10n ** 15n, armed: true });
     expect(book.paused).toBeNull();
+    expect(book.unresolved).toEqual([]);
     expect(readLedger(home).spentWei).toBe(2n * 10n ** 15n);
     expect(calls.filter((c) => c === "execute")).toHaveLength(1);
   });
