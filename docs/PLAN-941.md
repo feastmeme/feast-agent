@@ -845,3 +845,30 @@ The client still reads the sealed route's shape (no `place`, no `foundingNo`, no
 - **`status` asks `baw wallet address` (best effort, 5 s)** to pass `me=`, and reads the page's kept registration when this machine has no `league.json`. `--no-league` skips the league.
 - **The queue is held only while signed out:** the sign-in's end has passed, or `wallet status` says not connected. A wallet that cannot be read at all still meets the guard's L16 refusal, as before.
 - **`launch` refuses a launch-and-run agent** (it launches its own coin) and an agent that has launched already.
+
+## 15. Checked live (2026-10-22), with the lane wallet
+
+Nothing was launched, posted or spent: 0 BNB of the lane's 0.01 BNB.
+
+| Check | Result |
+| --- | --- |
+| `handleOf(lane wallet)` | `""`: no Agent ID. `FL register lane --check` stops at card A2, in en and zh |
+| `apple.ai`, `bnb.ai` through the wallet's `resolve-domain`, then `handleOf` of that address | `apple` and `bnb`: the registry read agrees with the wallet's resolver |
+| `/v1/creators` for the lane wallet, then the decision tree | one coin (AGTEST), proposed as "only", its creator confirmed on chain |
+| `GET https://feast.meme/api/league` | already v2 (`schemaVersion: 2`, `coming-soon`, `seats`, `me`); `GET /api/league/register?wallet=` answers `{ agent: null }` |
+| `FL preview register`, v2 message (bare name, 280-character zh/en manifesto) | accepted; reads back exactly; no risks; `requireConfirmation: false`; not executed |
+| `FL preview create` | clean preview (`000000000`); not executed |
+| `FL launch lane …` without `--yes` | card C; exit 2; no contract call |
+| `FL status lane` | the league block from the live page: coming soon, not registered |
+| `FL doctor` | the session row names the real end (the 48 h inactivity window, for a wallet with no agent running) |
+| **Q4: one `sign-message execute`** through `signRegistration` (name `previewcheck`, manifesto `preview-check`) | `COMPLETED` at once; `signature` is r‖s, 128 hex, no `0x`; `signatureRecovery` `"00"`; it recovers the lane wallet. **Never POSTed** |
+| the league home after all of it | no file holds the wallet's address |
+
+The sandbox test ran live too (`FEAST_AGENT_SANDBOX=1 npx vitest run src/league/register/sandbox.integration.test.ts`, 12.5 s). A body coin was launched on the sandbox by an in-memory key, found by the decision tree, and checked against the sandbox factory by the fake page. Another wallet's coin was refused, and the key's Register was seated.
+
+**A review of the branch** found the signing gate, wire compatibility with 927, privacy on disk and the decision tree clean. Its three risks and four nits are fixed in `4f5926c`:
+- the wallet is the authority on signed-out;
+- a gateway page or a 5xx is reconciled;
+- wallet errors while signing print a card;
+- the `status` timeouts, the address kept out of `--json`, unread notices never dropped;
+- a stricter preview reading.
