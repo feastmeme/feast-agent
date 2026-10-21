@@ -158,8 +158,10 @@ export function guard(input: GuardInput): GuardVerdict {
   }
   // L11: the gas reserve.
   const reserve = bnbToWei(limits.gasReserveBnb);
-  if (sized && wallet.balanceWei - sizeWei < reserve) {
-    return refuse("L11", `buying ${bnb(sizeWei)} would leave ${bnb(wallet.balanceWei - sizeWei > 0n ? wallet.balanceWei - sizeWei : 0n)}; the gas reserve is ${bnb(reserve)}`);
+  // A buy paid in the quote token spends no BNB but gas: only the reserve itself must be there.
+  const bnbSpent = intent.payIn === "quote" ? 0n : sizeWei;
+  if (sized && wallet.balanceWei - bnbSpent < reserve) {
+    return refuse("L11", `buying ${bnb(sizeWei)} would leave ${bnb(wallet.balanceWei - bnbSpent > 0n ? wallet.balanceWei - bnbSpent : 0n)}; the gas reserve is ${bnb(reserve)}`);
   }
   // L1: one trade.
   if (!sized) return refuse("L1", "a buy needs a size in BNB above zero");

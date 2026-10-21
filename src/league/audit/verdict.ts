@@ -39,10 +39,10 @@ export function recordModelVerdict(home: string, path: string, verdict: "pass" |
 }
 
 /** Why a script may not run, or null when its current bytes passed both stages. */
-export function auditRefusal(home: string, path: string): string | null {
+export function auditRefusal(home: string, path: string, alreadyRead?: string): string | null {
   let source: string;
   try {
-    source = readFileSync(resolve(path), "utf8");
+    source = alreadyRead ?? readFileSync(resolve(path), "utf8");
   } catch {
     return `no script at ${path}`;
   }

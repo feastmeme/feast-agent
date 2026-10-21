@@ -79,6 +79,13 @@ describe("each limit refuses a buy that breaks it, at its edge", () => {
     expect(refusedBy(input(buy(0.02), { wallet: { connected: true, devMode: true, quotaLeftUsd: 1_000, balanceWei: wei(0.023) } }))).toBe("ok");
   });
 
+  it("L11 a buy paid in the quote token spends no BNB: only the reserve itself must be there", () => {
+    const thin = { connected: true, devMode: true, quotaLeftUsd: 1_000, balanceWei: wei(0.003) };
+    expect(refusedBy(input(buy(0.02, { payIn: "quote", fundedBy: "claim" }), { wallet: thin, claimFundsWei: wei(1) }))).toBe("ok");
+    expect(refusedBy(input(buy(0.02), { wallet: thin }))).toBe("L11");
+    expect(refusedBy(input(buy(0.02, { payIn: "quote" }), { wallet: { ...thin, balanceWei: wei(0.0029) } }))).toBe("L11");
+  });
+
   it("L1 the size of one trade, and the minimum trade", () => {
     expect(refusedBy(input(buy(0.0201)))).toBe("L1");
     expect(refusedBy(input(buy(0.02)))).toBe("ok");

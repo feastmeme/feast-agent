@@ -75,3 +75,27 @@ describe("the book", () => {
     expect(() => parseBook(JSON.stringify({ version: 2 }))).toThrow(/version/);
   });
 });
+
+describe("the book on disk", () => {
+  it("reads bigints by field name, so a coin whose symbol looks like a number stays text", () => {
+    const odd = recordBuy(emptyBook(), { coin: COIN, symbol: "420n", quote: QUOTE, coinsOut: 7n, bnbInWei: 5n, gasWei: 1n, at: T, fundedBy: "wallet", ownLaunch: false, source: "preset" });
+    const back = parseBook(serializeBook(odd));
+    expect(back.positions[COIN.toLowerCase()]!.symbol).toBe("420n");
+    expect(back.positions[COIN.toLowerCase()]!.coins).toBe(7n);
+  });
+
+  it("still reads a book written in the earlier form", () => {
+    const legacy = JSON.stringify({ ...JSON.parse(serializeBook(buy())), lifetimeSpentWei: "10000000000000000n" });
+    expect(parseBook(legacy).lifetimeSpentWei).toBe(wei(0.01));
+  });
+
+  it("keeps an L14 pause and a pending transaction apart: neither clears the other", async () => {
+    const { pauseReason, clearPause } = await import("./book.ts");
+    const paused = recordFailure(recordFailure(recordFailure(emptyBook(), "x", 3), "x", 3), "x", 3);
+    const pending = { ...paused, unresolved: [{ txHash: null, kind: "sell" as const, at: T, intentId: "i", source: "runtime", fundedBy: "wallet" as const, coin: COIN, symbol: "T", quote: QUOTE, payIn: "native" as const, sizeWei: 1n, balanceBefore: 1n, minCoins: 1n }] };
+    expect(pauseReason(pending)).toMatch(/consecutive failures/);
+    expect(pauseReason({ ...pending, unresolved: [] })).toMatch(/consecutive failures/);
+    expect(pauseReason(clearPause(pending))).toMatch(/not known yet/);
+    expect(pauseReason(clearPause({ ...pending, unresolved: [] }))).toBeNull();
+  });
+});

@@ -4,7 +4,7 @@ import { E18, coinPriceE18 } from "../sdk/price.ts";
 import type { Book } from "./book.ts";
 import type { LeagueChain } from "./chain.ts";
 import { INDEXER_URL, type LeagueEvent } from "./events.ts";
-import type { Limits } from "./limits.ts";
+import { bnbToWei, type Limits } from "./limits.ts";
 import type { CoinRow, PositionRow, Snapshot, StrategyEvent, TradeRow } from "./strategy.ts";
 
 /**
@@ -65,39 +65,45 @@ export class Market {
     const response = await this.fetchImpl(`${(this.options.indexer ?? INDEXER_URL).replace(/\/+$/, "")}/v1/board?limit=100`, { headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`the indexer's board answered HTTP ${response.status}`);
     const body = (await response.json()) as { data?: BoardRow[] };
-    const rows: CoinRow[] = [];
-    for (const raw of Array.isArray(body.data) ? body.data : []) {
-      if (!isAddress(raw.coin, { strict: false }) || !isAddress(raw.quote, { strict: false })) continue;
-      const coin = getAddress(raw.coin);
-      const quote = getAddress(raw.quote);
-      const info = await this.chain.coinInfo(coin).catch(() => null);
-      if (!info) continue;
-      const quoteBnb = await this.chain.quoteBnbE18(quote).catch(() => null);
-      const launchedAt = Date.parse(raw.launchedAt);
-      const volume = /^\d+$/.test(String(raw.volume24h)) ? BigInt(raw.volume24h) : 0n;
-      const sqrt = raw.lastPriceSqrtX96 && /^\d+$/.test(raw.lastPriceSqrtX96) ? BigInt(raw.lastPriceSqrtX96) : 0n;
-      rows.push({
-        coin,
-        symbol: info.symbol,
-        quote,
-        creator: isAddress(raw.creator, { strict: false }) ? getAddress(raw.creator) : info.creator,
-        launchedAt,
-        ageSeconds: Math.max(0, Math.floor((now - launchedAt) / 1_000)),
-        holders: Number(raw.holders) || 0,
-        volume24hBnb: quoteBnb === null ? 0 : toNumber((volume * quoteBnb) / E18),
-        trades24h: Number(raw.trades24h) || 0,
-        priceBnb: sqrt > 0n ? await this.priceBnb(coin, sqrt) : null,
-        hasMetadata: raw.metadataHash !== ZERO_HASH,
-      });
-      const k = coin.toLowerCase();
-      this.holders[k] = [...(this.holders[k] ?? []), { at: now, holders: Number(raw.holders) || 0 }].filter((s) => now - s.at < 4 * HOUR);
-      const creator = raw.creator.toLowerCase();
-      if (Number.isFinite(launchedAt) && now - launchedAt < 24 * HOUR && !(this.launches[creator] ?? []).includes(launchedAt)) {
-        this.launches[creator] = [...(this.launches[creator] ?? []), launchedAt];
-      }
+    // The rows' chain reads run eight at a time: a cold cache is a few round trips, not hundreds in series.
+    const raws = (Array.isArray(body.data) ? body.data : []).filter((r) => isAddress(r.coin, { strict: false }) && isAddress(r.quote, { strict: false }));
+    const built: (CoinRow | null)[] = [];
+    for (let i = 0; i < raws.length; i += 8) {
+      built.push(...(await Promise.all(raws.slice(i, i + 8).map((raw) => this.boardRow(raw, now)))));
     }
+    const rows = built.filter((r): r is CoinRow => r !== null);
     this.board = { at: now, rows };
     return rows;
+  }
+
+  private async boardRow(raw: BoardRow, now: number): Promise<CoinRow | null> {
+    const coin = getAddress(raw.coin);
+    const quote = getAddress(raw.quote);
+    const info = await this.chain.coinInfo(coin).catch(() => null);
+    if (!info) return null;
+    const quoteBnb = await this.chain.quoteBnbE18(quote).catch(() => null);
+    const launchedAt = Date.parse(raw.launchedAt);
+    const volume = /^\d+$/.test(String(raw.volume24h)) ? BigInt(raw.volume24h) : 0n;
+    const sqrt = raw.lastPriceSqrtX96 && /^\d+$/.test(raw.lastPriceSqrtX96) ? BigInt(raw.lastPriceSqrtX96) : 0n;
+    const k = coin.toLowerCase();
+    this.holders[k] = [...(this.holders[k] ?? []), { at: now, holders: Number(raw.holders) || 0 }].filter((s) => now - s.at < 4 * HOUR);
+    const creator = raw.creator.toLowerCase();
+    if (Number.isFinite(launchedAt) && now - launchedAt < 24 * HOUR && !(this.launches[creator] ?? []).includes(launchedAt)) {
+      this.launches[creator] = [...(this.launches[creator] ?? []), launchedAt];
+    }
+    return {
+      coin,
+      symbol: info.symbol,
+      quote,
+      creator: isAddress(raw.creator, { strict: false }) ? getAddress(raw.creator) : info.creator,
+      launchedAt,
+      ageSeconds: Math.max(0, Math.floor((now - launchedAt) / 1_000)),
+      holders: Number(raw.holders) || 0,
+      volume24hBnb: quoteBnb === null ? 0 : toNumber((volume * quoteBnb) / E18),
+      trades24h: Number(raw.trades24h) || 0,
+      priceBnb: sqrt > 0n ? await this.priceBnb(coin, sqrt) : null,
+      hasMetadata: raw.metadataHash !== ZERO_HASH,
+    };
   }
 
   /** One event off the stream: into the windows, and out as what a strategy sees (with any price move it makes). */
@@ -186,7 +192,7 @@ export class Market {
         armed: p.armed,
       };
     });
-    const reserve = BigInt(Math.round(input.limits.gasReserveBnb * 1e9)) * 1_000_000_000n;
+    const reserve = bnbToWei(input.limits.gasReserveBnb);
     return {
       now,
       balanceBnb: input.balanceWei > reserve ? toNumber(input.balanceWei - reserve) : 0,

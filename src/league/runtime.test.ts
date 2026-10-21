@@ -147,11 +147,14 @@ describe("a sent transaction whose receipt is late", () => {
 
     // First run: the buy is sent, its receipt never comes.
     const first = run();
-    await until(() => state()?.paused?.startsWith("unresolved") === true);
+    const { pauseReason } = await import("./book.ts");
+    await until(() => (state()?.unresolved.length ?? 0) === 1);
     writeStop(agentPaths(home, "late").stop, "stop requested by the user");
     await first;
     const paused = state()!;
     expect(paused.unresolved).toHaveLength(1);
+    expect(pauseReason(paused)).toMatch(/not known yet/);
+    expect(paused.paused).toBeNull();
     expect(Object.keys(paused.positions)).toHaveLength(0);
     // Meanwhile the pending buy counts against the spend limits.
     expect(bookView(paused, undefined, Date.now()).spent24hWei).toBe(2n * 10n ** 15n);
@@ -169,5 +172,86 @@ describe("a sent transaction whose receipt is late", () => {
     expect(book.unresolved).toEqual([]);
     expect(readLedger(home).spentWei).toBe(2n * 10n ** 15n);
     expect(calls.filter((c) => c === "execute")).toHaveLength(1);
+  });
+});
+
+describe("outcomes that are not known, and the user's resume", () => {
+  async function harness(over: { execute?: () => Promise<never | { status: string; txHash: null; orderId: null; message: null }>; balances?: bigint[] } = {}) {
+    const { MAINNET } = await import("../sdk/networks.ts");
+    const FEAST = MAINNET.platformCoin!.address;
+    const WBNB = MAINNET.contracts.wrappedNative;
+    const home = mkdtempSync(join(tmpdir(), "feast-league-test-"));
+    homes.push(home);
+    const planned = planAgent({ name: "u", preset: "dca", params: { buyBnb: 0.002 } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const clean = { success: true, data: { requestId: "r1", simulationResult: { simulationCode: "000000000", simulationErrorDetail: null }, risks: { riskDetails: [], addresses: {}, riskBehaviors: [] }, requireConfirmation: false, expiresAt: Date.now() + 600_000 } };
+    const calls: string[] = [];
+    const signer: Signer = {
+      status: async () => ({ connected: true, status: "CONNECTED" }),
+      address: async () => WALLET,
+      settings: async () => ({ devModeEnabled: true, devModeExpiresAt: null, devModeDailyLimitUsd: 1000, devModeQuotaUsedUsd: 0, balanceExceeded: false, sessionExpireTime: null, inactiveSignOutTime: null, abnormalTxnHandling: null }) as WalletSettings,
+      txLock: async () => "UNLOCKED",
+      preview: async () => (calls.push("preview"), clean),
+      execute: over.execute ?? (async () => { calls.push("execute"); throw new Error("baw timed out"); }),
+      signMessagePreview: async () => ({}),
+    };
+    const balances = [...(over.balances ?? [0n])];
+    const key = { currency0: FEAST, currency1: WBNB, hooks: MAINNET.contracts.hook, poolManager: MAINNET.contracts.poolManager, fee: 100, parameters: "0x0000000000000000000000000000000000000000000000000000000000c80cc1" };
+    const chain = {
+      client: { simulateContract: async () => ({ result: [10n ** 21n, 0n] }), getTransactionReceipt: async () => null, getTransaction: async () => null },
+      coinInfo: async () => ({ coin: FEAST, quote: WBNB, creator: WALLET, poolId: MAINNET.platformCoin!.poolId, coinIsCurrency0: true, symbol: "FEAST", name: "Feast" }),
+      isFeastCoin: async () => true,
+      poolKey: async () => key,
+      hops: () => [],
+      spotQuotePerCoinE18: async () => 2n * 10n ** 12n,
+      chainTime: async () => 1n,
+      receipt: async () => ({ status: "success", logs: [], gasUsed: 1n, effectiveGasPrice: 1n, blockNumber: 1n }),
+      balance: async () => 10n ** 18n,
+      bnbUsd: async () => 600,
+      markWei: async () => 2n * 10n ** 15n,
+      quoteBnbE18: async () => 10n ** 18n,
+      quoteToBnbWei: async (_q: unknown, amount: bigint) => amount,
+      tokenBalance: async () => (balances.length > 1 ? balances.shift()! : balances[0]!),
+      allowance: async () => 2n ** 256n - 1n,
+      permit2Allowance: async () => ({ amount: 2n ** 160n - 1n, expiration: 2 ** 47 }),
+    } as unknown as LeagueChain;
+    return { home, signer, chain, calls, FEAST };
+  }
+
+  it("an execute that fails may still have sent: the buy is read from the coin's balance, and booked", async () => {
+    const { parseBook, pauseReason } = await import("./book.ts");
+    const { readFileSync } = await import("node:fs");
+    // The balance before the send, then the balance after: 1,000 coins arrived.
+    const { home, signer, chain, FEAST } = await harness({ balances: [0n, 0n, 1_000n * 10n ** 18n] });
+    const running = runAgent({ home, name: "u", signer, chain, fetch: (async () => new Response("{}")) as unknown as typeof fetch, loopMs: 50, unresolvedCheckMs: 100, pollMs: 10_000_000 });
+    const state = () => (() => { try { return parseBook(readFileSync(agentPaths(home, "u").state, "utf8")); } catch { return null; } })();
+    for (let i = 0; i < 100 && Object.keys(state()?.positions ?? {}).length === 0; i += 1) await new Promise((r) => setTimeout(r, 50));
+    writeStop(agentPaths(home, "u").stop, "stop requested by the user");
+    await running;
+    const book = state()!;
+    expect(book.positions[FEAST.toLowerCase()]?.coins).toBe(1_000n * 10n ** 18n);
+    expect(book.unresolved).toEqual([]);
+    expect(pauseReason(book)).toBeNull();
+    expect(book.counters.failures).toBe(0);
+  });
+
+  it("the user's resume clears an L14 pause; nothing else does", async () => {
+    const { parseBook, recordFailure, serializeBook, emptyBook } = await import("./book.ts");
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const { home, signer, chain } = await harness({ execute: async () => ({ status: "FAILED", txHash: null, orderId: null, message: null }) });
+    let paused = emptyBook();
+    for (let i = 0; i < 3; i += 1) paused = recordFailure(paused, "x", 3);
+    writeFileSync(agentPaths(home, "u").state, serializeBook(paused));
+    writeStop(agentPaths(home, "u").stop, "stop requested by the user");
+    // A plain start (with the stop removed) keeps the pause; a resume clears it.
+    const { rmSync } = await import("node:fs");
+    rmSync(agentPaths(home, "u").stop);
+    const kept = runAgent({ home, name: "u", signer, chain, fetch: (async () => new Response("{}")) as unknown as typeof fetch, loopMs: 50, maxRuntimeMs: 300, pollMs: 10_000_000 });
+    await kept;
+    expect(parseBook(readFileSync(agentPaths(home, "u").state, "utf8")).paused).toMatch(/consecutive failures/);
+    const resumed = runAgent({ home, name: "u", signer, chain, fetch: (async () => new Response("{}")) as unknown as typeof fetch, loopMs: 50, maxRuntimeMs: 300, pollMs: 10_000_000, clearPause: true });
+    await resumed;
+    expect(parseBook(readFileSync(agentPaths(home, "u").state, "utf8")).paused === null || /unresolved|not known/.test(String(parseBook(readFileSync(agentPaths(home, "u").state, "utf8")).paused))).toBe(true);
   });
 });

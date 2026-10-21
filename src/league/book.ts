@@ -62,8 +62,9 @@ export type Book = {
 };
 
 export type Unresolved = {
-  txHash: Hex;
-  kind: "buy" | "sell";
+  /** Null when the wallet's execute failed or waited for an App confirmation: it may have been sent, with no hash known. */
+  txHash: Hex | null;
+  kind: "buy" | "sell" | "launch" | "claim" | "arm";
   at: number;
   intentId: string;
   source: string;
@@ -72,8 +73,11 @@ export type Unresolved = {
   symbol: string;
   quote: Address;
   payIn: "native" | "quote";
-  /** A buy's size, BNB in wei (or the quote paid, for a buy paid in the quote). */
+  /** A buy's size, BNB in wei (or the quote paid, for a buy paid in the quote); a sale's coins. */
   sizeWei: bigint;
+  /** The wallet's balance of the coin before it was sent, and the least a fill moves it by: an unknown outcome is read from these. */
+  balanceBefore: bigint | null;
+  minCoins: bigint;
 };
 
 const DAY = 24 * 60 * 60 * 1_000;
@@ -243,6 +247,19 @@ export function pendingBuysWei(book: Book, fundedBy?: "wallet" | "claim"): bigin
   return (book.unresolved ?? []).filter((u) => u.kind === "buy" && u.payIn === "native" && (fundedBy === undefined || u.fundedBy === fundedBy)).reduce((sum, u) => sum + u.sizeWei, 0n);
 }
 
+/** Why entries are paused: an L14 failure pause, or else a transaction whose outcome is not known yet. The two never overwrite each other. */
+export function pauseReason(book: Book): string | null {
+  if (book.paused) return book.paused;
+  const pending = book.unresolved ?? [];
+  if (pending.length === 0) return null;
+  return `${pending.length} transaction(s) whose outcome is not known yet (${pending.map((u) => u.txHash ?? "no hash: the wallet's answer was lost").join(", ")})`;
+}
+
+/** The user's resume: the L14 pause and the failure streak are cleared. */
+export function clearPause(book: Book): Book {
+  return { ...book, paused: null, failureStreak: 0 };
+}
+
 export function bookView(book: Book, coin: Address | undefined, now: number): BookView {
   const live = pruned(book, now);
   const positions = Object.values(live.positions);
@@ -256,20 +273,42 @@ export function bookView(book: Book, coin: Address | undefined, now: number): Bo
     realizedLoss24hWei: lossWei,
     trades1h: live.trades.length,
     lastEntryAt: coin !== undefined ? live.lastEntryAt[key(coin)] ?? null : null,
-    paused: live.paused,
+    paused: pauseReason(live),
     drawdownWei: live.peakEquityWei > live.lastEquityWei ? live.peakEquityWei - live.lastEquityWei : 0n,
   };
 }
 
 // --- persistence ---------------------------------------------------------------------
 
-/** JSON with every bigint as a tagged decimal string, so a book survives a restart exactly. */
+/**
+ * The fields that hold bigints. They are written as decimal strings and read back by NAME,
+ * never by the look of a string — a coin whose symbol is "420n" stays text.
+ */
+const BIGINT_FIELDS = new Set([
+  "coins",
+  "costWei",
+  "peakMarkWei",
+  "wei",
+  "lifetimeSpentWei",
+  "pnlWei",
+  "realizedTotalWei",
+  "gasWei",
+  "peakEquityWei",
+  "lastEquityWei",
+  "claimFundsWei",
+  "sizeWei",
+  "balanceBefore",
+  "minCoins",
+]);
+
+/** JSON with every bigint as a decimal string, so a book survives a restart exactly. */
 export function serializeBook(book: Book): string {
-  return JSON.stringify(book, (_k, v) => (typeof v === "bigint" ? `${v}n` : v), 2);
+  return JSON.stringify(book, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2);
 }
 
 export function parseBook(text: string): Book {
-  const parsed = JSON.parse(text, (_k, v) => (typeof v === "string" && /^-?\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v)) as Book;
+  // Earlier books wrote "123n"; both forms are read, for the bigint fields only.
+  const parsed = JSON.parse(text, (k, v) => (BIGINT_FIELDS.has(k) && typeof v === "string" && /^-?\d+n?$/.test(v) ? BigInt(v.replace(/n$/, "")) : v)) as Book;
   if (parsed.version !== 1) throw new Error(`state.json version ${String(parsed.version)} is not one this runtime reads`);
   return { ...emptyBook(), ...parsed, unresolved: parsed.unresolved ?? [], counters: { ...emptyBook().counters, ...parsed.counters } };
 }

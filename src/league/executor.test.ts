@@ -144,6 +144,16 @@ describe("send: the one path every transaction takes", () => {
     expect(await ex.send("buy", BUY)).toMatchObject({ ok: false, stage: "confirmation" });
   });
 
+  it("tells a lost answer (may have been sent) from a wallet that answered it did not send", async () => {
+    const lost = fakeSigner({});
+    lost.signer.execute = async () => {
+      throw new Error("timed out");
+    };
+    expect(await executor(lost.signer).ex.send("buy", BUY)).toMatchObject({ ok: false, stage: "execute" });
+    const declined = fakeSigner({ execute: { status: "FAILED", txHash: null, orderId: "o3", message: "rejected" } });
+    expect(await executor(declined.signer).ex.send("buy", BUY)).toMatchObject({ ok: false, stage: "declined" });
+  });
+
   it("a reverted receipt is a failure of a sent transaction", async () => {
     const { signer } = fakeSigner({});
     const { ex } = executor(signer, { receipt: receiptOf([], "reverted") });

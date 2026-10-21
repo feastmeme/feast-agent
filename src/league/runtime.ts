@@ -8,7 +8,7 @@ import { loadAgent, type AgentConfig } from "./agent.ts";
 import { sha256Of } from "./audit/static.ts";
 import { auditRefusal } from "./audit/verdict.ts";
 import { BawError, type Signer } from "./baw.ts";
-import { bookView, emptyBook, pendingBuysWei, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
+import { bookView, clearPause, emptyBook, pendingBuysWei, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { IndexerPoller } from "./events.ts";
 import { Executor } from "./executor.ts";
@@ -54,6 +54,8 @@ export type RuntimeDeps = {
   chain?: LeagueChain;
   /** How often a sent transaction whose receipt never came is asked for again. */
   unresolvedCheckMs?: number;
+  /** The user's resume: clear an L14 pause at start. */
+  clearPause?: boolean;
   loopMs?: number;
   pollMs?: number;
   preflightMs?: number;
@@ -88,11 +90,13 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
   if (!checked.ok) return { exit: "refused", reason: `the agent's limits do not validate: ${checked.errors.join("; ")}` };
   const atStart = stopReason(deps.home, deps.name);
   if (atStart) return { exit: "refused", reason: `a stop file is present (${atStart}); \`feast-league resume\` removes it` };
+  // A script is read ONCE: the bytes checked here are the bytes the sandbox runs.
+  let scriptSource: string | null = null;
   if (agent.track === "script") {
-    const why = auditRefusal(deps.home, agent.script!.path);
+    scriptSource = readFileSync(agent.script!.path, "utf8");
+    if (sha256Of(scriptSource) !== agent.script!.sha256) return { exit: "refused", reason: "the script changed since it was planned: plan and audit it again" };
+    const why = auditRefusal(deps.home, agent.script!.path, scriptSource);
     if (why) return { exit: "refused", reason: why };
-    const now = readFileSync(agent.script!.path, "utf8");
-    if (sha256Of(now) !== agent.script!.sha256) return { exit: "refused", reason: "the script changed since it was planned: plan and audit it again" };
   }
 
   let lock: { release: () => void };
@@ -175,6 +179,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     // --- the book and the strategy --------------------------------------------------------
     let book: Book = existsSync(paths.state) ? parseBook(readFileSync(paths.state, "utf8")) : emptyBook();
     if (agent.track === "script" && book.warmup?.sha !== agent.script!.sha256) book = { ...book, warmup: { sha: agent.script!.sha256, trades: 0, consecutiveFailures: 0, launches: 0 } };
+    if (deps.clearPause && book.paused) {
+      appendJsonl(paths.log, { at: new Date(clock()).toISOString(), event: "pause.cleared", by: "user", was: book.paused });
+      book = clearPause(book);
+    }
     const statePath = join(paths.dir, "strategy-state.json");
     const stored = readJson<{ key: string; state: Record<string, unknown> }>(statePath);
     const stateKey = agent.track === "script" ? agent.script!.sha256 : `preset:${agent.preset}`;
@@ -221,7 +229,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         stop() {},
       };
     } else {
-      const sandbox = await ScriptSandbox.start(readFileSync(agent.script!.path, "utf8"));
+      const sandbox = await ScriptSandbox.start(scriptSource!);
       const params = { ...sandbox.params, ...agent.params };
       const slippagePct = typeof params.slippagePct === "number" ? params.slippagePct : Math.min(3, agent.limits.maxSlippagePct);
       const scriptAgent = agent;
@@ -282,56 +290,130 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       save();
     };
     /**
-     * A transaction that was broadcast but whose receipt never came: it may still land. Its hash is
-     * kept in the book (so a restart remembers it), entries pause, a pending buy counts against the
-     * spend limits, and the runtime asks for the receipt again every 15 s — a late fill is booked like
-     * any other, so a position never exists on chain without the book (and its exits) knowing.
+     * A transaction whose outcome is not known: sent but with no receipt in 120 s, or one the wallet
+     * may have sent when its execute failed or asked for an App confirmation. It is kept in the book
+     * (a restart remembers it), entries pause, a pending buy counts against the spend limits, and every
+     * 15 s the runtime asks again — a late fill is booked like any other, so a position never exists on
+     * chain without the book and its exits knowing. A hash the node no longer knows, or an unknown
+     * outcome that moved no balance, is released after 15 minutes.
      */
+    const RELEASE_AFTER_MS = 15 * 60_000;
     const resolvePending = async () => {
       for (const item of [...book.unresolved]) {
-        const receipt = await chain.client.getTransactionReceipt({ hash: item.txHash }).catch(() => null);
-        if (!receipt) continue;
-        book = { ...book, unresolved: book.unresolved.filter((u) => u.txHash !== item.txHash) };
-        const gasWei = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
+        const age = clock() - item.at;
+        const release = (why: string) => {
+          book = { ...book, unresolved: book.unresolved.filter((u) => u !== item) };
+          log("unresolved.released", { id: item.intentId, txHash: item.txHash, kind: item.kind, why });
+          notify("trade", `${item.kind} ${item.txHash ?? "(no hash)"}: ${why}`);
+          save();
+        };
         const info = { coin: item.coin, quote: item.quote, symbol: item.symbol, creator: item.coin, poolId: "0x" as Hex, coinIsCurrency0: true, name: item.symbol };
-        if (receipt.status !== "success") {
-          log("unresolved.reverted", { txHash: item.txHash });
-          notify("trade", `${item.txHash} reverted after its receipt was late; nothing was traded`);
-        } else if (item.kind === "buy") {
-          const fills = executor.verifyBuy(receipt, { call: { to: item.coin, data: "0x", value: 0n }, info, quotedOut: 0n, minOut: 0n, impactPct: 0, sizeWei: item.sizeWei, payIn: item.payIn });
-          if (fills.ok) {
-            const bnbIn = item.payIn === "native" ? item.sizeWei : await chain.quoteToBnbWei(item.quote, fills.quoteIn);
-            book = recordBuy(book, { coin: item.coin, symbol: item.symbol, quote: item.quote, coinsOut: fills.coinsOut, bnbInWei: bnbIn, gasWei, at: clock(), fundedBy: item.fundedBy, ownLaunch: false, source: item.source });
-            if (item.fundedBy === "wallet") addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: item.txHash });
-            log("buy.filled", { id: item.intentId, txHash: item.txHash, late: true, coinsOut: fills.coinsOut, bnbInWei: bnbIn, payerIsWallet: true });
-            notify("trade", `a late receipt: bought ${item.symbol} for ${weiToBnb(bnbIn)} BNB (${item.txHash})`);
-            enqueue([{ id: `arm-${clock()}`, kind: "arm", coin: item.coin, reason: "arm the exit", source: "runtime", createdAt: clock() }]);
-          } else halt(`receipt mismatch on ${item.txHash}: ${fills.reason}`);
-        } else {
-          const fills = executor.verifySell(receipt, { call: { to: item.coin, data: "0x", value: 0n }, info, coinsIn: item.sizeWei, quotedOut: 0n, minOut: 0n, quotedBy: "quoter" });
-          if (fills.ok) {
-            book = recordSell(book, { coin: item.coin, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, gasWei, at: clock() });
-            log("sell.filled", { id: item.intentId, txHash: item.txHash, late: true, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, payerIsWallet: true });
-            notify("trade", `a late receipt: sold ${item.symbol} for ${weiToBnb(fills.bnbOutWei)} BNB (${item.txHash})`);
-          } else halt(`receipt mismatch on ${item.txHash}: ${fills.reason}`);
+        if (item.txHash) {
+          const receipt = await chain.client.getTransactionReceipt({ hash: item.txHash }).catch(() => null);
+          if (!receipt) {
+            if (age > RELEASE_AFTER_MS) {
+              const known = await chain.client.getTransaction({ hash: item.txHash }).catch(() => null);
+              const lock = await deps.signer.txLock().catch(() => "LOCKED" as const);
+              if (!known && lock === "UNLOCKED") release("the network no longer knows this transaction: it was dropped or replaced, so nothing was traded");
+            }
+            continue;
+          }
+          book = { ...book, unresolved: book.unresolved.filter((u) => u !== item) };
+          const gasWei = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
+          if (receipt.status !== "success") {
+            log("unresolved.reverted", { txHash: item.txHash });
+            notify("trade", `${item.txHash} reverted after its receipt was late; nothing was traded`);
+          } else if (item.kind === "buy") {
+            const fills = executor.verifyBuy(receipt, { call: { to: item.coin, data: "0x", value: 0n }, info, quotedOut: 0n, minOut: 0n, impactPct: 0, sizeWei: item.sizeWei, payIn: item.payIn });
+            if (!fills.ok) halt(`receipt mismatch on ${item.txHash}: ${fills.reason}`);
+            else bookLateBuy(item, fills.coinsOut, item.payIn === "native" ? item.sizeWei : await chain.quoteToBnbWei(item.quote, fills.quoteIn), gasWei);
+          } else if (item.kind === "sell") {
+            const fills = executor.verifySell(receipt, { call: { to: item.coin, data: "0x", value: 0n }, info, coinsIn: item.sizeWei, quotedOut: 0n, minOut: 0n, quotedBy: "quoter" });
+            if (!fills.ok) halt(`receipt mismatch on ${item.txHash}: ${fills.reason}`);
+            else bookLateSell(item, fills.coinsIn, fills.bnbOutWei, gasWei);
+          } else if (item.kind === "launch") {
+            const made = executor.verifyLaunch(receipt);
+            if (!made.ok) halt(`receipt mismatch on ${item.txHash}: ${made.reason}`);
+            else {
+              book = { ...recordGas(book, gasWei, "launches"), launched: { coin: made.coin, poolId: made.poolId, at: clock(), txHash: item.txHash } };
+              log("launch.made", { id: item.intentId, txHash: item.txHash, late: true, coin: made.coin });
+              notify("trade", `a late receipt: the launch landed (${item.txHash})`);
+            }
+          } else if (item.kind === "claim") {
+            const paid = executor.verifyClaim(receipt);
+            book = recordClaim(book, await chain.quoteToBnbWei(item.quote, paid), gasWei);
+            log("claim.paid", { id: item.intentId, txHash: item.txHash, late: true, quoteAmount: paid });
+          }
+          save();
+          continue;
         }
-        if (book.unresolved.length === 0 && book.paused?.startsWith("unresolved")) book = { ...book, paused: null };
-        save();
+        // No hash: read the outcome from the coin's balance.
+        if (item.balanceBefore !== null && (item.kind === "buy" || item.kind === "sell")) {
+          const now = await chain.tokenBalance(item.coin, wallet).catch(() => null);
+          if (now !== null && item.kind === "buy" && now >= item.balanceBefore + item.minCoins) {
+            book = { ...book, unresolved: book.unresolved.filter((u) => u !== item) };
+            bookLateBuy(item, now - item.balanceBefore, item.payIn === "native" ? item.sizeWei : 0n, 0n);
+            save();
+            continue;
+          }
+          if (now !== null && item.kind === "sell" && now + item.sizeWei <= item.balanceBefore) {
+            book = { ...book, unresolved: book.unresolved.filter((u) => u !== item) };
+            // The BNB out is not known without the receipt: the floor the sale was sent with is booked.
+            bookLateSell(item, item.sizeWei, item.minCoins, 0n);
+            save();
+            continue;
+          }
+        }
+        if (age > RELEASE_AFTER_MS && (await deps.signer.txLock().catch(() => "LOCKED" as const)) === "UNLOCKED") release("no balance moved in 15 minutes and the wallet is free: it was not sent");
       }
     };
-    const unresolvedSend = (intent: Intent, txHash: Hex, kind: "buy" | "sell", what: { info: { coin: Address; quote: Address; symbol: string }; payIn: "native" | "quote"; sizeWei: bigint }) => {
+    const bookLateBuy = (item: (typeof book.unresolved)[number], coinsOut: bigint, bnbIn: bigint, gasWei: bigint) => {
+      book = recordBuy(book, { coin: item.coin, symbol: item.symbol, quote: item.quote, coinsOut, bnbInWei: bnbIn, gasWei, at: clock(), fundedBy: item.fundedBy, ownLaunch: book.launched?.coin.toLowerCase() === item.coin.toLowerCase(), source: item.source });
+      if (item.fundedBy === "wallet" && bnbIn > 0n) addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: item.txHash ?? "unknown" });
+      log("buy.filled", { id: item.intentId, txHash: item.txHash, late: true, coinsOut, bnbInWei: bnbIn, payerIsWallet: item.txHash !== null });
+      notify("trade", `a late outcome: bought ${item.symbol} for ${weiToBnb(bnbIn)} BNB (${item.txHash ?? "read from the balance"})`);
+      enqueue([{ id: `arm-${clock()}`, kind: "arm", coin: item.coin, reason: "arm the exit", source: "runtime", createdAt: clock() }]);
+    };
+    const bookLateSell = (item: (typeof book.unresolved)[number], coinsIn: bigint, bnbOut: bigint, gasWei: bigint) => {
+      book = recordSell(book, { coin: item.coin, coinsIn, bnbOutWei: bnbOut, gasWei, at: clock() });
+      log("sell.filled", { id: item.intentId, txHash: item.txHash, late: true, coinsIn, bnbOutWei: bnbOut, estimated: item.txHash === null });
+      notify("trade", `a late outcome: sold ${item.symbol} (${item.txHash ?? "read from the balance; the BNB out is the floor it was sent with"})`);
+    };
+    /** Keep a transaction whose outcome is not known. It never touches the L14 pause; `pauseReason` reads both. */
+    const unresolvedSend = (
+      intent: Intent,
+      txHash: Hex | null,
+      kind: "buy" | "sell" | "launch" | "claim",
+      what: { coin: Address; quote: Address; symbol: string; payIn?: "native" | "quote"; sizeWei?: bigint; balanceBefore?: bigint | null; minCoins?: bigint },
+      reason: string,
+    ) => {
       book = {
         ...book,
         unresolved: [
           ...book.unresolved,
-          { txHash, kind, at: clock(), intentId: intent.id, source: intent.source, fundedBy: intent.fundedBy ?? "wallet", coin: what.info.coin, symbol: what.info.symbol, quote: what.info.quote, payIn: what.payIn, sizeWei: what.sizeWei },
+          {
+            txHash,
+            kind,
+            at: clock(),
+            intentId: intent.id,
+            source: intent.source,
+            fundedBy: intent.fundedBy ?? "wallet",
+            coin: what.coin,
+            symbol: what.symbol,
+            quote: what.quote,
+            payIn: what.payIn ?? "native",
+            sizeWei: what.sizeWei ?? 0n,
+            balanceBefore: what.balanceBefore ?? null,
+            minCoins: what.minCoins ?? 0n,
+          },
         ],
-        paused: `unresolved transaction ${txHash}: its receipt has not come yet`,
       };
-      log("unresolved", { id: intent.id, txHash, kind });
-      notify("paused", `${txHash} was sent but its receipt has not come; entries pause until it resolves (the runtime keeps asking)`);
+      log("unresolved", { id: intent.id, txHash, kind, reason });
+      notify("paused", `${kind} ${txHash ?? "(the wallet's answer was lost)"}: the outcome is not known yet (${reason}); entries pause until it resolves, and the runtime keeps checking`);
       save();
     };
+    /** A send whose outcome is unknown — no receipt, a failed execute, an App confirmation — is kept, never just failed. */
+    const unknownOutcome = (stage: string) => stage === "receipt" || stage === "execute" || stage === "confirmation";
 
     const failed = (intent: Intent, stage: string, reason: string, txHash?: Hex) => {
       if (stage === "stopped" || stage === "busy") {
@@ -414,8 +496,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         const again = guard({ ...input, impactPct: prepared.value.impactPct });
         if (!again.ok) return refused(approved, again);
         log("buy.prepared", { id: approved.id, coin, sizeWei: prepared.value.sizeWei, payIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, impactPct: prepared.value.impactPct });
+        const balanceBefore = await chain.tokenBalance(coin, wallet).catch(() => null);
         const sent = await executor.send(`buy ${prepared.value.info.symbol}`, prepared.value.call);
-        if (!sent.ok && sent.stage === "receipt" && sent.txHash) return unresolvedSend(approved, sent.txHash, "buy", { info: prepared.value.info, payIn, sizeWei: prepared.value.sizeWei });
+        if (!sent.ok && unknownOutcome(sent.stage)) {
+          return unresolvedSend(approved, sent.txHash ?? null, "buy", { ...prepared.value.info, payIn, sizeWei: prepared.value.sizeWei, balanceBefore, minCoins: prepared.value.minOut }, `${sent.stage}: ${sent.reason}`);
+        }
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const fills = executor.verifyBuy(sent.receipt, prepared.value);
         if (!fills.ok) {
@@ -451,13 +536,17 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         const coin = approved.coin!;
         const position = positionOf(book, coin);
         if (!position) return log("sell.nothing", { id: approved.id, coin });
-        if (!position.armed && !(await arm(coin, approved))) return;
+        // Every sale re-checks the allowance on chain: Permit2's lasts 30 days, so "armed" once is not armed for ever.
+        if (!(await arm(coin, approved))) return;
         const coins = (position.coins * BigInt(Math.round((approved.fraction ?? 1) * 1_000_000))) / 1_000_000n;
         const prepared = await executor.prepareSell(coin, coins, approved.slippagePct!);
         if (!prepared.ok) return failed(approved, "prepare", prepared.reason);
         log("sell.prepared", { id: approved.id, coin, coinsIn: prepared.value.coinsIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, quotedBy: prepared.value.quotedBy });
+        const balanceBefore = await chain.tokenBalance(coin, wallet).catch(() => null);
         const sent = await executor.send(`sell ${prepared.value.info.symbol}`, prepared.value.call);
-        if (!sent.ok && sent.stage === "receipt" && sent.txHash) return unresolvedSend(approved, sent.txHash, "sell", { info: prepared.value.info, payIn: "native", sizeWei: prepared.value.coinsIn });
+        if (!sent.ok && unknownOutcome(sent.stage)) {
+          return unresolvedSend(approved, sent.txHash ?? null, "sell", { ...prepared.value.info, sizeWei: prepared.value.coinsIn, balanceBefore, minCoins: prepared.value.minOut }, `${sent.stage}: ${sent.reason}`);
+        }
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const fills = executor.verifySell(sent.receipt, prepared.value);
         if (!fills.ok) {
@@ -477,9 +566,14 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
 
       if (approved.kind === "launch") {
+        // One launch at a time: while one's outcome is unknown, another would make a second coin.
+        if (book.launched || book.unresolved.some((u) => u.kind === "launch")) return log("launch.skipped", { id: approved.id, why: book.launched ? "this agent has launched its coin" : "a launch's outcome is not known yet" });
         const prepared = await executor.prepareLaunch({ ...approved.launch!, quote: approved.launch!.quote });
         if (!prepared.ok) return failed(approved, "prepare", prepared.reason);
         const sent = await executor.send(`launch ${approved.launch!.symbol}`, prepared.value.call);
+        if (!sent.ok && unknownOutcome(sent.stage)) {
+          return unresolvedSend(approved, sent.txHash ?? null, "launch", { coin: prepared.value.predicted, quote: prepared.value.quote, symbol: approved.launch!.symbol }, `${sent.stage}: ${sent.reason}`);
+        }
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const made = executor.verifyLaunch(sent.receipt);
         if (!made.ok) {
@@ -501,6 +595,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         const valueWei = await chain.quoteToBnbWei(prepared.value.quote, prepared.value.claimable);
         if (valueWei < bnbToWei(approved.claim?.minClaimBnb ?? 0)) return log("claim.small", { id: approved.id, valueWei });
         const sent = await executor.send("claim the creator's share", prepared.value.call);
+        if (!sent.ok && unknownOutcome(sent.stage)) return unresolvedSend(approved, sent.txHash ?? null, "claim", { coin, quote: prepared.value.quote, symbol: "claim" }, `${sent.stage}: ${sent.reason}`);
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const paid = executor.verifyClaim(sent.receipt);
         const paidBnb = await chain.quoteToBnbWei(prepared.value.quote, paid);
@@ -510,7 +605,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         const share = BigInt(Math.round(approved.claim?.buybackPct ?? 0));
         const quoteAmount = (paid * share) / 100n;
         if (quoteAmount > 0n && (await arm(prepared.value.quote, approved))) {
-          const bnb = weiToBnb((paidBnb * share) / 100n);
+          // Floored to the gwei, so the size the guard reads never rounds above the claimed funds.
+          const bnb = weiToBnb((((paidBnb * share) / 100n) / 1_000_000_000n) * 1_000_000_000n);
           enqueue([
             { id: `buyback-${clock()}`, kind: "buy", coin, bnb, payIn: "quote", quoteAmount, fundedBy: "claim", slippagePct: Math.min(3, agent!.limits.maxSlippagePct), reason: "buy back with the creator's claimed share", source: "preset", createdAt: clock() },
           ]);
@@ -535,6 +631,13 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           const normal = normalizeIntent(request.request, { snapshot: { feast, now: clock(), limits: agent!.limits }, source: "manual", slippagePct: slippage, ttlMs: 120_000 });
           if ("error" in normal) log("inbox.refused", { problem: normal.error });
           else enqueue([normal.intent]);
+        } else if (request?.type === "unpause") {
+          if (book.paused) {
+            log("pause.cleared", { by: "user", was: book.paused });
+            notify("started", "entries resume: the user cleared the pause");
+          }
+          book = clearPause(book);
+          save();
         } else if (request?.type === "reload") {
           const next = loadAgent(deps.home, deps.name);
           if (next?.confirmed) {

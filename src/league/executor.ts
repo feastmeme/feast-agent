@@ -22,7 +22,13 @@ import { callRefusal, gatePreview, summarizePreview, type Targets } from "./gate
  * own; the runtime books what it returns.
  */
 
-export type Stage = "allowlist" | "stopped" | "busy" | "preview" | "gate" | "execute" | "confirmation" | "receipt" | "reverted" | "mismatch" | "prepare";
+/**
+ * Where a send stopped. `execute` means the wallet's answer was lost (it threw, timed out or was
+ * unreadable), so the transaction may have gone out; `declined` means the wallet answered that it
+ * did not broadcast. The runtime keeps the first, with `receipt` and `confirmation`, as an outcome
+ * not known yet.
+ */
+export type Stage = "allowlist" | "stopped" | "busy" | "preview" | "gate" | "execute" | "declined" | "confirmation" | "receipt" | "reverted" | "mismatch" | "prepare";
 
 export type SendOutcome =
   | { ok: true; txHash: Hex; receipt: TransactionReceipt; gasWei: bigint }
@@ -165,18 +171,20 @@ export class Executor {
     if (executed.status === "PENDING_CONFIRMATION") {
       return fail("confirmation", "the wallet asks for a confirmation in the Binance App: approve or reject it there (it was not expected; nothing more is sent until the wallet is free)");
     }
-    if (executed.status !== "BROADCASTED" || !executed.txHash) return fail("execute", `execute answered ${executed.status}${executed.message ? `: ${executed.message}` : ""}`);
+    if (executed.status !== "BROADCASTED") return fail("declined", `execute answered ${executed.status}${executed.message ? `: ${executed.message}` : ""}`);
+    const txHash = executed.txHash;
+    if (!txHash) return fail("execute", "execute answered BROADCASTED with no transaction hash");
 
     let receipt: TransactionReceipt;
     try {
-      receipt = await this.deps.chain.receipt(executed.txHash, this.deps.receiptTimeoutMs ?? 120_000);
+      receipt = await this.deps.chain.receipt(txHash, this.deps.receiptTimeoutMs ?? 120_000);
     } catch (error) {
-      return fail("receipt", `no receipt for ${executed.txHash}: ${say(error)}`, { txHash: executed.txHash, sent: true });
+      return fail("receipt", `no receipt for ${txHash}: ${say(error)}`, { txHash, sent: true });
     }
-    if (receipt.status !== "success") return fail("reverted", `${executed.txHash} reverted`, { txHash: executed.txHash, sent: true });
+    if (receipt.status !== "success") return fail("reverted", `${txHash} reverted`, { txHash, sent: true });
     const gasWei = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
-    this.deps.log("receipt", { what, txHash: executed.txHash, block: receipt.blockNumber, gasUsed: receipt.gasUsed, gasWei });
-    return { ok: true, txHash: executed.txHash, receipt, gasWei };
+    this.deps.log("receipt", { what, txHash, block: receipt.blockNumber, gasUsed: receipt.gasUsed, gasWei });
+    return { ok: true, txHash, receipt, gasWei };
   }
 
   /**

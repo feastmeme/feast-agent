@@ -112,6 +112,7 @@ async function main(argv: string[]): Promise<number> {
       coin: { type: "string" },
       bnb: { type: "string" },
       home: { type: "string" },
+      "clear-pause": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -185,10 +186,18 @@ async function main(argv: string[]): Promise<number> {
         }
       }
       const extra = values["max-runtime"] ? ["--max-runtime", values["max-runtime"]] : [];
+      if (command === "resume" && statusOf(home, name).running) {
+        // Running already (an L14 pause stops entries, not the runtime): the user's resume clears the pause in place.
+        const paths = agentPaths(home, name);
+        mkdirSync(paths.inbox, { recursive: true });
+        writeJsonAtomic(join(paths.inbox, `${Date.now()}-unpause.json`), { type: "unpause" });
+        console.log(`"${name}" is running; its pause is cleared`);
+        return 0;
+      }
       if (values.detach && command !== "run") {
         const holder = walletLockHolder(home);
         if (holder) throw new Error(`the wallet is in use by agent "${holder.agent}"; stop it first`);
-        const pid = detach(home, name, extra);
+        const pid = detach(home, name, command === "resume" ? [...extra, "--clear-pause"] : extra);
         console.log(`started "${name}" in the background (pid ${pid}); feast-league status ${name}`);
         return 0;
       }
@@ -198,6 +207,7 @@ async function main(argv: string[]): Promise<number> {
         signer: signerFor(home, name),
         rpcUrl: rpc(),
         maxRuntimeMs: values["max-runtime"] ? Number(values["max-runtime"]) * 1_000 : undefined,
+        clearPause: command === "resume" || values["clear-pause"],
       });
       console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
       return outcome.exit === "error" ? 1 : outcome.exit === "refused" ? 2 : 0;
