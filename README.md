@@ -34,6 +34,71 @@ npm run demo:sandbox    # faucet → launch a coin paired with AAPLB → buy →
 
 The quickstart needs no Binance credentials. Without them the agent says "Binance Web3 API not configured" and falls back to Binance's keyless Wallet Skill, then to the stock token's PancakeSwap pool. To use the RWA Data API, set `BINANCE_WEB3_API_KEY` and `BINANCE_WEB3_API_SECRET` in `.env`, then run `npm run agent -- binance-check`.
 
+## Feast league: how a user runs this
+
+An agent that trades Feast coins for you from one sentence, with your **Binance Agentic Wallet**, under hard limits it cannot switch off. It runs on your machine. No model runs inside it: your own agent turns what you say into a strategy, and the runtime carries it out.
+
+1. **Install the skills** into your agent:
+
+   ```bash
+   npx skills add feastmeme/feast-agent
+   ```
+
+   That installs two skills. `feast-league` turns a sentence into an agent and looks after it. `feast-audit` checks a strategy script before it may run. On first use the skill installs the runtime from this repository at a pinned release into `~/.feast-league/runtime`, where you can read every line of it.
+
+2. **Sign in.** Say *"sign in to my Binance Agentic Wallet"*, compare the pairing code, and scan it in the Binance App.
+   - Then turn on Developer Mode in the App. Every trade is a Developer Mode contract call: previewed, then executed, one at a time.
+   - Keep the wallet's balance below Developer Mode's daily limit.
+
+3. **Say a sentence.** For example:
+   - *"Buy FEAST with 0.002 BNB now and every day after, and buy another 0.002 if it dips 15 %."*
+   - *"Snipe new coins with 0.005 BNB each and cut losses at 25 %."*
+
+   The skill picks one of five presets:
+
+   | Preset | What it does |
+   | --- | --- |
+   | new-coin sniper | buys a coin within seconds of its launch |
+   | momentum | rides growing volume and holders |
+   | copy | follows the wallets you name |
+   | launch-and-run | launches your coin and buys it back with its fee share |
+   | DCA / dip-buy | buys FEAST or the most-held coins on a schedule |
+
+   It asks back only what it cannot default, then shows one card: the preset, every parameter, the hard limits, and *"This trades real BNB from your wallet as soon as you say yes."*
+
+4. **Say yes.** The agent starts on your machine and needs no model to run. It reacts to new coins and trades within seconds (from the Feast indexer), and checks in on its own tick, from every 15 s to every hour.
+
+5. **Look after it.** Say *"status"*, *"make the stop 20 %"* or *"stop"*.
+   - A `STOP` file halts everything: the agent's own (`~/.feast-league/agents/<name>/STOP`), or `~/.feast-league/STOP` for every agent.
+   - The wallet's session lasts about 48 hours. When it ends, the agent pauses until you sign in again.
+
+**Your own script.** Say *"run my script ./strategy.mjs"*, or *"write me a script that …"*.
+- **The audit.** It goes through two stages: deterministic rules (no wallet or process access, no imports, no network, no secrets, bounded loops, only the runtime's `buy` / `sell` / `launch` / `read`), then a read by your agent against a fixed checklist.
+- **The sandbox.** It runs in a separate process with no files, no network, no environment and no wallet.
+- **The warm-up.** Its first five trades are forced to 0.001 BNB, and two failures in a row or any limit hit stop it.
+
+**The hard limits,** with defaults. You may tighten each one, and loosen it only to its ceiling:
+
+| Limit | Default |
+| --- | --- |
+| one trade | 0.02 BNB |
+| buys in any 24 h | 0.1 BNB |
+| lifetime budget | 0.25 BNB |
+| open positions | 5 |
+| backstop stop-loss | 50 % |
+| slippage | 10 % |
+| gas reserve | 0.003 BNB |
+
+There are also caps on exposure, daily loss, drawdown, price impact, trades per hour and failures in a row. Only Feast coins, and only our own contracts. The full list is in [`skills/feast-league/references/limits.md`](skills/feast-league/references/limits.md), and the design is in [`docs/league/PLAN.md`](docs/league/PLAN.md).
+
+```bash
+npm run league -- doctor            # the wallet, Developer Mode, the indexer and the chain
+npm run league -- plan my-agent --preset dca --set buyBnb=0.002 --sentence "…"
+npm run league -- start my-agent --yes --detach
+npm run league -- status my-agent
+npm run league -- stop my-agent
+```
+
 ## What it does
 
 | Part | Where | What |
@@ -110,21 +175,21 @@ What the live responses showed, in detail in [`docs/dx-log.md`](docs/dx-log.md):
 | Platform sink | `0x59BA4f39Ce8a405d1C08979680f051c17dC8BBFB` | where the platform's 20 points are released to (listed, not called) |
 | PancakeSwap Infinity CL pool manager | `0xa0FfB9c1CE1Fe56963B0321B32E7A0302114058b` | `getSlot0`, the coin's spot price |
 | PancakeSwap Infinity vault | `0x238a358808379702088667322f80aC48bAd5e6c4` | listed, not called |
-| PancakeSwap Infinity Universal Router | `0xd9C500DfF816a1Da21A48A732d3498Bf09dc9AEB` | the mainnet trade route (not driven by this release) |
-| Permit2 | `0x31c2F6fcFf4F8759b3Bd5Bf0e1084A055615c768` | the mainnet trade route (not driven by this release) |
-| MixedQuoter | `0x2dCbF7B985c8C5C931818e4E107bAe8aaC8dAB7C` | the mainnet trade route (not driven by this release) |
+| PancakeSwap Infinity Universal Router | `0xd9C500DfF816a1Da21A48A732d3498Bf09dc9AEB` | the mainnet trade route (the league runtime's buys and sales) |
+| Permit2 | `0x31c2F6fcFf4F8759b3Bd5Bf0e1084A055615c768` | the mainnet trade route (a coin's allowance for the router) |
+| MixedQuoter | `0x2dCbF7B985c8C5C931818e4E107bAe8aaC8dAB7C` | the mainnet trade route (quotes, simulated as the trader) |
 | WBNB | `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` | the native quote |
 | USDT / WBNB v3 pool | `0x172fcD41E0913e95784454622d1c3724f546f849` | BNB's dollar price |
 
 On the sandbox (chain 56096) the agent trades through `FeastSandboxRouter` `0xa8c7180912D4464fa66713758Fa7eB3418b81D01`. Its other addresses are in [`src/sdk/networks.ts`](src/sdk/networks.ts).
 
-**Mainnet is read-only in this release.** `quotes`, `quote`, `split`, `payouts` and `launch --dry-run` work against chain 56. That read path was verified on 2026-10-10: the factory has code, the pricer listed eleven quotes (WBNB and ten bStocks), and the factory's `predictCoin` matches the SDK's local CREATE2 port. `npm run test:mainnet-read` repeats the check. Any write on chain 56 is refused in the SDK, and no flag changes that.
+**The SDK's own signer stays on the sandbox.** `quotes`, `quote`, `split`, `payouts` and `launch --dry-run` work against chain 56. That read path was verified on 2026-10-10: the factory has code, the pricer listed eleven quotes (WBNB and ten bStocks), and the factory's `predictCoin` matches the SDK's local CREATE2 port. `npm run test:mainnet-read` repeats the check. A write on chain 56 through the SDK's private-key signer is refused, and no flag changes that. On BNB Smart Chain, only the league runtime sends, and only through the Binance Agentic Wallet behind its hard limits. It builds its calldata with the SDK's `infinity.ts`, which is held byte for byte to the feast.meme site's encoder.
 
 ## No private keys, ever
 
 - The agent signs with `FEAST_AGENT_PRIVATE_KEY`, read from the environment or `.env`. `.env` is git-ignored.
 - `npm run faucet` creates a **throwaway sandbox** key only when none is set. It writes the key into `.env` with mode 600 and never prints it; only the address is printed.
-- Do not put a key that holds real money in `.env`. This release never sends a transaction to BNB Smart Chain anyway.
+- Do not put a key that holds real money in `.env`: the private-key signer sends only on the sandbox. The league never holds a key; it signs through the Binance Agentic Wallet.
 - `BINANCE_WEB3_API_SECRET` signs requests and is never sent. The Binance recorder strips credentials from what it saves.
 - Nothing in this repository is a secret. Tests generate their keys at run time.
 
@@ -135,11 +200,12 @@ npm test                 # offline: encoders and decoders, config, signing, Bina
 npm run typecheck        # tsc --noEmit, strict
 npm run test:sandbox     # FEAST_AGENT_SANDBOX=1: the whole loop against the live sandbox
 npm run test:mainnet-read  # FEAST_AGENT_MAINNET=1: chain 56 read path (factory code, quotes, predictCoin); sends nothing
+npm run league -- preview buy --coin FEAST --bnb 0.001   # the wallet's preview of a call shape; nothing is executed
 ```
 
 ## Limits
 
-- On BNB Smart Chain, trading goes through PancakeSwap Infinity's Universal Router with Permit2. This release does not drive that route. The Feast read API's `/api/v1/quote` prices mainnet trades.
+- On BNB Smart Chain, trading goes through PancakeSwap Infinity's Universal Router with Permit2. Only the league runtime drives that route, through the Binance Agentic Wallet. The CLI's `buy` and `sell` and the MCP tools still trade on the sandbox only.
 - `payouts` reads the Feast public read API. It reports only settled payouts (claims, buy-back-and-burns, platform releases), and only as far as its index has caught up.
 - `referencePrice` is derived from the on-chain token price (live: exactly `tokenPrice ÷ tokenToShareRatio`), not quoted by an exchange. A gap to the listed share appears only when the Wallet Skill publishes `stockInfo.price`, during US trading hours.
 
