@@ -225,6 +225,19 @@ describe("③ copy", () => {
     expect(run("copy", snap({ now: T + 6_000 }), s3, { wallets: [LEADER] })).toHaveLength(0);
   });
 
+  it("fails closed: no copy when the chase cannot be measured (either price unknown)", () => {
+    const s1 = {};
+    const noLeaderPrice: StrategyEvent = { ...(leaderTrade("buy") as Extract<StrategyEvent, { type: "trade" }>), priceBnb: null };
+    run("copy", snap(), s1, { wallets: [LEADER] }, noLeaderPrice);
+    expect(run("copy", snap({ now: T + 6_000, coins: [row({ priceBnb: 1 })] }), s1, { wallets: [LEADER] })).toHaveLength(0);
+    const s2 = {};
+    run("copy", snap(), s2, { wallets: [LEADER] }, leaderTrade("buy"));
+    expect(run("copy", snap({ now: T + 6_000, coins: [row({ priceBnb: null })] }), s2, { wallets: [LEADER] })).toHaveLength(0);
+    const s3 = {};
+    run("copy", snap(), s3, { wallets: [LEADER] }, leaderTrade("buy"));
+    expect(run("copy", snap({ now: T + 6_000 }), s3, { wallets: [LEADER] })).toHaveLength(0);
+  });
+
   it("sells a copied coin when its leader sells", () => {
     const state: Record<string, unknown> = { mine: { [COIN.toLowerCase()]: T - MIN } };
     const out = run("copy", snap({ positions: [position()] }), state, { wallets: [LEADER] }, leaderTrade("sell"));

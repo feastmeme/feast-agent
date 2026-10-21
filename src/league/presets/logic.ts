@@ -173,8 +173,13 @@ function copy(): Strategy {
         continue;
       }
       if (now - item.due > 10 * MINUTE || api.read.position(item.coin)) continue;
+      // Fail closed: copy only when the chase can be measured and is inside the limit.
       const price = api.read.coin(item.coin)?.priceBnb ?? null;
-      if (item.leaderPrice && price && price > item.leaderPrice * (1 + p.maxChasePct / 100)) {
+      if (!item.leaderPrice || item.leaderPrice <= 0 || !price || price <= 0) {
+        api.log("copy: skipped, the price move since the leader's fill cannot be measured");
+        continue;
+      }
+      if (price > item.leaderPrice * (1 + p.maxChasePct / 100)) {
         api.log(`copy: skipped, the price is ${(((price - item.leaderPrice) / item.leaderPrice) * 100).toFixed(1)}% above the leader's fill`);
         continue;
       }
