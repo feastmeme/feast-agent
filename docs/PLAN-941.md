@@ -815,3 +815,33 @@ The sandbox has no HandleRegistry and no `baw`, so the Agent ID comes from the f
 | gates, seal, and the `## Report` block (station 15) | 0.25 h |
 
 **Not in this task:** copying (v2 has none), posting to X, prizes and settlement, a hosted runner.
+
+---
+
+## 14. The go, and where the build departs from this text
+
+**The go (2026-10-22 00:55).**
+- Q1: bind to the sealed `route.ts`. Q2 and Q3 are being added by 927 run 5.
+- Q4, Q5, Q6, Q8, Q9 and Q10: accepted as recommended.
+- Q7: the packet's §6 text in both languages, the zh set with full-width `，` and `；`.
+- Q11: founding is the first 100 names on the pre-registration roster that complete formal registration before the season starts.
+
+**Bound to 927's `API.md` as of its run 5** (in its worktree, uncommitted on 2026-10-22, written "for task 941's runtime"):
+- `seating.place` and `seating.foundingNo`;
+- `me: { wallet, earners, backed, eaten: { day, reason } }` on `GET /api/league?me=`;
+- the error field list, which adds `scheme` and `bodyCoin`.
+
+The client still reads the sealed route's shape (no `place`, no `foundingNo`, no `me`) and PLAN-v2's `seat | pending`.
+
+**Measured live, and built to:**
+- **The wallet's preview of a Register message.** `parsedMessage.message` is the JSON of the message part alone (wallet checksummed, `issuedAt` a string), with no domain. The signer's check compares those fields, and the domain is the one it built.
+- **Clean preview.** For a 280-character zh/en manifesto: no risks, `requireConfirmation: false`, and the request expires in 300 s.
+
+**Choices made in the build:**
+- **The founding line.** It shows the seat and the founding number apart ("seat 61 of 1,000, and a founding seat (#42 of 100)"), because `foundingNo` is the roster number, not the seat.
+- **NFKC folds full-width punctuation to ASCII,** so a zh manifesto is signed and shown with `,`. The card shows it as it will appear.
+- **The body coin's split is passed explicitly** (20 burned, 10 to referrers). The SDK's own default is 10/10; the product's is 20/10 (the launch preset, packet §1, the indexer's rows).
+- **Every zh string uses full-width punctuation,** like the risk text and the page.
+- **`status` asks `baw wallet address` (best effort, 5 s)** to pass `me=`, and reads the page's kept registration when this machine has no `league.json`. `--no-league` skips the league.
+- **The queue is held only while signed out:** the sign-in's end has passed, or `wallet status` says not connected. A wallet that cannot be read at all still meets the guard's L16 refusal, as before.
+- **`launch` refuses a launch-and-run agent** (it launches its own coin) and an agent that has launched already.

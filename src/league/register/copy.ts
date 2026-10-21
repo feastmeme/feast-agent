@@ -130,7 +130,7 @@ function bodyCoinRow(view: CheckView, lang: Lang): string {
     case "not-yours":
       return zh ? `${short(plan.coin)} 不是这个钱包发的` : `${short(plan.coin)} wasn't launched by this wallet`;
     case "bad-address":
-      return zh ? `${quoted(plan.given, lang)} 不是一个地址` : `${quoted(plan.given, lang)} is not an address`;
+      return zh ? `${quoted(plan.given, lang)}不是一个地址` : `${quoted(plan.given, lang)} is not an address`;
     case "unreadable":
       return zh ? "暂时没能在链上核对是谁发的币" : "the chain couldn't confirm who launched it just now";
     case "ask-address":
@@ -343,7 +343,7 @@ export function signingLine(what: "pending" | "declined" | "expired" | "local-ch
 }
 
 export function previewMismatch(reason: string, lang: Lang): string {
-  return lang === "zh" ? `钱包预览和联赛消息对不上，或者提示了风险，所以没有签名：${reason}。` : `Your wallet's preview didn't match the league message, or it flagged a risk, so nothing was signed: ${reason}.`;
+  return lang === "zh" ? `钱包预览和联赛消息对不上，或者提示了风险，所以没有签名。（${reason}）` : `Your wallet's preview didn't match the league message, or it flagged a risk, so nothing was signed: ${reason}.`;
 }
 
 // --- F. the answer -------------------------------------------------------------------------
@@ -463,7 +463,7 @@ export function sessionNotice(code: SessionCode, endMs: number | null, lang: Lan
 // --- what the commands say when something is missing ---------------------------------------
 
 export function xHandleProblem(given: string, lang: Lang): string {
-  return lang === "zh" ? `${quoted(given, lang)} 不像 X 账号：1–15 个字母、数字或下划线，可以带 @。` : `${quoted(given, lang)} isn't an X handle: 1–15 letters, digits or underscores, with or without @.`;
+  return lang === "zh" ? `${quoted(given, lang)}不像 X 账号：1–15 个字母、数字或下划线，可以带 @。` : `${quoted(given, lang)} isn't an X handle: 1–15 letters, digits or underscores, with or without @.`;
 }
 
 export function bodyCoinProblem(plan: BodyCoinPlan, lang: Lang): string {
@@ -478,7 +478,7 @@ export function bodyCoinProblem(plan: BodyCoinPlan, lang: Lang): string {
     case "not-yours":
       return zh ? `${short(plan.coin)} 不是这个钱包发的。请选一个这个钱包发的币。` : `${short(plan.coin)} wasn't launched by this wallet. Pick one this wallet launched.`;
     case "bad-address":
-      return zh ? `${quoted(plan.given, lang)} 不是一个地址。` : `${quoted(plan.given, lang)} is not an address.`;
+      return zh ? `${quoted(plan.given, lang)}不是一个地址。` : `${quoted(plan.given, lang)} is not an address.`;
     case "unreadable":
       return zh ? "暂时没能在链上核对是谁发的币。没有签名，也没有发送任何东西。过一分钟再试。" : "The chain couldn't confirm who launched the coin just now. Nothing was signed or sent. Try again in a minute.";
     case "ask-address":
