@@ -79,3 +79,80 @@ describe("the runtime loop", () => {
     expect(walletLockHolder(home)).toBeNull();
   });
 });
+
+describe("a sent transaction whose receipt is late", () => {
+  it("pauses entries, keeps asking, and books the late fill — position, ledger and arming — when it lands", async () => {
+    const { encodeAbiParameters, encodeEventTopics } = await import("viem");
+    const { hookAbi } = await import("../sdk/abi.ts");
+    const { wrappedNativeAbi } = await import("../sdk/venue-abi.ts");
+    const { MAINNET } = await import("../sdk/networks.ts");
+    const { readLedger } = await import("./store.ts");
+    const { parseBook } = await import("./book.ts");
+    const { readFileSync } = await import("node:fs");
+    const FEAST = MAINNET.platformCoin!.address;
+    const WBNB = MAINNET.contracts.wrappedNative;
+    const router = MAINNET.trade.kind === "infinity" ? MAINNET.trade.router : WALLET;
+    const HASH = `0x${"cd".repeat(32)}` as const;
+    const home = mkdtempSync(join(tmpdir(), "feast-league-test-"));
+    homes.push(home);
+    const planned = planAgent({ name: "late", preset: "dca", params: { buyBnb: 0.002 } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const calls: string[] = [];
+    const clean = { success: true, data: { requestId: "r1", simulationResult: { simulationCode: "000000000", simulationErrorDetail: null }, risks: { riskDetails: [], addresses: {}, riskBehaviors: [] }, requireConfirmation: false, expiresAt: Date.now() + 600_000 } };
+    const signer: Signer = {
+      status: async () => ({ connected: true, status: "CONNECTED" }),
+      address: async () => WALLET,
+      settings: async () => ({ devModeEnabled: true, devModeExpiresAt: null, devModeDailyLimitUsd: 1000, devModeQuotaUsedUsd: 0, balanceExceeded: false, sessionExpireTime: null, inactiveSignOutTime: null, abnormalTxnHandling: null }) as WalletSettings,
+      txLock: async () => "UNLOCKED",
+      preview: async () => (calls.push("preview"), clean),
+      execute: async () => (calls.push("execute"), { status: "BROADCASTED", txHash: HASH, orderId: "o", message: null }),
+      signMessagePreview: async () => ({}),
+    };
+    const coins = 10_000n * 10n ** 18n;
+    const trade = { address: MAINNET.contracts.hook, topics: encodeEventTopics({ abi: hookAbi, eventName: "Trade", args: { coin: FEAST, quote: WBNB, payer: WALLET } }), data: encodeAbiParameters([{ type: "bool" }, { type: "uint256" }, { type: "uint256" }, { type: "uint160" }, { type: "uint256" }], [true, coins, 2n * 10n ** 15n, 1n, 2n * 10n ** 13n]) };
+    const deposit = { address: WBNB, topics: encodeEventTopics({ abi: wrappedNativeAbi, eventName: "Deposit", args: { dst: router } } as never), data: encodeAbiParameters([{ type: "uint256" }], [2n * 10n ** 15n]) };
+    let landed = false;
+    const key = { currency0: FEAST, currency1: WBNB, hooks: MAINNET.contracts.hook, poolManager: MAINNET.contracts.poolManager, fee: 100, parameters: "0x0000000000000000000000000000000000000000000000000000000000c80cc1" };
+    const chain = {
+      client: {
+        simulateContract: async () => ({ result: [coins, 0n] }),
+        getTransactionReceipt: async () => (landed ? { status: "success", logs: [trade, deposit], gasUsed: 1n, effectiveGasPrice: 1n, blockNumber: 2n } : null),
+      },
+      coinInfo: async () => ({ coin: FEAST, quote: WBNB, creator: WALLET, poolId: MAINNET.platformCoin!.poolId, coinIsCurrency0: true, symbol: "FEAST", name: "Feast" }),
+      isFeastCoin: async () => true,
+      poolKey: async () => key,
+      hops: () => [],
+      spotQuotePerCoinE18: async () => 2n * 10n ** 11n,
+      chainTime: async () => 1n,
+      receipt: async () => {
+        throw new Error("timed out");
+      },
+      balance: async () => 10n ** 18n,
+      bnbUsd: async () => 600,
+      markWei: async () => 2n * 10n ** 15n,
+      quoteBnbE18: async () => 10n ** 18n,
+      quoteToBnbWei: async (_q: unknown, amount: bigint) => amount,
+      tokenBalance: async () => coins,
+      allowance: async () => 2n ** 256n - 1n,
+      permit2Allowance: async () => ({ amount: 2n ** 160n - 1n, expiration: 2 ** 47 }),
+    } as unknown as LeagueChain;
+    const running = runAgent({ home, name: "late", signer, chain, fetch: (async () => new Response(JSON.stringify({ data: [] }))) as unknown as typeof fetch, loopMs: 50, unresolvedCheckMs: 100, pollMs: 10_000_000 });
+    const until = async (check: () => boolean) => {
+      for (let i = 0; i < 100 && !check(); i += 1) await new Promise((r) => setTimeout(r, 50));
+    };
+    const state = () => (() => { try { return parseBook(readFileSync(agentPaths(home, "late").state, "utf8")); } catch { return null; } })();
+    await until(() => state()?.paused?.startsWith("unresolved") === true);
+    expect(state()?.paused).toMatch(/unresolved transaction/);
+    expect(Object.keys(state()?.positions ?? {})).toHaveLength(0);
+    landed = true;
+    await until(() => Object.keys(state()?.positions ?? {}).length === 1 && state()?.positions[FEAST.toLowerCase()]?.armed === true);
+    writeStop(agentPaths(home, "late").stop, "stop requested by the user");
+    await running;
+    const book = state()!;
+    expect(book.positions[FEAST.toLowerCase()]).toMatchObject({ coins, costWei: 2n * 10n ** 15n, armed: true });
+    expect(book.paused).toBeNull();
+    expect(readLedger(home).spentWei).toBe(2n * 10n ** 15n);
+    expect(calls.filter((c) => c === "execute")).toHaveLength(1);
+  });
+});

@@ -52,6 +52,8 @@ export type RuntimeDeps = {
   only?: IntentRequest[];
   /** The chain reads (tests pass a fake). */
   chain?: LeagueChain;
+  /** How often a sent transaction whose receipt never came is asked for again. */
+  unresolvedCheckMs?: number;
   loopMs?: number;
   pollMs?: number;
   preflightMs?: number;
@@ -208,9 +210,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         params: presetAgent.params,
         wants: (state) => strategy.wants?.(state) ?? [],
         async call(fn, snapshot, state, event) {
-          const ttl = fn === "onEvent" ? 30_000 : presetAgent.tickSeconds * 1_000;
+          const ttl = fn === "onEvent" ? 30_000 : agent!.tickSeconds * 1_000;
           const logs: string[] = [];
-          const { api, intents, problems } = makeApi(snapshot, { params: presetAgent.params, state, source: "preset", ttlMs: ttl, log: (t) => logs.push(t) });
+          // The agent's current parameters: a `feast-league set` reloads them into a running runtime.
+          const { api, intents, problems } = makeApi(snapshot, { params: agent!.params, state, source: "preset", ttlMs: ttl, log: (t) => logs.push(t) });
           if (fn === "onEvent" && event) strategy.onEvent?.(api, event, extras);
           else strategy.onTick(api, extras);
           return { intents, problems, logs, state };
@@ -278,6 +281,52 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (verdict.halt) halt(`${verdict.limit === "W" ? "warm-up" : verdict.limit}: ${verdict.message}`);
       save();
     };
+    /**
+     * A transaction that was broadcast but whose receipt never came: it may still land. Its hash is
+     * kept, entries pause, and every tick asks for the receipt again — a late fill is booked like any
+     * other, so a position never exists on chain without the book (and its exits) knowing.
+     */
+    type Unresolved = { txHash: Hex; kind: "buy" | "sell"; at: number; buy?: Parameters<typeof executor.verifyBuy>[1]; sell?: Parameters<typeof executor.verifySell>[1]; intent: Intent };
+    const unresolved: Unresolved[] = [];
+    const resolvePending = async () => {
+      for (const item of [...unresolved]) {
+        const receipt = await chain.client.getTransactionReceipt({ hash: item.txHash }).catch(() => null);
+        if (!receipt) continue;
+        unresolved.splice(unresolved.indexOf(item), 1);
+        const gasWei = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
+        if (receipt.status !== "success") {
+          log("unresolved.reverted", { txHash: item.txHash });
+          notify("trade", `${item.txHash} reverted after its receipt was late; nothing was traded`);
+        } else if (item.kind === "buy" && item.buy) {
+          const fills = executor.verifyBuy(receipt, item.buy);
+          if (fills.ok) {
+            const bnbIn = item.buy.payIn === "native" ? item.buy.sizeWei : await chain.quoteToBnbWei(item.buy.info.quote, fills.quoteIn);
+            book = recordBuy(book, { coin: item.buy.info.coin, symbol: item.buy.info.symbol, quote: item.buy.info.quote, coinsOut: fills.coinsOut, bnbInWei: bnbIn, gasWei, at: clock(), fundedBy: item.intent.fundedBy ?? "wallet", ownLaunch: false, source: item.intent.source });
+            if ((item.intent.fundedBy ?? "wallet") === "wallet") addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: item.txHash });
+            log("buy.filled", { id: item.intent.id, txHash: item.txHash, late: true, coinsOut: fills.coinsOut, bnbInWei: bnbIn, payerIsWallet: true });
+            notify("trade", `a late receipt: bought ${item.buy.info.symbol} for ${weiToBnb(bnbIn)} BNB (${item.txHash})`);
+            enqueue([{ id: `arm-${clock()}`, kind: "arm", coin: item.buy.info.coin, reason: "arm the exit", source: "runtime", createdAt: clock() }]);
+          } else halt(`receipt mismatch on ${item.txHash}: ${fills.reason}`);
+        } else if (item.kind === "sell" && item.sell) {
+          const fills = executor.verifySell(receipt, item.sell);
+          if (fills.ok) {
+            book = recordSell(book, { coin: item.sell.info.coin, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, gasWei, at: clock() });
+            log("sell.filled", { id: item.intent.id, txHash: item.txHash, late: true, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, payerIsWallet: true });
+            notify("trade", `a late receipt: sold ${item.sell.info.symbol} for ${weiToBnb(fills.bnbOutWei)} BNB (${item.txHash})`);
+          } else halt(`receipt mismatch on ${item.txHash}: ${fills.reason}`);
+        }
+        if (unresolved.length === 0 && book.paused?.startsWith("unresolved")) book = { ...book, paused: null };
+        save();
+      }
+    };
+    const unresolvedSend = (intent: Intent, txHash: Hex, kind: "buy" | "sell", prepared: { buy?: Unresolved["buy"]; sell?: Unresolved["sell"] }) => {
+      unresolved.push({ txHash, kind, at: clock(), intent, ...prepared });
+      book = { ...book, paused: `unresolved transaction ${txHash}: its receipt has not come yet` };
+      log("unresolved", { id: intent.id, txHash, kind });
+      notify("paused", `${txHash} was sent but its receipt has not come; entries pause until it resolves (the runtime keeps asking)`);
+      save();
+    };
+
     const failed = (intent: Intent, stage: string, reason: string, txHash?: Hex) => {
       if (stage === "stopped" || stage === "busy") {
         log("intent.dropped", { id: intent.id, stage, reason });
@@ -360,6 +409,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (!again.ok) return refused(approved, again);
         log("buy.prepared", { id: approved.id, coin, sizeWei: prepared.value.sizeWei, payIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, impactPct: prepared.value.impactPct });
         const sent = await executor.send(`buy ${prepared.value.info.symbol}`, prepared.value.call);
+        if (!sent.ok && sent.stage === "receipt" && sent.txHash) return unresolvedSend(approved, sent.txHash, "buy", { buy: prepared.value });
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const fills = executor.verifyBuy(sent.receipt, prepared.value);
         if (!fills.ok) {
@@ -401,6 +451,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (!prepared.ok) return failed(approved, "prepare", prepared.reason);
         log("sell.prepared", { id: approved.id, coin, coinsIn: prepared.value.coinsIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, quotedBy: prepared.value.quotedBy });
         const sent = await executor.send(`sell ${prepared.value.info.symbol}`, prepared.value.call);
+        if (!sent.ok && sent.stage === "receipt" && sent.txHash) return unresolvedSend(approved, sent.txHash, "sell", { sell: prepared.value });
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const fills = executor.verifySell(sent.receipt, prepared.value);
         if (!fills.ok) {
@@ -497,6 +548,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     let nextPoll = 0;
     let nextTick = 0;
     let nextPreflight = clock() + (deps.preflightMs ?? 300_000);
+    let nextUnresolvedCheck = 0;
     // The coins marked fresh from the chain in a snapshot: deduplicated and capped, whatever a strategy asks for.
     const watchList = () => [...new Set([...loaded!.meta.watch, ...loaded!.wants(strategyState)].map((w) => w.toLowerCase()))].slice(0, 20);
     const watched = () => new Set([...Object.keys(book.positions), ...loaded!.meta.watch.map((w) => (w.toUpperCase() === "FEAST" ? feast.toLowerCase() : w.toLowerCase()))]);
@@ -562,6 +614,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         } catch (error) {
           log("events.failed", { reason: String((error as Error).message).slice(0, 200) });
         }
+      }
+      if (unresolved.length > 0 && now >= nextUnresolvedCheck) {
+        nextUnresolvedCheck = now + (deps.unresolvedCheckMs ?? 15_000);
+        await resolvePending().catch((error: unknown) => log("unresolved.check.failed", { reason: String((error as Error).message) }));
       }
       if (now >= nextTick) {
         nextTick = now + tickMs();

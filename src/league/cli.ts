@@ -32,7 +32,7 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   card <name>                     print the confirmation card again
   start <name> --yes [--detach]   the user said yes: confirm and start (real BNB, no practice mode)
   stop <name> | --all             write the stop file and wait for the agent to halt
-  resume <name> [--detach]        remove the stop file and start again
+  resume <name> [--all] [--detach] remove the stop file (--all: the global one too) and start again
   status <name> [--json]          the book, the limits and the latest notifications
   set <name> [--set k=v]… [--limit k=v]… [--tick s] (--yes | --review)
                                   change a confirmed agent (--review may only tighten)
@@ -162,7 +162,13 @@ async function main(argv: string[]): Promise<number> {
       const name = need(args[0], "an agent name");
       let agent = loadAgent(home, name);
       if (!agent) throw new Error(`no agent "${name}": plan it first`);
-      if (command === "resume") removeStop(agentPaths(home, name).stop);
+      if (command === "resume") {
+        removeStop(agentPaths(home, name).stop);
+        if (existsSync(join(home, "STOP"))) {
+          if (!values.all) throw new Error("the global stop file is present too (feast-league stop --all wrote it); resume with --all to remove it");
+          removeStop(join(home, "STOP"));
+        }
+      }
       if (command !== "run" && !agent.confirmed) {
         if (!values.yes) {
           console.log(`${renderCard(agent)}\n\nNot started: this needs the user's explicit yes (--yes).`);
