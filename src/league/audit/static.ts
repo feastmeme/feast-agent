@@ -14,6 +14,12 @@ import { parse } from "acorn";
  * This file only reads the script as text: it never imports, evaluates or runs
  * it. A pass here is the first of two; the second is a model read by the user's
  * own agent, against `skills/feast-audit/references/checklist.md`.
+ *
+ * It is a gate, not the boundary. No static reading catches every string a
+ * script can build at run time; where it cannot read a key it refuses, and what
+ * it still cannot see meets the sandbox (script/sandbox.ts): a separate process
+ * under Node's permission model, with no environment, no file but its own, no
+ * child processes, code generation from strings disabled and frozen intrinsics.
  */
 
 export type RuleId = "A1" | "A2" | "A3" | "A4" | "A5" | "A6" | "A7" | "A8" | "A9";
@@ -151,6 +157,11 @@ function readableKey(node: Node): boolean {
       if (!["+", "-", "*", "/", "%"].includes(String(node.operator))) return false;
       const isText = (n: Node) => (n.type === "Literal" && typeof n.value === "string") || n.type === "TemplateLiteral";
       if (isText(node.left as Node) || isText(node.right as Node)) return fold(node) !== null;
+      // `+` may join two strings held in variables: only `i + 1`, a number literal on one side, is read as arithmetic.
+      if (node.operator === "+") {
+        const isNumber = (n: Node) => n.type === "Literal" && typeof n.value === "number";
+        if (!isNumber(node.left as Node) && !isNumber(node.right as Node)) return false;
+      }
       return readableKey(node.left as Node) && readableKey(node.right as Node);
     }
     case "TemplateLiteral":
@@ -380,6 +391,12 @@ export function auditSource(source: string, options: { maxTradeBnb?: number } = 
         if (node.id) recursion(String((node.id as Node).name), node);
         break;
       case "CallExpression": {
+        // A join of literals folds like a `+` does: read it wherever it appears.
+        const joined = fold(node);
+        if (joined !== null) {
+          checkString(joined, node);
+          checkProperty(joined, node);
+        }
         const callee = node.callee as Node;
         const isBuy = callee.type === "MemberExpression" && isApi(callee.object as Node) && String((callee.property as Node).name) === "buy";
         const arg = (node.arguments as Node[])[0];

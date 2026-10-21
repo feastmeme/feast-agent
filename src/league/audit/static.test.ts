@@ -168,6 +168,13 @@ describe("obfuscation does not hide a forbidden word", () => {
     refusedBy(script(`const k = atob("Y29uc3RydWN0b3I="); api.log(k);`), "A5");
     refusedBy(script(`const x = ({})[api.read.now() > 0 ? "a" : "b"];`), "A5");
     refusedBy(script(`const x = ({})[api.state.k || "a"];`), "A5");
+    refusedBy(script(`const a = "con"; const b = "structor"; const x = ({})[a + b];`), "A5");
+    refusedBy(script("const a = 'con'; const b = 'structor'; const x = ({})[`${a}${b}`];"), "A5");
+  });
+
+  it("folds a join of literals wherever it appears, not only at keys", () => {
+    refusedBy(script(`api.log(["ba", "w"].join(""));`), "A1");
+    refusedBy(script(`const k = ["con", "structor"].join("");`), "A5");
   });
 
   it("checks every key of an object or a destructuring pattern", () => {
