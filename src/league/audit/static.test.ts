@@ -101,6 +101,8 @@ describe("A5 no dynamic code, no reaching for globals", () => {
     refusedBy(script(`const p = ({}).__proto__;`), "A5");
     refusedBy(script(`const r = Reflect.ownKeys({});`), "A5");
     refusedBy(script(`const w = WebAssembly;`), "A5");
+    refusedBy(script(`const proto = Object.getPrototypeOf(api);`), "A5");
+    refusedBy(script(`Object.defineProperty(api, "x", {});`), "A5");
   });
 });
 
