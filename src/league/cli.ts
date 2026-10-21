@@ -20,9 +20,44 @@ import { Executor } from "./executor.ts";
 import { guard } from "./guard.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
 import { PRESETS, PRESET_IDS } from "./presets/specs.ts";
+import { BODY_COIN_QUOTE, BODY_COIN_SPLIT, bodyCoinNames } from "./register/claims.ts";
+import {
+  agentIdUnreadable,
+  alreadyLaunchedLine,
+  bodyCoinProblem,
+  checkCard,
+  duration,
+  langOf,
+  launchCard,
+  launchedLine,
+  launchFailedLine,
+  launchPresetOwnLine,
+  manifestoProblem,
+  nextStepLine,
+  noAgentIdCard,
+  noAnswerLine,
+  preregLine,
+  previewMismatch,
+  queuedLaunchLine,
+  refusalLine,
+  registerCard,
+  seatedLine,
+  sessionNotice,
+  signingLine,
+  utc8,
+  walletNotReady,
+  xHandleProblem,
+  type Lang,
+  type SessionCode,
+} from "./register/copy.ts";
+import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
+import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
+import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
-import { agentPaths, appendJsonl, leagueHome, readLedger, removeStop, stopReason, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
-import { normalizeIntent } from "./strategy.ts";
+import { standingLines } from "./season-card.ts";
+import { sessionView } from "./session.ts";
+import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
+import { normalizeIntent, type IntentRequest } from "./strategy.ts";
 
 const HELP = `feast-league — run a Feast agent with your Binance Agentic Wallet
 
@@ -33,7 +68,8 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   start <name> --yes [--detach]   the user said yes: confirm and start (real BNB, no practice mode)
   stop <name> | --all             write the stop file and wait for the agent to halt
   resume <name> [--all] [--detach] remove the stop file (--all: the global one too) and start again
-  status <name> [--json]          the book, the limits and the latest notifications
+  status <name> [--json] [--lang en|zh] [--no-league]
+                                  the book, the limits, what is new since the last status, and the league
   set <name> [--set k=v]… [--limit k=v]… [--tick s] (--yes | --review)
                                   change a confirmed agent (--review may only tighten)
   review <name>                   the last hour, as JSON, for the optional hourly review
@@ -41,6 +77,12 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   the script audit: static rules, then the model read's verdict
   buy <name> <coin|FEAST> <bnb>   one guarded buy, through the agent's limits
   sell <name> <coin|FEAST> <fraction|all>
+  register <name> --check [--body-coin 0x…] [--lang en|zh]
+                                  the league registration check: Agent ID, body coin, seat (reads only)
+  register <name> --manifesto "…" [--body-coin 0x…] [--x handle] [--pending] [--lang en|zh] [--yes]
+                                  the registration card; with --yes (the user's word): sign (no gas) and send to the league page
+  launch <name> [--name "…"] [--symbol T] [--quote WBNB|<stock>] [--description "…"] [--lang en|zh] [--yes]
+                                  the body coin's card; with --yes: one launch through the agent's limits
   preview <buy|approve|permit2|sell|claim|create|register> [--coin c] [--bnb x]
                                   preview-only checks: the wallet's answer, nothing executed
   agents                          the agents on this machine
@@ -113,6 +155,17 @@ async function main(argv: string[]): Promise<number> {
       bnb: { type: "string" },
       home: { type: "string" },
       "clear-pause": { type: "boolean", default: false },
+      check: { type: "boolean", default: false },
+      manifesto: { type: "string" },
+      "body-coin": { type: "string" },
+      x: { type: "string" },
+      pending: { type: "boolean", default: false },
+      lang: { type: "string" },
+      name: { type: "string" },
+      symbol: { type: "string" },
+      quote: { type: "string" },
+      description: { type: "string" },
+      "no-league": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -227,6 +280,9 @@ async function main(argv: string[]): Promise<number> {
       const s = statusOf(home, name);
       if (!s.agent) throw new Error("no such agent");
       const view = s.book ? bookView(s.book, undefined, Date.now()) : null;
+      const lang = langOf(values.lang);
+      const unread = unreadNotifications(home, name, true);
+      const league = values["no-league"] ? null : await leagueStanding(home, lang).catch(() => null);
       const data = {
         name,
         running: s.running,
@@ -244,6 +300,8 @@ async function main(argv: string[]): Promise<number> {
         paused: s.book?.paused ?? null,
         warmup: s.book?.warmup ?? null,
         notifications: s.notifications,
+        unread,
+        league: league?.data ?? null,
       };
       print(json, data, () =>
         [
@@ -252,8 +310,8 @@ async function main(argv: string[]): Promise<number> {
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...(data.paused ? [`paused: ${data.paused}`] : []),
           ...(data.warmup ? [`warm-up: ${data.warmup.trades} of 5 trades`] : []),
-          "latest:",
-          ...s.notifications.slice(-8).map((n) => `  ${(n as { at: string }).at} ${(n as { kind: string }).kind}: ${(n as { text: string }).text}`),
+          ...(unread.length > 0 ? ["new since the last status:", ...unread.slice(-20).map((n) => noticeLine(n, lang))] : ["latest:", ...s.notifications.slice(-8).map((n) => noticeLine(n, lang))]),
+          ...(league ? ["", ...league.lines] : []),
         ].join("\n"),
       );
       return 0;
@@ -354,6 +412,10 @@ async function main(argv: string[]): Promise<number> {
       console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
       return outcome.exit === "finished" ? 0 : 2;
     }
+    case "register":
+      return registerCommand(home, checkAgentName(need(args[0], "an agent name")), values, json);
+    case "launch":
+      return launchCommand(home, checkAgentName(need(args[0], "an agent name")), values, json);
     case "preview":
       return previewCheck(home, need(args[0], "a check"), values.coin, values.bnb, json);
     case "agents": {
@@ -374,7 +436,7 @@ async function main(argv: string[]): Promise<number> {
 }
 
 /** A guard pass with an optimistic wallet: what it refuses, it refuses without asking the wallet anything. */
-function refuseEarly(home: string, agent: AgentConfig, request: { kind: "buy"; coin: string; bnb: number; reason: string } | { kind: "sell"; coin: string; fraction: number; reason: string }) {
+function refuseEarly(home: string, agent: AgentConfig, request: IntentRequest) {
   const feast = MAINNET.platformCoin!.address;
   const normal = normalizeIntent(request, { snapshot: { feast, now: Date.now(), limits: agent.limits }, source: "manual", slippagePct: Math.min(3, agent.limits.maxSlippagePct), ttlMs: 120_000 });
   if ("error" in normal) return { limit: "L15", message: normal.error };
@@ -394,6 +456,153 @@ function refuseEarly(home: string, agent: AgentConfig, request: { kind: "buy"; c
     warmup: agent.track === "script" ? book?.warmup ?? null : null,
   });
   return verdict.ok ? null : { limit: verdict.limit, message: verdict.message };
+}
+
+/** 280 characters, zh and en mixed, for the preview of the Register message. */
+const PREVIEW_MANIFESTO = (() => {
+  const text = [..."预览检查 preview-check 只咬刚出生的新币，小口快吃。 ".repeat(10).normalize("NFKC").replace(/\s+/gu, " ")].slice(0, 280).join("").trim();
+  return normalizeManifesto(text).ok ? text : "preview-check";
+})();
+
+type Values = Record<string, string | boolean | string[] | undefined>;
+const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+
+/** One notification as the status card shows it; a session notice in the user's language. */
+function noticeLine(n: unknown, lang: Lang): string {
+  const entry = n as { at: string; kind: string; text: string; code?: SessionCode; endsAt?: string | null };
+  const text = entry.kind === "session" && entry.code ? sessionNotice(entry.code, entry.endsAt ? Date.parse(entry.endsAt) : null, lang) : entry.text;
+  return `  ${entry.at} ${entry.kind}: ${text}`;
+}
+
+/** The league block of `status` (PLAN-941 §6). Best effort: it never fails `status`. */
+async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string[]; data: Record<string, unknown> }> {
+  const site = new LeagueSite(siteFromEnv());
+  const me = await Promise.race([signerFor(home, null).address(), new Promise<null>((r) => setTimeout(() => r(null), 5_000))]).catch(() => null);
+  const record = readLeagueRecord(home);
+  let agentId = record?.agentId ?? null;
+  let seating = record?.seating ?? null;
+  const kept = me ? await site.kept(me) : null;
+  if (kept?.state === "read" && kept.agent) {
+    agentId = kept.agent.agentId ?? agentId;
+    seating = seatingOfKept(kept.agent);
+  }
+  const today = await site.league("today", me);
+  const season = today && (today.state === "season" || today.state === "over") ? await site.league("season", me) : null;
+  const lines = standingLines({ agentId, seating, today, season, now: Date.now() }, lang);
+  return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: today?.me ?? null } };
+}
+
+/** `feast-league register` (PLAN-941 §1): the check, the card, and after the user's yes the signature and the answer. */
+async function registerCommand(home: string, name: string, values: Values, json: boolean): Promise<number> {
+  const lang = langOf(values.lang);
+  const signer = signerFor(home, name);
+  const paths = agentPaths(home, name);
+  const deps: FlowDeps = {
+    home,
+    name,
+    signer,
+    chain: new LeagueChain(MAINNET, rpc()),
+    site: new LeagueSite(siteFromEnv()),
+    log: (event, fields) => appendJsonl(paths.log, { at: new Date().toISOString(), event, ...fields }),
+  };
+  const say = (data: Record<string, unknown>, text: string, code: number) => (print(json, { ...data, card: text }, () => text), code);
+  const found = await check(deps, { named: str(values["body-coin"]) ?? null });
+  if (found.kind === "not-ready") return say({ ok: false, stage: "check", result: found.kind, reason: found.reason }, walletNotReady(found.reason, lang), 2);
+  if (found.kind === "no-agent-id") return say({ ok: false, stage: "check", result: found.kind }, noAgentIdCard(lang), 2);
+  if (found.kind === "agent-id-unreadable") return say({ ok: false, stage: "check", result: found.kind }, agentIdUnreadable(lang), 2);
+
+  const summary = {
+    agentId: found.agentId,
+    bodyCoin: found.plan.kind === "coin" ? { coin: found.plan.coin, symbol: found.coin?.symbol ?? null, why: found.plan.why, others: found.plan.others } : null,
+    plan: found.plan.kind,
+    registration: found.keptUnreadable ? "unreadable" : found.keptSeating,
+    league: found.league ? { state: found.league.state, season: found.league.season, seats: found.league.seats } : null,
+    launch: { ...found.launch, quote: BODY_COIN_QUOTE },
+  };
+  const manifesto = str(values.manifesto);
+  if (values.check || manifesto === undefined) return say({ ok: true, stage: "check", ...summary }, checkCard({ agentId: found.agentId, plan: found.plan, coin: found.coin, kept: found.kept, keptSeating: found.keptSeating, keptUnreadable: found.keptUnreadable, league: found.league, now: Date.now() }, lang), 0);
+
+  const prepared = prepare(found, { manifesto, xHandle: str(values.x) ?? null, pending: values.pending === true }, Date.now());
+  if (!prepared.ok) {
+    const p = prepared.problem;
+    const text = p.kind === "manifesto" ? manifestoProblem(p.reason, p.length, lang) : p.kind === "x-handle" ? xHandleProblem(p.given, lang) : bodyCoinProblem(p.plan, lang);
+    return say({ ok: false, stage: "prepare", problem: p.kind, ...summary }, text, 2);
+  }
+  const card = registerCard(prepared.prepared.view, lang);
+  const shown = { agentId: found.agentId, manifesto: prepared.prepared.fields.strategy, issuedAt: prepared.prepared.fields.issuedAt, bodyCoin: prepared.prepared.bodyCoin?.coin ?? null, xHandle: prepared.prepared.xHandle };
+  if (!values.yes) return say({ ok: true, stage: "card", answer: { kind: "not-sent" }, ...shown }, `${card}\n\n${lang === "zh" ? "没有发送：需要用户说「好」（--yes）。" : "Not sent: this needs the user's yes (--yes)."}`, 2);
+
+  const outcome = await submit(deps, prepared.prepared, { onPending: () => process.stderr.write(`${signingLine("pending", lang)}\n`) });
+  if (outcome.kind === "not-signed") {
+    const why = outcome.why;
+    const text = why.kind === "declined" ? signingLine("declined", lang) : why.kind === "expired" ? signingLine("expired", lang) : why.kind === "not-ready" ? walletNotReady(why.reason, lang) : previewMismatch(why.reason, lang);
+    return say({ ok: false, stage: "sign", answer: { kind: "not-sent", why: why.kind } }, text, 2);
+  }
+  if (outcome.kind === "local-check-failed") return say({ ok: false, stage: "sign", answer: { kind: "not-sent", why: "local-check" } }, signingLine("local-check", lang, outcome.reason), 2);
+  if (outcome.kind === "too-old") return say({ ok: false, stage: "sign", answer: { kind: "not-sent", why: "too-old" } }, signingLine("expired", lang), 2);
+  const answer = outcome.answer;
+  if (answer.kind === "kept") {
+    const season = answer.agent?.season ?? found.league?.season.number ?? 1;
+    const lines = [seatedLine(answer.seating, found.agentId, season, lang), preregLine(answer.prereg, prepared.prepared.xHandle, found.agentId, lang), nextStepLine(found.league, Date.now(), lang)].filter((l): l is string => l !== null);
+    if (outcome.reconciled) lines.unshift(noAnswerLine(true, lang));
+    const seating = answer.seating;
+    return say({ ok: true, stage: "answer", answer: { kind: seating.kind, ...(seating.kind === "seated" ? { seatNo: seating.seatNo, founding: seating.founding, foundingNo: seating.foundingNo, waitlisted: seating.waitlisted, place: seating.place } : { reason: seating.reason }), prereg: answer.prereg, reconciled: outcome.reconciled } }, lines.join("\n"), 0);
+  }
+  if (answer.kind === "refused") return say({ ok: false, stage: "answer", answer: { kind: "refused", status: answer.status, code: answer.code, field: answer.field } }, refusalLine(answer.code, answer.field, found.agentId, lang), 2);
+  return say({ ok: false, stage: "answer", answer: { kind: "no-answer", reason: answer.reason, reconciled: outcome.reconciled } }, noAnswerLine(outcome.reconciled, lang), 2);
+}
+
+const QUOTES = ["WBNB", ...MAINNET.stocks.map((s) => s.symbol)];
+
+/** `feast-league launch` (PLAN-941 §1.5): the body coin's card, and after the user's yes one launch through the agent's limits. */
+async function launchCommand(home: string, name: string, values: Values, json: boolean): Promise<number> {
+  const lang = langOf(values.lang);
+  const say = (data: Record<string, unknown>, text: string, code: number) => (print(json, { ...data, card: text }, () => text), code);
+  const agent = loadAgent(home, name);
+  if (!agent?.confirmed) throw new Error(`no confirmed agent "${name}": the launch goes through its hard limits, so plan it and confirm it first`);
+  if (agent.preset === "launch") return say({ ok: false, stage: "card" }, launchPresetOwnLine(lang), 2);
+  const launched = statusOf(home, name).book?.launched;
+  if (launched) return say({ ok: false, stage: "card", coin: launched.coin }, alreadyLaunchedLine(launched.coin, lang), 2);
+
+  // The Agent ID names the coin and titles the card; best effort when a name and a ticker are given.
+  let agentId: string | null = null;
+  try {
+    const id = await new LeagueChain(MAINNET, rpc()).agentIdOf(await signerFor(home, name).address());
+    agentId = id.state === "read" ? id.id : null;
+  } catch {
+    agentId = null;
+  }
+  const derived = agentId ? bodyCoinNames(agentId) : null;
+  const coinName = (str(values.name) ?? derived?.name ?? "").trim();
+  const symbol = (str(values.symbol) ?? derived?.symbol ?? "").trim().toUpperCase();
+  if (!coinName || !symbol) throw new Error("give the coin's --name and --symbol: this wallet's Agent ID could not be read to derive them");
+  if (coinName.length > 32) throw new Error(`a coin's name is at most 32 characters (got ${coinName.length})`);
+  if (!/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error("a ticker is 1–10 letters or digits");
+  const quote = (str(values.quote) ?? BODY_COIN_QUOTE).trim().toUpperCase();
+  if (!QUOTES.includes(quote)) throw new Error(`the pair is WBNB or a listed tokenized stock: ${QUOTES.join(", ")}`);
+  const description = (str(values.description) ?? readLeagueRecord(home)?.manifesto ?? "").trim().slice(0, 280) || null;
+
+  const card = launchCard({ agentId, name: coinName, symbol, quote, description }, lang);
+  const shown = { name: coinName, symbol, quote, description, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer };
+  if (!values.yes) return say({ ok: true, stage: "card", ...shown }, `${card}\n\n${lang === "zh" ? "没有发币：需要用户说「好」（--yes）。" : "Not launched: this needs the user's yes (--yes)."}`, 2);
+
+  const request: IntentRequest = { kind: "launch", name: coinName, symbol, quote, description: description ?? undefined, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, reason: "the league's body coin" };
+  const early = refuseEarly(home, agent, request);
+  if (early) {
+    appendJsonl(agentPaths(home, name).log, { at: new Date().toISOString(), event: "intent.refused", source: "manual", limit: early.limit, message: early.message, before: "any wallet call" });
+    return say({ ok: false, stage: "limits", refused: early }, launchFailedLine(`${early.limit}: ${early.message}`, lang), 2);
+  }
+  if (statusOf(home, name).running) {
+    const paths = agentPaths(home, name);
+    mkdirSync(paths.inbox, { recursive: true });
+    writeJsonAtomic(join(paths.inbox, `${Date.now()}-launch.json`), { type: "intent", request });
+    return say({ ok: true, stage: "queued", ...shown }, queuedLaunchLine(name, lang), 0);
+  }
+  const outcome = await runAgent({ home, name, signer: signerFor(home, name), rpcUrl: rpc(), only: [request] });
+  const after = statusOf(home, name);
+  if (after.book?.launched) return say({ ok: true, stage: "launched", coin: after.book.launched.coin, txHash: after.book.launched.txHash ?? null, ...shown }, launchedLine(symbol, after.book.launched.coin, after.book.launched.txHash ?? null, lang), 0);
+  const failure = [...after.notifications].reverse().find((n) => (n as { kind: string }).kind === "failure") as { text?: string } | undefined;
+  return say({ ok: false, stage: "launch", exit: outcome.exit, reason: outcome.reason }, launchFailedLine(`${outcome.exit}: ${failure?.text ?? outcome.reason}`, lang), 2);
 }
 
 /** The preview-only checks of PLAN.md §8.2: the wallet's answer to each call shape. Nothing is executed. */
@@ -417,31 +626,14 @@ async function previewCheck(home: string, check: string, coinArg: string | undef
   await executor.learn(coin);
 
   if (check === "register") {
-    // The league page's registration (task 927): EIP-712 with no verifyingContract. Preview only: never signed.
-    const typed = {
-      types: {
-        EIP712Domain: [
-          { name: "name", type: "string" },
-          { name: "version", type: "string" },
-          { name: "chainId", type: "uint256" },
-        ],
-        Register: [
-          { name: "wallet", type: "address" },
-          { name: "name", type: "string" },
-          { name: "strategy", type: "string" },
-          { name: "copies", type: "address" },
-          { name: "issuedAt", type: "uint256" },
-        ],
-      },
-      primaryType: "Register",
-      domain: { name: "Feast League", version: "1", chainId: 56 },
-      message: { wallet, name: "preview-check", strategy: "dca", copies: "0x0000000000000000000000000000000000000000", issuedAt: String(Math.floor(Date.now() / 1_000)) },
-    };
-    const message = JSON.stringify({ method: "eth_signTypedData_v4", params: [wallet, JSON.stringify(typed)] });
-    const answer = (await signer.signMessagePreview(message)) as Record<string, unknown>;
+    // The league's Register message as task 941 sends it (bare name, a 280-character zh/en manifesto, copies zero). Preview only: never signed here.
+    const fields = { wallet, name: "previewcheck", strategy: PREVIEW_MANIFESTO, issuedAt: Math.floor(Date.now() / 1_000) };
+    const answer = (await signer.signMessagePreview(signRequestMessage(fields))) as Record<string, unknown>;
     const data = (answer.data ?? {}) as Record<string, unknown>;
     const result = {
       accepted: answer.success === true && typeof data.requestId === "string",
+      readsBack: previewDescribes(data.parsedMessage, fields).ok,
+      manifestoLength: [...fields.strategy].length,
       error: answer.error ?? null,
       parsedMessage: data.parsedMessage ?? null,
       risks: data.risks ?? null,
@@ -495,7 +687,13 @@ async function doctor(home: string, json: boolean): Promise<number> {
     checks.push({ what: "wallet", ok: status.connected, detail: status.connected ? "connected" : `${status.status}: sign in with baw auth signin` });
     const settings = await signer.settings();
     checks.push({ what: "developer mode", ok: settings.devModeEnabled && !settings.balanceExceeded, detail: settings.devModeEnabled ? (settings.balanceExceeded ? "on, but the balance is above its limit" : `on until ${settings.devModeExpiresAt ? new Date(settings.devModeExpiresAt * 1_000).toISOString() : "?"}`) : "off: turn it on in the Binance App" });
-    checks.push({ what: "session", ok: true, detail: settings.sessionExpireTime ? `ends ${settings.sessionExpireTime}` : "unknown" });
+    const session = sessionView(settings);
+    const left = session.end === null ? null : session.end - Date.now();
+    checks.push({
+      what: "session",
+      ok: left === null || left > 0,
+      detail: left === null ? "unknown" : left > 0 ? `ends in ${duration(left, "en")} (${session.source}), at ${utc8(session.end!)} UTC+8` : "ended: scan again (baw auth signin)",
+    });
   } catch (error) {
     checks.push({ what: "wallet", ok: false, detail: `the baw CLI did not answer: ${(error as Error).message}` });
   }

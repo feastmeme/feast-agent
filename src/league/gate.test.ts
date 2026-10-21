@@ -134,7 +134,11 @@ describe("the baw signer", () => {
       await expect(signer.call(command, [])).rejects.toMatchObject({ errorName: "NOT_ALLOWED" });
     }
     expect(calls).toHaveLength(0);
-    expect(BAW_ALLOWLIST).not.toContain("sign-message execute");
+    // Since task 941 `sign-message execute` and `result` are listed, but only for this signer's own Register preview:
+    // without one, as above, they are refused before anything runs (register/signer.test.ts holds the rest).
+    await expect(signer.call("sign-message execute", ["--requestId", "someone-elses"])).rejects.toMatchObject({ errorName: "NOT_ALLOWED" });
+    await expect(signer.call("sign-message result", ["--order-id", "someone-elses"])).rejects.toMatchObject({ errorName: "NOT_ALLOWED" });
+    expect(calls).toHaveLength(0);
     expect(BAW_ALLOWLIST.some((c) => c.startsWith("market-order"))).toBe(false);
   });
 

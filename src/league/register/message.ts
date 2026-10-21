@@ -139,8 +139,11 @@ export async function signatureMatches(fields: RegisterFields, signature: Hex): 
 }
 
 /**
- * Does the wallet's preview describe exactly this message? Its `parsedMessage.message`
- * is the typed data it will sign; every field the page checks must be ours.
+ * Does the wallet's preview describe exactly this message? Every field the page
+ * checks must be ours. Measured on mainnet (2026-10-22): `parsedMessage.message`
+ * is the JSON of the `message` part alone — wallet, name, strategy, copies,
+ * issuedAt — with no domain; the domain is the one this file built into the
+ * request. A reading that does carry a domain must carry ours.
  */
 export function previewDescribes(parsed: unknown, fields: RegisterFields): { ok: true } | { ok: false; reason: string } {
   const p = (parsed ?? {}) as Record<string, unknown>;
@@ -154,12 +157,14 @@ export function previewDescribes(parsed: unknown, fields: RegisterFields): { ok:
       return { ok: false, reason: "the wallet's reading of the message is not JSON" };
     }
   }
-  const t = (typed ?? {}) as { domain?: Record<string, unknown>; primaryType?: unknown; message?: Record<string, unknown> };
-  if (!t.domain || !t.message) return { ok: false, reason: "the wallet's reading has no domain or message" };
-  if (t.domain.name !== LEAGUE_DOMAIN.name || String(t.domain.version) !== LEAGUE_DOMAIN.version || Number(t.domain.chainId) !== LEAGUE_CHAIN_ID) return { ok: false, reason: "the domain is not Feast League / 1 / 56" };
-  if ("verifyingContract" in t.domain && t.domain.verifyingContract !== undefined) return { ok: false, reason: "the domain names a contract" };
+  if (typeof typed !== "object" || typed === null) return { ok: false, reason: "the wallet's reading has no message" };
+  const t = typed as { domain?: Record<string, unknown>; primaryType?: unknown; message?: Record<string, unknown> } & Record<string, unknown>;
+  if (t.domain !== undefined) {
+    if (t.domain.name !== LEAGUE_DOMAIN.name || String(t.domain.version) !== LEAGUE_DOMAIN.version || Number(t.domain.chainId) !== LEAGUE_CHAIN_ID) return { ok: false, reason: "the domain is not Feast League / 1 / 56" };
+    if ("verifyingContract" in t.domain && t.domain.verifyingContract !== undefined) return { ok: false, reason: "the domain names a contract" };
+  }
   if (t.primaryType !== undefined && t.primaryType !== "Register") return { ok: false, reason: `the message type is ${String(t.primaryType)}` };
-  const m = t.message;
+  const m = (t.message ?? t) as Record<string, unknown>;
   const same =
     String(m.wallet).toLowerCase() === fields.wallet.toLowerCase() &&
     m.name === fields.name &&

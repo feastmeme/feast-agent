@@ -6,6 +6,7 @@ import { poolIdOf, type PoolKey } from "../sdk/infinity.ts";
 import type { FeastNetwork, Hop } from "../sdk/networks.ts";
 import { E18, coinPriceE18 } from "../sdk/price.ts";
 import { permit2Abi } from "../sdk/venue-abi.ts";
+import { AGENT_ID } from "./register/message.ts";
 
 /**
  * The runtime's reads of BNB Smart Chain, for everything that touches money
@@ -18,6 +19,12 @@ import { permit2Abi } from "../sdk/venue-abi.ts";
  */
 
 export const DEFAULT_MAINNET_RPC = "https://bsc-dataseed.binance.org";
+
+/** The Binance Agent ID registry on BSC (SPACE ID's HandleRegistry): one address, one bare name; `handleOf` is the reverse read. */
+export const AGENT_ID_REGISTRY: Address = "0x60b9262456de011f7d15a54cdd8c48baaa8b022f";
+const handleRegistryAbi = [{ type: "function", name: "handleOf", stateMutability: "view", inputs: [{ name: "owner", type: "address" }], outputs: [{ name: "", type: "string" }] }] as const;
+
+export type AgentIdRead = { state: "read"; id: string | null } | { state: "unreadable"; reason: string };
 
 export type CoinInfo = { coin: Address; quote: Address; creator: Address; poolId: Hex; coinIsCurrency0: boolean; symbol: string; name: string };
 
@@ -62,6 +69,31 @@ export class LeagueChain {
       pending.catch(() => this.coins.delete(k));
     }
     return pending;
+  }
+
+  /**
+   * The wallet's Binance Agent ID as the chain holds it: bare a–z 0–9, or null
+   * when it has none (`handleOf` answers ""). A read that failed is
+   * "unreadable", never "none". Only BSC has the registry.
+   */
+  async agentIdOf(wallet: Address): Promise<AgentIdRead> {
+    if (this.network.chainId !== 56) return { state: "unreadable", reason: `the Agent ID registry is on BSC, not chain ${this.network.chainId}` };
+    try {
+      const id = await this.client.readContract({ address: AGENT_ID_REGISTRY, abi: handleRegistryAbi, functionName: "handleOf", args: [wallet] });
+      return { state: "read", id: typeof id === "string" && AGENT_ID.test(id) ? id : null };
+    } catch (error) {
+      return { state: "unreadable", reason: String((error as Error).message).split("\n")[0]!.slice(0, 200) };
+    }
+  }
+
+  /** Who the factory says launched a coin; null for a coin the factory never made; unreadable when the chain did not answer. */
+  async creatorOf(coin: Address): Promise<Address | null | "unreadable"> {
+    try {
+      const info = await this.coinInfo(coin);
+      return info ? info.creator : null;
+    } catch {
+      return "unreadable";
+    }
   }
 
   async isFeastCoin(coin: Address): Promise<boolean> {

@@ -124,6 +124,13 @@ describe("the wallet's preview of the message", () => {
     expect(previewDescribes(parsed(), FIELDS)).toEqual({ ok: true });
   });
 
+  it("matches the reading the wallet gives live: the message part alone, as JSON (measured 2026-10-22)", () => {
+    const live = { messageType: "SignTypedData", preCheckCode: "", version: "V4", message: JSON.stringify(JSON.parse(GOLDEN_JSON).message) };
+    expect(previewDescribes(live, FIELDS)).toEqual({ ok: true });
+    const other = { ...live, message: JSON.stringify({ ...JSON.parse(GOLDEN_JSON).message, name: "someoneelse" }) };
+    expect(previewDescribes(other, FIELDS).ok).toBe(false);
+  });
+
   it("refuses another domain, another type, other fields, or a pre-check code", () => {
     expect(previewDescribes(parsed({ domain: { name: "Permit2", version: "1", chainId: 56 } }), FIELDS).ok).toBe(false);
     expect(previewDescribes(parsed({ domain: { name: "Feast League", version: "1", chainId: 56, verifyingContract: "0x0000000000000000000000000000000000000001" } }), FIELDS).ok).toBe(false);
