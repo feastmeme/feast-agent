@@ -157,11 +157,17 @@ describe("the baw signer", () => {
     const signer = new BawSigner(runner, (c) => seen.push(c));
     expect(await signer.status()).toEqual({ connected: true, status: "CONNECTED" });
     expect((await signer.address()).toLowerCase()).toBe(WALLET);
-    expect(await signer.settings()).toMatchObject({ devModeEnabled: true, devModeDailyLimitUsd: 1000, devModeQuotaUsedUsd: 12.5, balanceExceeded: false });
+    expect(await signer.settings()).toMatchObject({ devModeEnabled: true, devModeExpiresAt: 1793000000, devModeDailyLimitUsd: 1000, devModeQuotaUsedUsd: 12.5, balanceExceeded: false });
     expect(await signer.txLock()).toBe("UNLOCKED");
     expect(seen).toEqual(["wallet status", "wallet address", "wallet settings", "wallet tx-lock"]);
     expect(calls.every((args) => args.at(-1) === "--json")).toBe(true);
     expect(calls[3]).toEqual(["wallet", "tx-lock", "--binanceChainId", "56", "--json"]);
+  });
+
+  it("reads Developer Mode's expiry as the live wallet gives it: an ISO date (2026-10-21)", async () => {
+    const { runner } = fake({ "wallet settings": { success: true, data: { devMode: { enabled: true, expiresAt: "2026-10-28T10:57:20+08:00", dailyLimit: 1000, balanceExceeded: false }, developerModeQuotaUsed: 2.22 } } });
+    const settings = await new BawSigner(runner).settings();
+    expect(settings.devModeExpiresAt).toBe(Math.floor(Date.parse("2026-10-28T10:57:20+08:00") / 1000));
   });
 
   it("previews with the call as separate arguments, value in wei", async () => {

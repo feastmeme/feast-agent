@@ -82,6 +82,13 @@ type Envelope = { success?: boolean; data?: unknown; error?: { code?: number | s
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+/** A time as Unix seconds: the docs show seconds; live, on 2026-10-21, `devMode.expiresAt` was an ISO date. Both are read. */
+const unixSeconds = (v: unknown): number | null => {
+  const n = num(v);
+  if (n !== null) return n > 1e12 ? Math.floor(n / 1_000) : n;
+  if (typeof v === "string" && Number.isFinite(Date.parse(v))) return Math.floor(Date.parse(v) / 1_000);
+  return null;
+};
 
 export class BawSigner implements Signer {
   /** Every command the signer ran, by name only (no arguments, so no addresses). */
@@ -136,7 +143,7 @@ export class BawSigner implements Signer {
     const dev = (d.devMode ?? {}) as Record<string, unknown>;
     return {
       devModeEnabled: dev.enabled === true,
-      devModeExpiresAt: num(dev.expiresAt),
+      devModeExpiresAt: unixSeconds(dev.expiresAt),
       devModeDailyLimitUsd: num(dev.dailyLimit),
       devModeQuotaUsedUsd: num(d.developerModeQuotaUsed),
       balanceExceeded: dev.balanceExceeded === true,
