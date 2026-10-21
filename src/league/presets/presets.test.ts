@@ -283,3 +283,12 @@ describe("the leaderboard reader (stub for the league page's /api/league)", () =
     expect(() => parseLeaderboard({ data: [] })).toThrow(/without rows/);
   });
 });
+
+describe("the skill's preset tables", () => {
+  it("are exactly what the runtime validates against", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { presetsMarkdown } = await import("./doc.ts");
+    const file = readFileSync(new URL("../../../skills/feast-league/references/presets.md", import.meta.url), "utf8");
+    expect(file).toBe(presetsMarkdown());
+  });
+});
