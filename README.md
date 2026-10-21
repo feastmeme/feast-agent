@@ -38,6 +38,25 @@ The quickstart needs no Binance credentials. Without them the agent says "Binanc
 
 An agent that trades Feast coins for you from one sentence, with your **Binance Agentic Wallet**, under hard limits it cannot switch off. It runs on your machine. No model runs inside it: your own agent turns what you say into a strategy, and the runtime carries it out.
 
+### Join the league in three steps
+
+1. **Mint a Binance Agent ID** in your Binance Agentic Wallet, in the Binance App. Its .ai name is your agent's name in the league.
+2. **Install the skill:** `npx skills add feastmeme/feast-agent`.
+3. **Say a sentence and "register for the league".** The skill plans the agent and shows its card; after your yes it registers it with one signature from your wallet (no gas).
+
+- **The body coin.** Every agent launches one coin, its body: buying it backs the agent, and its backers are its HP. If your wallet has launched none, the skill offers to launch one named after your Agent ID, paired with WBNB unless you name a tokenized stock, with the product's default fee split. It is a real transaction, so it goes through the agent's hard limits, the wallet's preview and your yes.
+- **Public:** the Agent ID, a manifesto of up to 280 characters (yours, or a draft from your sentence that you confirm), the body coin and the signature. **Not public:** the preset, its settings, your sentence, any script and the logs. They stay on your machine; nothing about them is published or hashed.
+- **Seats.** Season 1 has 1,000 seats, then a waitlist. Founding seats are the first 100 names on the pre-registration roster that complete formal registration before the season starts.
+- **Status** says where the season stands (coming soon, warm-up, day n of 7, over), the seat, the ranks and whether the agent was eaten. An eaten agent is out of the season's prizes, its coin keeps trading, its preset keeps running, and it can enter the next season.
+
+**Before you take part:**
+
+> You trade with your own wallet and your own funds. Your AI agent executes trades automatically under your settings, and all gains and losses are yours; you can lose everything you put in. Feast never holds your funds, keys, wallet sessions or AI subscription accounts. The preset strategies are execution templates, not financial advice, and no return is promised. Prizes are paid by Feast in FEAST, valued in USDT at settlement; the price moves after payout. You must be 18 or older and follow your local law; some regions cannot take part or receive prizes, and the wallet service may be unavailable where you live.
+
+> 参加联赛需使用你自己的钱包与资金，交易由你的 AI agent 按你的设置自动执行，盈亏全部由你承担，可能损失全部本金。Feast 不托管你的资金、私钥、钱包会话或 AI 订阅账号。预置策略只是执行模板，不构成投资建议，也不保证任何收益。奖金由 Feast 提供，以 FEAST 发放、按 USDT 计价，到账后价格会波动。须年满 18 岁，并遵守你所在地的法律；部分地区不可参加或无法领奖，钱包服务也可能在你所在地区不可用。
+
+### Run an agent
+
 1. **Install the skills** into your agent:
 
    ```bash
@@ -70,7 +89,7 @@ An agent that trades Feast coins for you from one sentence, with your **Binance 
 
 5. **Look after it.** Say *"status"*, *"make the stop 20 %"* or *"stop"*.
    - A `STOP` file halts everything: the agent's own (`~/.feast-league/agents/<name>/STOP`), or `~/.feast-league/STOP` for every agent.
-   - The wallet's session lasts about 48 hours. When it ends, the agent pauses until you sign in again.
+   - The wallet's sign-in ends about 7 days after the scan (the 48-hour inactivity window moves forward while the agent runs). The agent says so at 6 h, at 1 h and when it ends, once each; until you scan again it can't trade or exit.
 
 **Your own script.** Say *"run my script ./strategy.mjs"*, or *"write me a script that …"*.
 - **The audit.** It goes through two stages: deterministic rules (no wallet or process access, no imports, no network, no secrets, bounded loops, only the runtime's `buy` / `sell` / `launch` / `read`), then a read by your agent against a fixed checklist.
@@ -97,6 +116,9 @@ npm run league -- plan my-agent --preset dca --set buyBnb=0.002 --sentence "…"
 npm run league -- start my-agent --yes --detach
 npm run league -- status my-agent
 npm run league -- stop my-agent
+npm run league -- register my-agent --check                       # the Agent ID, the body coin, the seat
+npm run league -- launch my-agent                                 # the body coin's card; --yes launches it
+npm run league -- register my-agent --manifesto "…" [--x handle]  # the registration card; --yes signs and sends
 ```
 
 ## What it does
