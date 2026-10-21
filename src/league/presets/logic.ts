@@ -200,7 +200,10 @@ function copy(): Strategy {
       if (!p.wallets.some((w) => lc(w) === lc(event.payer))) return;
       if (event.side === "buy") {
         if ((event.bnb ?? 0) < p.minLeaderBuyBnb) return;
-        bag<Pending[]>(api.state, "pending", []).push({ coin: event.coin, due: api.read.now() + p.delaySeconds * 1_000, leaderPrice: event.priceBnb, leaderBnb: event.bnb });
+        const pending = bag<Pending[]>(api.state, "pending", []);
+        pending.push({ coin: event.coin, due: api.read.now() + p.delaySeconds * 1_000, leaderPrice: event.priceBnb, leaderBnb: event.bnb });
+        // Bounded: the newest twenty copies wait; older ones are dropped.
+        if (pending.length > 20) pending.splice(0, pending.length - 20);
       } else if (p.copySells && bag<Record<string, number>>(api.state, "mine", {})[lc(event.coin)] !== undefined) {
         exit(api, api.state, event.coin, 1, "copy: the followed wallet sold");
       }

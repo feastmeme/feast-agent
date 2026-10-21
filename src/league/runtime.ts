@@ -497,6 +497,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     let nextPoll = 0;
     let nextTick = 0;
     let nextPreflight = clock() + (deps.preflightMs ?? 300_000);
+    // The coins marked fresh from the chain in a snapshot: deduplicated and capped, whatever a strategy asks for.
+    const watchList = () => [...new Set([...loaded!.meta.watch, ...loaded!.wants(strategyState)].map((w) => w.toLowerCase()))].slice(0, 20);
     const watched = () => new Set([...Object.keys(book.positions), ...loaded!.meta.watch.map((w) => (w.toUpperCase() === "FEAST" ? feast.toLowerCase() : w.toLowerCase()))]);
     if (deps.only) {
       for (const request of deps.only) {
@@ -546,7 +548,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           if (events.length > 0) {
             const marks = await market.marks(book);
             const balanceWei = await chain.balance(wallet).catch(() => walletState.balanceWei);
-            const snapshot = await market.snapshot({ now: clock(), balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: [...loaded.meta.watch, ...loaded.wants(strategyState)], feast, needBoard: false });
+            const snapshot = await market.snapshot({ now: clock(), balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: false });
             const seen = watched();
             for (const event of events) {
               for (const strategyEvent of await market.ingest(event, clock(), seen)) {
@@ -580,7 +582,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           );
           // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
           const needBoard = agent.track === "script" || agent.preset === "momentum" || (agent.preset === "dca" && agent.params.targets === "topHolders");
-          const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: [...loaded.meta.watch, ...loaded.wants(strategyState)], feast, needBoard });
+          const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard });
           await runStrategy("onTick", snapshot);
         } catch (error) {
           log("tick.failed", { reason: String((error as Error).message).slice(0, 300) });
