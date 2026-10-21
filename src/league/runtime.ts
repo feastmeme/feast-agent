@@ -352,7 +352,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           const now = await chain.tokenBalance(item.coin, wallet).catch(() => null);
           if (now !== null && item.kind === "buy" && now >= item.balanceBefore + item.minCoins) {
             book = { ...book, unresolved: book.unresolved.filter((u) => u !== item) };
-            bookLateBuy(item, now - item.balanceBefore, item.payIn === "native" ? item.sizeWei : 0n, 0n);
+            // The cost is what it was sent with: the BNB, or the quote paid converted to BNB — never zero.
+            bookLateBuy(item, now - item.balanceBefore, item.payIn === "native" ? item.sizeWei : await chain.quoteToBnbWei(item.quote, item.sizeWei), 0n);
             save();
             continue;
           }
