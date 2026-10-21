@@ -43,6 +43,10 @@ export type AgentPaths = {
   stop: string;
   audit: string;
   pid: string;
+  /** What the session reminder has said for the current sign-in (docs/PLAN-941.md §7). */
+  session: string;
+  /** How many notifications `status` has shown the user. */
+  seen: string;
 };
 
 export function agentPaths(home: string, name: string): AgentPaths {
@@ -57,12 +61,27 @@ export function agentPaths(home: string, name: string): AgentPaths {
     stop: join(dir, "STOP"),
     audit: join(dir, "audit"),
     pid: join(dir, "runtime.pid"),
+    session: join(dir, "session.json"),
+    seen: join(dir, "notifications.seen"),
   };
 }
 
 export const globalStopPath = (home: string) => join(home, "STOP");
 export const walletLockPath = (home: string) => join(home, "wallet.lock");
 export const ledgerPath = (home: string) => join(home, "ledger.json");
+/** The wallet's league registration as the page answered it: no address and no signature (a signature with its message gives the address back). */
+export const leagueRecordPath = (home: string) => join(home, "league.json");
+
+/** The notifications the user has not been shown yet; `mark` moves the cursor past them. */
+export function unreadNotifications(home: string, name: string, mark: boolean): unknown[] {
+  const paths = agentPaths(home, name);
+  if (!existsSync(paths.notifications)) return [];
+  const lines = readFileSync(paths.notifications, "utf8").split("\n").filter(Boolean);
+  const seen = existsSync(paths.seen) ? Number(readFileSync(paths.seen, "utf8").trim()) : 0;
+  const from = Number.isInteger(seen) && seen >= 0 && seen <= lines.length ? seen : 0;
+  if (mark) writeFileAtomic(paths.seen, String(lines.length));
+  return lines.slice(from).map((line) => JSON.parse(line) as unknown);
+}
 
 /** Write through a temporary file and a rename, so a crash never leaves half a file. */
 export function writeFileAtomic(path: string, text: string): void {

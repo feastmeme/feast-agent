@@ -17,7 +17,9 @@ import { guard, warmupActive, warmupAfter, type GuardInput, type GuardVerdict, t
 import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type Limits } from "./limits.ts";
 import { Market } from "./market.ts";
 import { presetStrategy } from "./presets/logic.ts";
+import { sessionNotice } from "./register/copy.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
+import { freshMemory, pastEnd, sessionStep, sessionView, type SessionMemory, type SessionView } from "./session.ts";
 import { addToLedger, acquireWalletLock, agentPaths, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
 import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExtras, type Snapshot, type StrategyEvent } from "./strategy.ts";
 
@@ -145,24 +147,41 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     let walletState = wallet0;
     let bnbUsd = 0;
     const expiryWarned = new Set<string>();
+    // The sign-in (PLAN-941 §7): what the reminder has said for it, kept on disk so a restart never repeats it.
+    let session: SessionMemory = readJson<SessionMemory>(paths.session) ?? freshMemory();
+    let signedOut = false;
+    const sessionSay = (reading: { connected: boolean; view: SessionView | null }) => {
+      const step = sessionStep(session, reading, clock());
+      session = step.memory;
+      signedOut = step.signedOut;
+      writeJsonAtomic(paths.session, session);
+      for (const code of step.say) notify("session", sessionNotice(code, session.end, "en"), { code, endsAt: session.end !== null ? new Date(session.end).toISOString() : null });
+    };
     const preflight = async (): Promise<void> => {
+      let status: { connected: boolean; status: string };
       try {
-        const status = await deps.signer.status();
+        status = await deps.signer.status();
+      } catch (error) {
+        walletState = { ...walletState, connected: false };
+        // Past the sign-in's known end, a wallet that cannot be read is a signed-out one: said once, not every 10 minutes.
+        if (pastEnd(session, clock())) sessionSay({ connected: false, view: null });
+        else notify("paused", `the wallet could not be read: ${error instanceof BawError ? error.message : String(error)}`, {}, "wallet-read");
+        return;
+      }
+      if (!status.connected) {
+        walletState = { ...walletState, connected: false };
+        sessionSay({ connected: false, view: null });
+        return;
+      }
+      try {
         const settings = await deps.signer.settings();
         const now = clock();
         const devExpires = settings.devModeExpiresAt === null ? null : settings.devModeExpiresAt * 1_000;
         const devMode = settings.devModeEnabled && (devExpires === null || devExpires > now) && !settings.balanceExceeded;
         const quotaLeftUsd = (settings.devModeDailyLimitUsd ?? Number.POSITIVE_INFINITY) - (settings.devModeQuotaUsedUsd ?? 0);
-        walletState = { ...walletState, connected: status.connected, devMode, quotaLeftUsd };
+        sessionSay({ connected: true, view: sessionView(settings) });
+        walletState = { ...walletState, connected: !signedOut, devMode, quotaLeftUsd };
         if (settings.balanceExceeded) notify("devmode", "the wallet's balance is above its Developer Mode daily limit: Developer Mode will not sign, not even an exit. Raise the limit in the Binance App or move funds.", {}, "balance-exceeded");
-        if (!status.connected) notify("paused", "the wallet is signed out: sign in again (baw auth signin) and the agent resumes", {}, "signed-out");
-        const session = settings.sessionExpireTime ? Date.parse(settings.sessionExpireTime) : Number.NaN;
-        for (const hours of [6, 1]) {
-          if (Number.isFinite(session) && session - now < hours * 3_600_000 && !expiryWarned.has(`s${hours}`)) {
-            expiryWarned.add(`s${hours}`);
-            notify("session", `the wallet's session ends in under ${hours} h (${settings.sessionExpireTime}): sign in again before then`);
-          }
-        }
         if (devExpires !== null && devExpires - now < 24 * 3_600_000 && !expiryWarned.has("dev")) {
           expiryWarned.add("dev");
           notify("devmode", "Developer Mode expires within 24 h: renew it in the Binance App");
@@ -753,6 +772,23 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         } catch (error) {
           log("tick.failed", { reason: String((error as Error).message).slice(0, 300) });
         }
+      }
+      if (!signedOut && pastEnd(session, now)) {
+        // The sign-in ended between two wallet reads: known before any trade fails.
+        walletState = { ...walletState, connected: false };
+        sessionSay({ connected: false, view: null });
+      }
+      if (signedOut && queue.length > 0) {
+        // Signed out (PLAN-941 §7): nothing is asked of the wallet. Buys lapse at their expiry; sales wait for the next scan.
+        for (let i = queue.length - 1; i >= 0; i -= 1) {
+          const held = queue[i]!;
+          if (held.kind === "buy" && held.expiresAt !== undefined && now > held.expiresAt) {
+            log("intent.stale", { id: held.id, reason: held.reason, signedOut: true });
+            queue.splice(i, 1);
+          }
+        }
+        await sleep(deps.loopMs ?? 1_000);
+        continue;
       }
       const next = queue.shift();
       if (next) {
