@@ -162,6 +162,36 @@ describe("obfuscation does not hide a forbidden word", () => {
     refusedBy(script("const u = `ws${'s'}://relay.example`;"), "A3");
     refusedBy(script(`const s = "pro" + "cess";`), "A1");
   });
+  it("fails closed on computed keys it cannot read, and on string-building primitives", () => {
+    refusedBy(script(`const x = ({})[["con", "structor"].join("")];`), "A5");
+    refusedBy(script(`const x = ({})[String.fromCharCode(99)];`), "A5");
+    refusedBy(script(`const k = atob("Y29uc3RydWN0b3I="); api.log(k);`), "A5");
+    refusedBy(script(`const x = ({})[api.read.now() > 0 ? "a" : "b"];`), "A5");
+    refusedBy(script(`const x = ({})[api.state.k || "a"];`), "A5");
+  });
+
+  it("checks every key of an object or a destructuring pattern", () => {
+    refusedBy(script(`const { constructor: c } = ({});`), "A5");
+    refusedBy(script(`const { constructor } = ({});`), "A5");
+    refusedBy(script(`const o = { ["proto" + "type"]: 1 };`), "A5");
+    refusedBy(script(`const o = { __proto__: null };`), "A5");
+    refusedBy(script(`let c; ({ constructor: c } = ({}));`), "A5");
+  });
+
+  it("still lets plain indexing and keyed state through", () => {
+    passes(
+      script(`
+  const rows = api.read.coins({ limit: 5 });
+  api.state.seen = api.state.seen || {};
+  for (let i = 0; i < 5; i++) {
+    const r = rows[i];
+    if (r) api.state.seen[r.coin] = (api.state.seen[r.coin] || 0) + 1;
+    const next = rows[i + 1];
+    if (next) api.log(next.coin);
+  }`),
+    );
+  });
+
   it("refuses identifiers spelled with escapes", () => {
     refusedBy(script(`const \\u0062aw = 1;`), "A7");
   });

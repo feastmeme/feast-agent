@@ -51,7 +51,9 @@ const A4_HEX = /0x[0-9a-fA-F]{64}(?![0-9a-fA-F])/;
 const A4_API_KEY = /(?:\bsk-[A-Za-z0-9_-]{8,}|\bsk_live_|\bAKIA[0-9A-Z]{12,}|\bghp_[A-Za-z0-9]{20,}|\bxox[abprs]-|\bAIza[0-9A-Za-z_-]{20,})/;
 const A4_PATH = /(?:^|[\s/\\"'])\.env\b|\.ssh\b|\bid_rsa\b|\.pem\b|\bkeystore\b|PRIVATE_KEY/i;
 
-const A5_IDENT = new Set(["eval", "Function", "globalThis", "global", "self", "window", "Reflect", "WebAssembly", "Proxy", "SharedArrayBuffer", "Atomics", "vm"]);
+const A5_IDENT = new Set(["eval", "Function", "globalThis", "global", "self", "window", "Reflect", "WebAssembly", "Proxy", "SharedArrayBuffer", "Atomics", "vm", "atob", "btoa", "unescape", "escape", "decodeURI", "decodeURIComponent"]);
+/** Primitives that build a string out of codes or encodings: a script has no use for them but to hide a word. */
+const A5_STRING_BUILDERS = new Set(["fromCharCode", "fromCodePoint"]);
 const A5_PROP = new Set([
   "constructor",
   "prototype",
@@ -117,7 +119,46 @@ function fold(node: Node | null | undefined): string | null {
     const right = fold(node.right as Node);
     return left !== null && right !== null ? left + right : null;
   }
+  // `["con", "structor"].join("")`: an array of literals joined by a literal.
+  if (node.type === "CallExpression") {
+    const callee = node.callee as Node;
+    const args = node.arguments as Node[];
+    if (callee.type === "MemberExpression" && !callee.computed && String((callee.property as Node).name) === "join" && (callee.object as Node).type === "ArrayExpression" && args.length <= 1) {
+      const parts = ((callee.object as Node).elements as (Node | null)[]).map((e) => fold(e));
+      const separator = args.length === 0 ? "," : fold(args[0]);
+      return parts.every((p) => p !== null) && separator !== null ? parts.join(separator) : null;
+    }
+  }
   return null;
+}
+
+/**
+ * A computed key the audit can read: a constant it folds, or a plain variable,
+ * member or arithmetic of those (`rows[i + 1]`, `state.seen[r.coin]`). Anything
+ * that builds a key at run time — a call, a ternary, a logical, a string joined
+ * to a variable — is refused: the audit fails closed where it cannot see.
+ */
+function readableKey(node: Node): boolean {
+  switch (node.type) {
+    case "Literal":
+    case "Identifier":
+      return true;
+    case "MemberExpression":
+      return node.computed ? readableKey(node.property as Node) && readableKey(node.object as Node) : readableKey(node.object as Node);
+    case "UnaryExpression":
+      return ["-", "+"].includes(String(node.operator)) && readableKey(node.argument as Node);
+    case "BinaryExpression": {
+      if (!["+", "-", "*", "/", "%"].includes(String(node.operator))) return false;
+      const isText = (n: Node) => (n.type === "Literal" && typeof n.value === "string") || n.type === "TemplateLiteral";
+      if (isText(node.left as Node) || isText(node.right as Node)) return fold(node) !== null;
+      return readableKey(node.left as Node) && readableKey(node.right as Node);
+    }
+    case "TemplateLiteral":
+    case "CallExpression":
+      return fold(node) !== null;
+    default:
+      return false;
+  }
 }
 
 export function auditSource(source: string, options: { maxTradeBnb?: number } = {}): StaticAudit {
@@ -238,6 +279,7 @@ export function auditSource(source: string, options: { maxTradeBnb?: number } = 
     if (A1_PROP.has(name)) hit("A1", node, `".${name}" reaches for the wallet or the process`);
     if (A3_PROP.has(name)) hit("A3", node, `".${name}" is a network primitive`);
     if (A5_PROP.has(name)) hit("A5", node, `".${name}" reaches along the prototype chain`);
+    if (A5_STRING_BUILDERS.has(name)) hit("A5", node, `".${name}" builds a string out of codes: not allowed`);
   };
   const isApi = (node: Node | undefined) => node?.type === "Identifier" && apiNames.has(String(node.name));
 
@@ -250,8 +292,19 @@ export function auditSource(source: string, options: { maxTradeBnb?: number } = 
         const isKey = parent?.type === "Property" && parent.key === node && !parent.computed;
         if (isMemberProperty) checkProperty(name, node);
         else if (isKey) {
+          // An object's or a destructuring pattern's key is a property name: `{ constructor: c } = x` reaches as `x.constructor` does.
+          checkProperty(name, node);
           if (/[^\x00-\x7F]/.test(name) || source.slice(node.start, node.end) !== name) checkIdentifier(name, node);
         } else checkIdentifier(name, node);
+        break;
+      }
+      case "Property": {
+        const key = node.key as Node;
+        if (node.computed) {
+          const name = fold(key);
+          if (name !== null) checkProperty(name, key);
+          else if (!readableKey(key)) hit("A5", key, "a computed key the audit cannot read");
+        } else if (key.type === "Literal" && typeof key.value === "string") checkProperty(key.value, key);
         break;
       }
       case "Literal":
@@ -290,6 +343,8 @@ export function auditSource(source: string, options: { maxTradeBnb?: number } = 
         const property = node.property as Node;
         const name = node.computed ? fold(property) : String(property.name);
         if (node.computed && name !== null) checkProperty(name, property);
+        if (node.computed && name === null && !readableKey(property)) hit("A5", property, "a computed key the audit cannot read");
+        if (!node.computed && object.type === "Identifier" && String(object.name) === "String" && name === "raw") hit("A5", node, "String.raw builds strings: not allowed");
         if (isApi(object)) {
           if (node.computed) hit("A8", node, "computed access on api is not allowed");
           else if (!API_MEMBERS.has(String(name))) hit("A8", node, `api.${name} is not one of the runtime's functions`);
