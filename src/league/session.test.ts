@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Address } from "viem";
@@ -34,7 +34,8 @@ describe("the reminder: once per sign-in", () => {
     const said: string[] = [];
     const end = 100 * H;
     for (let now = 90 * H; now < 102 * H; now += 300_000) {
-      const step = sessionStep(memory, view(end), now);
+      // The wallet says CONNECTED until its end, then not.
+      const step = sessionStep(memory, now < end ? view(end) : { connected: false, view: null }, now);
       memory = step.memory;
       said.push(...step.say);
     }
@@ -55,11 +56,19 @@ describe("the reminder: once per sign-in", () => {
   });
 
   it("says 'back' once after a new scan, and arms the next sign-in afresh", () => {
-    let step = sessionStep(freshMemory(), view(10 * H, "k1"), 11 * H);
+    let step = sessionStep(freshMemory(), view(10 * H, "k1"), 9 * H);
+    step = sessionStep(step.memory, { connected: false, view: null }, 11 * H);
     expect(step.say).toEqual(["ended"]);
     step = sessionStep(step.memory, view(200 * H, "k2"), 12 * H);
     expect(step).toMatchObject({ say: ["back"], signedOut: false, memory: { key: "k2", said: [] } });
     expect(sessionStep(step.memory, view(200 * H, "k2"), 196 * H).say).toEqual(["6h"]);
+  });
+
+  it("believes a wallet that still says CONNECTED past its own end: no notice, no hold, and that end dropped", () => {
+    const step = sessionStep(freshMemory(), view(10 * H), 11 * H);
+    expect(step).toEqual({ say: [], signedOut: false, memory: { key: "k1", end: null, said: [] } });
+    // A fast clock, the same way: still CONNECTED, so nothing is held.
+    expect(sessionStep(step.memory, view(10 * H), 30 * H).signedOut).toBe(false);
   });
 
   it("says 'back' once even when the wallet gives no sign-in time to key it by", () => {
@@ -118,9 +127,9 @@ const notices = (home: string) =>
 describe("the runtime, when the sign-in ends", () => {
   it("knows before a trade fails: asks the wallet nothing, says it once, and holds through a restart", async () => {
     const clock = { now: Date.parse("2026-10-28T02:00:00Z") };
-    // The sign-in ends 30 s into the run, between two 5-minute wallet reads.
+    // The sign-in ends 30 s into the run, between two 5-minute wallet reads; from then on the wallet says it is signed out.
     const end = new Date(clock.now + 30_000).toISOString();
-    const s = setup(clock, { signInMaxTime: end, sessionExpireTime: new Date(clock.now + 48 * H).toISOString() });
+    const s = setup(clock, { signInMaxTime: end, sessionExpireTime: new Date(clock.now + 48 * H).toISOString() }, () => clock.now < Date.parse(end));
     // A minute after the end, the user asks the running agent for a buy (the CLI's inbox).
     let sent = false;
     const sleep = async (ms: number) => {
@@ -148,6 +157,27 @@ describe("the runtime, when the sign-in ends", () => {
     const again = await runAgent({ home: s.home, name: "dca", signer: s.signer, chain: s.chain, fetch: s.board, now: s.now, sleep, loopMs: 10_000, maxRuntimeMs: 60_000 });
     expect(again.exit).toBe("refused");
     expect(notices(s.home).map((n) => n.code)).toEqual(["1h", "ended"]);
+  });
+
+  it("never holds a wallet that still says CONNECTED past its sign-in time (a wrong field, or a fast clock)", async () => {
+    const clock = { now: Date.parse("2026-10-28T02:00:00Z") };
+    const s = setup(clock, { signInMaxTime: new Date(clock.now - H).toISOString(), sessionExpireTime: new Date(clock.now + 48 * H).toISOString() });
+    let sent = false;
+    const sleep = async (ms: number) => {
+      clock.now += ms;
+      if (!sent && clock.now > Date.parse("2026-10-28T02:01:00Z")) {
+        sent = true;
+        mkdirSync(agentPaths(s.home, "dca").inbox, { recursive: true });
+        writeFileSync(join(agentPaths(s.home, "dca").inbox, "1-buy.json"), JSON.stringify({ type: "intent", request: { kind: "buy", coin: "FEAST", bnb: 0.002, reason: "manual buy" } }));
+      }
+    };
+    expect((await runAgent({ home: s.home, name: "dca", signer: s.signer, chain: s.chain, fetch: s.board, now: s.now, sleep, loopMs: 10_000, maxRuntimeMs: 10 * 60_000 })).exit).toBe("finished");
+    const log = readFileSync(agentPaths(s.home, "dca").log, "utf8");
+    expect(sent).toBe(true);
+    expect(existsSync(agentPaths(s.home, "dca").notifications) ? notices(s.home) : []).toEqual([]);
+    expect(log).not.toMatch(/"signedOut":true/);
+    // The buy went on to the guard and the executor, as for any connected wallet.
+    expect(log).toMatch(/"event":"intent.queued"[^\n]*"kind":"buy"/);
   });
 
   it("says 'back' once after a new scan, and trades again", async () => {

@@ -242,7 +242,8 @@ export class LeagueSite {
       try {
         parsed = JSON.parse(text);
       } catch {
-        return response.status >= 500 || response.status === 429 ? parseRegisterAnswer(response.status, null) : { kind: "no-answer", reason: `the page answered ${response.status}, not JSON` };
+        // A gateway's page, not the route's answer: whether the POST reached the route is unknown.
+        return { kind: "no-answer", reason: `the page answered ${response.status}, not JSON` };
       }
       return parseRegisterAnswer(response.status, parsed);
     } catch (error) {

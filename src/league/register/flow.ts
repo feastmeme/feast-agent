@@ -180,7 +180,12 @@ export type SubmitOutcome =
 export async function submit(deps: FlowDeps, prepared: Prepared, options: SignOptions = {}): Promise<SubmitOutcome> {
   const now = deps.now ?? Date.now;
   const { fields } = prepared;
-  const signed = await deps.signer.signRegistration(fields, options);
+  let signed: SignOutcome;
+  try {
+    signed = await deps.signer.signRegistration(fields, options);
+  } catch (error) {
+    signed = { kind: "refused", reason: `the wallet did not answer: ${(error as Error).message}` };
+  }
   if (signed.kind !== "signed") {
     deps.log?.("register.not-signed", { why: signed.kind, reason: "reason" in signed ? signed.reason : null });
     return { kind: "not-signed", why: signed };
@@ -206,7 +211,8 @@ export async function submit(deps: FlowDeps, prepared: Prepared, options: SignOp
   deps.log?.("register.sent", { issuedAt: fields.issuedAt, bodyCoin: body.bodyCoin ?? null, xHandle: body.xHandle !== undefined });
   let answer = await deps.site.register(body);
   let reconciled: boolean | null = null;
-  if (answer.kind === "no-answer" || (answer.kind === "refused" && answer.code === "replayed")) {
+  // A lost answer, a replay, or a 5xx (the route's last 503 comes after its save is tried): did it land?
+  if (answer.kind === "no-answer" || (answer.kind === "refused" && (answer.code === "replayed" || answer.status >= 500))) {
     // Did it land? Ours is the kept one exactly when its issuedAt and manifesto are ours.
     const kept = await deps.site.kept(fields.wallet);
     if (kept.state === "read" && kept.agent && kept.agent.issuedAt === fields.issuedAt && kept.agent.manifesto === fields.strategy) {

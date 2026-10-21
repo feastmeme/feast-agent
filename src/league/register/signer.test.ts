@@ -47,6 +47,13 @@ describe("the signer's one signing path (PLAN-941 §5.3)", () => {
     await expect(signer.call("sign-message result", ["--order-id", order])).rejects.toMatchObject({ errorName: "NOT_ALLOWED" });
   });
 
+  it("refuses an execute whose request id is given twice", async () => {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const { runner } = fakeBaw({ account });
+    const signer = new BawSigner(runner);
+    await expect(signer.call("sign-message execute", ["--requestId", "req-1", "--requestId", "req-1"])).rejects.toMatchObject({ errorName: "NOT_ALLOWED" });
+  });
+
   it("checks the wallet first: signed in, and in Developer Mode", async () => {
     const account = privateKeyToAccount(generatePrivateKey());
     expect(await new BawSigner(fakeBaw({ account, connected: false }).runner).signRegistration(fields(account.address))).toEqual({ kind: "not-ready", reason: "signed-out" });

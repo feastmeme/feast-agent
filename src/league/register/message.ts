@@ -147,7 +147,8 @@ export async function signatureMatches(fields: RegisterFields, signature: Hex): 
  */
 export function previewDescribes(parsed: unknown, fields: RegisterFields): { ok: true } | { ok: false; reason: string } {
   const p = (parsed ?? {}) as Record<string, unknown>;
-  if (p.messageType !== undefined && p.messageType !== "SignTypedData") return { ok: false, reason: `the wallet reads it as ${String(p.messageType)}, not typed data` };
+  if (p.messageType !== "SignTypedData") return { ok: false, reason: `the wallet reads it as ${String(p.messageType ?? "nothing")}, not typed data` };
+  if (p.version !== undefined && p.version !== "V4") return { ok: false, reason: `the wallet reads it as typed data ${String(p.version)}, not V4` };
   if (typeof p.preCheckCode === "string" && p.preCheckCode !== "") return { ok: false, reason: `the wallet's pre-check said ${p.preCheckCode}` };
   let typed: unknown = p.message;
   if (typeof typed === "string") {
