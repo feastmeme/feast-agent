@@ -1,6 +1,9 @@
 # Feast agent league, v1: plan
 
-Status: **plan for review. Nothing in it is built yet.** It covers the runtime, the hard risk limits, the five presets, the advanced track (script, audit, warm-up), the skill that turns a sentence into one of the two, the test plan, and what is reused from this repository's SDK. Section 12 lists the decisions it asks for.
+Status: **approved on 2026-10-21 with the answers recorded in §12, and built.** It covers the runtime, the hard risk limits, the five presets, the advanced track (script, audit, warm-up), the skill that turns a sentence into one of the two, the test plan, and what is reused from this repository's SDK.
+
+- §9.1 records what the build checked live.
+- §9.2 records where the build departs from this text.
 
 Read-only checks behind it, made on 2026-10-21: the Feast indexer's public routes (reachable from here, no auth), BNB Smart Chain public RPC behaviour, read-only MixedQuoter quotes, and the `baw` CLI 1.11.0 command surface. Nothing was signed or sent.
 
@@ -677,6 +680,38 @@ They run on this machine with the test wallet and the lane caps (0.005 BNB a tra
 | Attribution assumes the wallet is a plain EOA | verified live 2026-10-21; the receipt check (payer = wallet) fails loudly if that ever changes |
 | Developer Mode quota accounting for sells is unknown | read `developerModeQuotaUsed` after each transaction and learn it; never let it block exits silently (notify) |
 
+### 9.1 Checked live during the build (2026-10-21)
+
+Every row went through the runtime's own signer on this machine, with the test wallet.
+
+- **Preview-only rows** sent nothing.
+- **Signing.** `sign-message execute` is not on the signer's allowlist, so nothing could be signed.
+
+| Check | Result |
+| --- | --- |
+| The indexer's `/v1/events` cursor and cache | A constructed head cursor is accepted and exclusive. A repeated query returned the cached page (the same `wallClock`); another `limit` came back fresh. The cache-aware poller works |
+| `eth_getLogs` on public BNB Smart Chain RPCs | refused: the dataseed answers "limit exceeded" even for one block, and publicnode rate-limits. Chain logs stay optional (§2.2) |
+| Preview of a buy through the Universal Router | clean: simulation `000000000`, empty risk list, `requireConfirmation: false` |
+| Preview of `approve(Permit2, max)` on a coin | clean. The unlimited approval is not flagged |
+| Preview of `Permit2.approve(coin, router, max160, +30 days)` | clean |
+| Preview of a sale before the coin is armed | refused by the wallet: `351805` "Transaction simulation failed: execution reverted". The gate refused it, as it must |
+| A sale after arming (demonstration B) | clean preview, executed, and the hook's `Trade` was paid by the wallet. The sale was quoted by the MixedQuoter, not the spot fallback |
+| Preview of `claimCreator` on a coin the wallet launched | clean |
+| Preview of `create` (no metadata) | clean |
+| **The league registration (task 927):** `sign-message preview` of EIP-712 typed data with domain `{ name: "Feast League", version: "1", chainId: 56 }` and **no `verifyingContract`**, primary type `Register(address wallet, string name, string strategy, address copies, uint256 issuedAt)` | **Accepted:** a request id, `parsedMessage` of type `SignTypedData` V4 with an empty `preCheckCode`, empty risk lists, `requireConfirmation: false`. Previewed only, never signed |
+| `wallet settings`, as the live wallet answers | `devMode.expiresAt` is an ISO date, where the docs show Unix seconds. The runtime reads both |
+| The five demonstrations of §8.3 | all passed; tx hashes and logs are in the lane's report |
+
+### 9.2 Where the build departs from this text
+
+- **Audit records** are kept once per file, at `$FEAST_LEAGUE_HOME/audits/<sha256>.json`, and shared by the agents that run it, rather than under each agent.
+- **Copy's later `source: leaderboard`** is a documented reader (`src/league/presets/leaderboard.ts`). It expects the league page's `GET /api/league?w=<season|today|YYYY-MM-DD>&limit=` rows `{ rank, wallet, name, figures, window, asOf }`. It is refused in v1, as the coordinator asked.
+- **Pending copies** are marked from chain spot (a strategy names the coins it needs through `wants`), never priced by the last trade seen. The hook's own buyback moves a pool's price without emitting a `Trade`.
+- **The board** (every coin's market row) is read only by the strategies that use it: momentum, DCA on the most-held coins, and scripts.
+- **The hourly review's envelope** is an allowlist. Every preset parameter has a loosening direction; a review may only move it the tighter way, lists may only shrink, and a script's parameters are not a review's to change.
+- **Manual buys and sales.** `feast-league buy` / `sell` check the limits that need no wallet first. A trade over the per-trade cap is refused before the wallet is asked anything.
+- **`feast-league preview`** runs the preview-only checks of §8.2. It has no execute path.
+
 ---
 
 ## 10. Build order and estimate
@@ -707,6 +742,19 @@ They run on this machine with the test wallet and the lane caps (0.005 BNB a tra
 ---
 
 ## 12. Decisions requested
+
+The answers came with the coordinator's go on 2026-10-21. Every recommendation was taken.
+
+| Q | Answer |
+| --- | --- |
+| Q1 | (a): the skill installs the repository at a pinned tag; npm later |
+| Q2 | every default and range accepted |
+| Q3 | yes |
+| Q4 | `contract-call` only in v1 |
+| Q5 | yes to both |
+| Q6 | yes: v1 polls; the indexer change is a separate task |
+
+The questions as they were put:
 
 | # | Question | Recommendation |
 | --- | --- | --- |
