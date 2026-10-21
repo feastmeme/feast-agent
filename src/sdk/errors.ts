@@ -1,6 +1,7 @@
 import { BaseError, ContractFunctionRevertedError, decodeErrorResult, type Hex } from "viem";
 
 import { refusalErrorsAbi } from "./abi.ts";
+import { venueRefusalsAbi } from "./venue-abi.ts";
 
 /** An error this SDK raises on purpose, with a sentence a person can act on. */
 export class FeastError extends Error {
@@ -110,4 +111,54 @@ export function refusalOf(error: unknown): Refusal {
     return describe(null, [], error.shortMessage);
   }
   return describe(null, [], error instanceof Error ? error.message : String(error));
+}
+
+/**
+ * The mainnet path wraps refusals in envelopes: the router's
+ * `ExecutionFailed(index, message)`, the quoter's `UnexpectedRevertBytes(bytes)`,
+ * and around a hook's refusal the pool manager's `WrappedError`. These are opened
+ * one by one, down to the error that actually refused — a buy over the opening
+ * cap reads `PurchaseCapExceeded`, not the quoter's envelope.
+ */
+export const INFINITY_REFUSALS_ABI = [...REFUSALS_ABI, ...venueRefusalsAbi] as const;
+
+/** Where each envelope keeps the revert it carries. */
+const ENVELOPES: Record<string, number> = { ExecutionFailed: 1, UnexpectedRevertBytes: 0, WrappedError: 2 };
+
+/** `Error(string)`: Solidity's `require(…, "…")`, which Permit2's token transfer speaks. */
+const ERROR_STRING = "0x08c379a0";
+
+/** The innermost refusal in raw revert data, envelopes opened; null when nothing decodes. */
+export function innermostRefusal(raw: Hex | undefined, depth = 0): Refusal | null {
+  if (!raw || raw.length < 10 || depth > 4) return null;
+  if (raw.slice(0, 10).toLowerCase() === ERROR_STRING) {
+    try {
+      const decoded = decodeErrorResult({ abi: [], data: raw });
+      const said = typeof decoded.args?.[0] === "string" ? decoded.args[0] : "Error(string)";
+      return describe(said, [], said);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const decoded = decodeErrorResult({ abi: INFINITY_REFUSALS_ABI, data: raw });
+    const slot = ENVELOPES[decoded.errorName];
+    if (slot === undefined) return describe(decoded.errorName, decoded.args ?? [], decoded.errorName);
+    const inner = innermostRefusal((decoded.args ?? [])[slot] as Hex | undefined, depth + 1);
+    return inner ?? describe(decoded.errorName, decoded.args ?? [], decoded.errorName);
+  } catch {
+    return null;
+  }
+}
+
+/** A refusal on the mainnet path, by the innermost error's name when there is one. */
+export function infinityRefusalOf(error: unknown): Refusal {
+  if (error instanceof BaseError) {
+    const reverted = error.walk((e) => e instanceof ContractFunctionRevertedError);
+    if (reverted instanceof ContractFunctionRevertedError && reverted.raw) {
+      const inner = innermostRefusal(reverted.raw);
+      if (inner) return inner;
+    }
+  }
+  return refusalOf(error);
 }

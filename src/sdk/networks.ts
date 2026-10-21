@@ -1,4 +1,4 @@
-import type { Address } from "viem";
+import type { Address, Hex } from "viem";
 
 /**
  * The two Feast deployments this SDK knows, selected by `FEAST_NETWORK`.
@@ -52,6 +52,8 @@ export type FeastNetwork = {
   /** True on a chain that holds real money. The SDK refuses to send transactions there. */
   realMoney: boolean;
   trade: TradeRoute;
+  /** The platform coin and its pool, where the network has one: FEAST on BNB Smart Chain. */
+  platformCoin?: { address: Address; symbol: string; poolId: Hex };
   contracts: {
     factory: Address;
     hook: Address;
@@ -190,6 +192,11 @@ export const MAINNET: FeastNetwork = {
     router: "0xd9C500DfF816a1Da21A48A732d3498Bf09dc9AEB",
     permit2: "0x31c2F6fcFf4F8759b3Bd5Bf0e1084A055615c768",
     mixedQuoter: "0x2dCbF7B985c8C5C931818e4E107bAe8aaC8dAB7C",
+  },
+  platformCoin: {
+    address: "0x747dC14ec8B21bD9137dAc9148d61A084c18C2A2",
+    symbol: "FEAST",
+    poolId: "0x58fbbd6ee5e1588979fac56f68cb10dbcfad04764facd33bb1080f4d2f80f8c0",
   },
   contracts: {
     factory: "0x1003b54659F5e31A7391fEBE824A137e8CDa90da",
