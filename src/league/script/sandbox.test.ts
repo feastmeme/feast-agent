@@ -101,6 +101,17 @@ describe("the script sandbox", () => {
     if (!out.ok) expect(out.error).toMatch(/synchronously/);
   });
 
+  it("never lets the host run the script's code outside the time budget: getters in meta or params, and queued promise jobs", async () => {
+    // A getter that never returns, read while describing the script: the load times out instead of hanging the host.
+    await expect(ScriptSandbox.start(`export const meta = { name: "t", get tickSeconds() { for (;;) {} } };\nexport function onTick(api) {}\n`, 3_000)).rejects.toThrow();
+    await expect(ScriptSandbox.start(`export const meta = { name: "t", tickSeconds: 60 };\nexport const params = { toJSON() { for (;;) {} } };\nexport function onTick(api) {}\n`, 3_000)).rejects.toThrow();
+    // A promise job that loops: it drains inside the timed call, so the call times out rather than the child hanging after it.
+    const started = Date.now();
+    const out = await onTick(`Promise.resolve().then(() => { for (;;) {} });`, 200);
+    expect(out.ok).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
   it("caps what one call can ask for", async () => {
     const out = await onTick(`for (let i = 0; i < 500; i++) api.buy({ coin: "FEAST", bnb: 0.001 });`);
     expect(out.ok && out.requests.length).toBe(50);

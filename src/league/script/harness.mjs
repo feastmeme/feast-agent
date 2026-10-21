@@ -25,12 +25,25 @@ let meta = null;
 // The api, defined inside the context, so the script only ever touches objects of its own realm.
 const RUNNER = String.raw`(() => {
   "use strict";
-  let onTick = null;
-  let onEvent = null;
+  let ns = null;
   const lc = (s) => String(s).toLowerCase();
   return {
-    set(tick, event) { onTick = tick; onEvent = event; },
+    set(namespace) { ns = namespace; },
+    // Read the script's own objects here, inside the context and under the timeout: never from the host.
+    describe() {
+      const m = ns.meta && typeof ns.meta === "object" ? ns.meta : {};
+      const meta = {
+        name: typeof m.name === "string" ? m.name.slice(0, 60) : "script",
+        tickSeconds: typeof m.tickSeconds === "number" ? m.tickSeconds : 60,
+        events: Array.isArray(m.events) ? m.events.filter((e) => typeof e === "string").slice(0, 5) : [],
+        watch: Array.isArray(m.watch) ? m.watch.filter((w) => typeof w === "string").slice(0, 20) : [],
+      };
+      const params = ns.params && typeof ns.params === "object" ? JSON.parse(JSON.stringify(ns.params)) : {};
+      return JSON.stringify({ meta, params, exports: Object.keys(ns) });
+    },
     run(inputJson) {
+      const onTick = ns.onTick;
+      const onEvent = ns.onEvent;
       const input = JSON.parse(inputJson);
       const s = input.snapshot;
       const out = { requests: [], logs: [] };
@@ -97,7 +110,8 @@ const FREEZE = String.raw`(() => {
 })()`;
 
 async function load(source) {
-  context = vm.createContext({}, { name: "feast-script", codeGeneration: { strings: false, wasm: false } });
+  // microtaskMode "afterEvaluate": promise jobs the script queues drain inside each timed call, never after it.
+  context = vm.createContext({}, { name: "feast-script", codeGeneration: { strings: false, wasm: false }, microtaskMode: "afterEvaluate" });
   const runner = vm.runInContext(RUNNER, context);
   vm.runInContext(FREEZE, context);
   const module = new vm.SourceTextModule(source, { context, identifier: "strategy.mjs" });
@@ -105,18 +119,20 @@ async function load(source) {
     throw new Error("imports are not allowed in a strategy script");
   });
   await module.evaluate({ timeout: LOAD_TIMEOUT_MS });
-  const ns = module.namespace;
-  runner.set(ns.onTick, ns.onEvent);
+  if (module.status === "errored") throw module.error;
+  runner.set(module.namespace);
   // The runner and the input travel under random global names, defined non-enumerable on a global object nobody can name.
   const token = randomBytes(12).toString("hex");
   const runName = `__run_${token}`;
+  const describeName = `__describe_${token}`;
   inputName = `__in_${token}`;
   Object.defineProperty(context, runName, { value: (json) => runner.run(json), enumerable: false });
+  Object.defineProperty(context, describeName, { value: () => runner.describe(), enumerable: false });
   callScript = new vm.Script(`${runName}(${inputName})`);
-  const m = ns.meta && typeof ns.meta === "object" ? ns.meta : {};
-  meta = { name: typeof m.name === "string" ? m.name : "script", tickSeconds: typeof m.tickSeconds === "number" ? m.tickSeconds : 60, events: Array.isArray(m.events) ? m.events.filter((e) => typeof e === "string") : [], watch: Array.isArray(m.watch) ? m.watch.filter((w) => typeof w === "string") : [] };
-  const params = ns.params && typeof ns.params === "object" ? JSON.parse(JSON.stringify(ns.params)) : {};
-  return { meta, params, exports: Object.keys(ns) };
+  // Only a JSON string comes back across the boundary.
+  const described = JSON.parse(String(new vm.Script(`${describeName}()`).runInContext(context, { timeout: LOAD_TIMEOUT_MS })));
+  meta = described.meta;
+  return { meta: described.meta, params: described.params, exports: described.exports };
 }
 
 /** One call into the script, under the vm's timeout: the input is a string, the answer is a string. */
