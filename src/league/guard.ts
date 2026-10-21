@@ -33,6 +33,11 @@ export type Intent = {
   /** A buy signal goes stale: past this it is dropped, never traded late. */
   expiresAt?: number;
   launch?: { name: string; symbol: string; quote: string; description?: string; burn?: number; referrer?: number };
+  /** A buy paid in the pool's quote token (a buyback from claimed fees): how much of it, raw units. */
+  payIn?: "native" | "quote";
+  quoteAmount?: bigint;
+  /** A creator claim, and what share of it to spend buying the coin back. */
+  claim?: { buybackPct: number; minClaimBnb: number };
 };
 
 export type WalletState = { connected: boolean; devMode: boolean; quotaLeftUsd: number; balanceWei: bigint };
