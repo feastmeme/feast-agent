@@ -103,6 +103,8 @@ export type Strategy = {
   meta: Meta;
   onTick(api: StrategyApi, extras?: PresetExtras): void;
   onEvent?(api: StrategyApi, event: StrategyEvent, extras?: PresetExtras): void;
+  /** Coins the strategy needs a fresh chain price for in its next snapshot, besides meta.watch (presets only). */
+  wants?(state: Record<string, unknown>): string[];
 };
 
 let counter = 0;

@@ -60,6 +60,8 @@ export type RuntimeDeps = {
 type Loaded = {
   meta: Meta;
   params: Record<string, unknown>;
+  /** Coins to mark fresh from the chain in the next snapshot, besides meta.watch. */
+  wants(state: Record<string, unknown>): string[];
   call(fn: "onTick" | "onEvent", snapshot: Snapshot, state: Record<string, unknown>, event?: StrategyEvent): Promise<{ intents: Intent[]; problems: string[]; logs: string[]; state: Record<string, unknown> }>;
   stop(): void;
 };
@@ -204,6 +206,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       loaded = {
         meta: { ...strategy.meta, tickSeconds: presetAgent.tickSeconds },
         params: presetAgent.params,
+        wants: (state) => strategy.wants?.(state) ?? [],
         async call(fn, snapshot, state, event) {
           const ttl = fn === "onEvent" ? 30_000 : presetAgent.tickSeconds * 1_000;
           const logs: string[] = [];
@@ -222,6 +225,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       loaded = {
         meta: { ...sandbox.meta, tickSeconds: scriptAgent.tickSeconds },
         params,
+        wants: () => [],
         async call(fn, snapshot, state, event) {
           const result = await sandbox.call(fn, { snapshot, state, params, event }, fn === "onEvent" ? 250 : 1_000);
           if (!result.ok) return { intents: [], problems: [`the script failed: ${result.error}`], logs: [], state };
@@ -542,7 +546,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           if (events.length > 0) {
             const marks = await market.marks(book);
             const balanceWei = await chain.balance(wallet).catch(() => walletState.balanceWei);
-            const snapshot = await market.snapshot({ now: clock(), balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: loaded.meta.watch, feast, needBoard: false });
+            const snapshot = await market.snapshot({ now: clock(), balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: [...loaded.meta.watch, ...loaded.wants(strategyState)], feast, needBoard: false });
             const seen = watched();
             for (const event of events) {
               for (const strategyEvent of await market.ingest(event, clock(), seen)) {
@@ -576,7 +580,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           );
           // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
           const needBoard = agent.track === "script" || agent.preset === "momentum" || (agent.preset === "dca" && agent.params.targets === "topHolders");
-          const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: loaded.meta.watch, feast, needBoard });
+          const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: [...loaded.meta.watch, ...loaded.wants(strategyState)], feast, needBoard });
           await runStrategy("onTick", snapshot);
         } catch (error) {
           log("tick.failed", { reason: String((error as Error).message).slice(0, 300) });

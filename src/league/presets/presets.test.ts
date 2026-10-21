@@ -238,11 +238,12 @@ describe("③ copy", () => {
     expect(run("copy", snap({ now: T + 6_000 }), s3, { wallets: [LEADER] })).toHaveLength(0);
   });
 
-  it("reads the current price from the last trade on the stream when the coin has no row", () => {
+  it("asks the runtime for a fresh chain price of every pending copy, and never copies on a trade's stale price", () => {
     const state = {};
     run("copy", snap(), state, { wallets: [LEADER] }, leaderTrade("buy"));
+    expect(presetStrategy("copy").wants?.(state)).toEqual([COIN]);
     const trades = [{ coin: COIN, side: "buy" as const, payer: CREATOR, bnb: 0.01, coins: 1, priceBnb: 1.02, at: T + 3_000, txHash: "0x" }];
-    expect(run("copy", snap({ now: T + 6_000, trades }), state, { wallets: [LEADER] })).toMatchObject([{ kind: "buy", coin: COIN }]);
+    expect(run("copy", snap({ now: T + 6_000, trades }), state, { wallets: [LEADER] })).toHaveLength(0);
   });
 
   it("sells a copied coin when its leader sells", () => {

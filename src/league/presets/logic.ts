@@ -173,10 +173,9 @@ function copy(): Strategy {
         continue;
       }
       if (now - item.due > 10 * MINUTE || api.read.position(item.coin)) continue;
-      // Fail closed: copy only when the chase can be measured and is inside the limit. The price is the coin's
-      // row, or else the last trade on the event stream.
-      const lastTrade = api.read.trades(item.coin, { limit: 1 }).at(-1);
-      const price = api.read.coin(item.coin)?.priceBnb ?? lastTrade?.priceBnb ?? null;
+      // Fail closed: copy only when the chase can be measured and is inside the limit. The price is the
+      // chain's spot for a pending coin (the runtime marks every coin `wants` names), never a stale trade.
+      const price = api.read.coin(item.coin)?.priceBnb ?? null;
       if (!item.leaderPrice || item.leaderPrice <= 0 || !price || price <= 0) {
         api.log("copy: skipped, the price move since the leader's fill cannot be measured");
         continue;
@@ -193,6 +192,7 @@ function copy(): Strategy {
   };
   return {
     meta: { name: "copy", tickSeconds: PRESETS.copy.tickSeconds, events: PRESETS.copy.events, watch: [] },
+    wants: (state) => (Array.isArray(state.pending) ? (state.pending as Pending[]).map((p) => p.coin) : []),
     onTick: run,
     onEvent(api, event: StrategyEvent) {
       if (event.type !== "trade") return;
