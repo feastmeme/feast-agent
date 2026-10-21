@@ -10,7 +10,7 @@
 - This repository: `src/league/**` (`cli.ts`, `baw.ts`, `chain.ts`, `runtime.ts`, `guard.ts`, `strategy.ts`, `executor.ts`, `store.ts`, `card.ts`, the presets), `skills/feast-league/**`, the README's league section, `docs/league/PLAN.md` §9.
 - Task 927, branch `todo/02ae9342a9eab7b6`:
   - committed: `PLAN-v2.md` §0 Q1–Q3, §3, §4, and `API.md`;
-  - in the worktree, uncommitted and read only: `src/app/api/league/register/route.ts`, `src/app/api/league/agent-id/route.ts`, `src/app/api/league/route.ts`, `src/lib/league/{message,agent-id,body-coin,registry,wire,season,prereg}.ts` and the rig.
+  - read first in its worktree while in flight, then re-checked at its seal `ce268d59`: `src/app/api/league/register/route.ts`, `src/app/api/league/agent-id/route.ts`, `src/app/api/league/route.ts`, `src/lib/league/{message,agent-id,body-coin,registry,wire,season,prereg}.ts` and the rig.
 - The judgement packet `judgement-league-rules-20261021.md`, §1 and §6 (§5 and §8 for context).
 - The Binance Agentic Wallet skill: `sign-message`, `wallet settings` and authentication.
 
@@ -38,7 +38,7 @@ The session fields:
 - The runtime reads the wallet's settings every 5 minutes, so on a running agent `sessionExpireTime` never comes within 6 h, and its 6 h and 1 h warnings never fire.
 - `signInMaxTime` is not read at all. §7 fixes both.
 
-**927's in-flight route differs from its PLAN in two places**, and I bind to the route (Q1):
+**927's route differs from its PLAN in two places**, unchanged at its seal `ce268d59`, and I bind to the route (Q1):
 - **The 201 answer** is `{ agent, seating: { state: "seated", seatNo, founding, waitlisted } | { state: "pending", reason: "no-body-coin" }, prereg }`, not `seat | pending`.
 - **"No Agent ID"** is a `400 no-agent-id` refusal, not a pending answer.
 
@@ -48,13 +48,13 @@ The session fields:
 
 | # | Question | My recommendation |
 | --- | --- | --- |
-| Q1 | **Which answer shape to bind to.** 927's PLAN-v2 §3 says `seat: { no, founding, waitlisted } \| pending: "no-agent-id" \| "no-body-coin"`. Its in-flight `route.ts` answers `201 { agent, seating, prereg }` and refuses `no-agent-id` with a 400. | Bind to `route.ts`, and parse the PLAN shape too, so either lands. Ask 927 to write the shape it ships into `API.md` (it still describes v1: 140 characters, `copies`). |
+| Q1 | **Which answer shape to bind to.** 927's PLAN-v2 §3 says `seat: { no, founding, waitlisted } \| pending: "no-agent-id" \| "no-body-coin"`. Its `route.ts`, sealed since at `ce268d59` (`0c421887`), answers `201 { agent, seating, prereg }` and refuses `no-agent-id` with a 400. | Bind to the sealed `route.ts`, and parse the PLAN shape too, so either lands. Ask 927 to write the shape it ships into `API.md`; at `ce268d59` it still describes v1 (140 characters, `copies`). |
 | Q2 | **Waitlist place.** The page returns `seatNo` and `waitlisted`; its plan says "the 1,001st is waitlisted with place 1". | The agent shows place = `seatNo − seats.cap` (cap 1,000). Better: 927 returns `place` itself. |
 | Q3 | **This wallet's own row for the status card.** `GET /api/league` has no "me" row. `me=` only places the viewer in the arena, and `limit` caps at 100, so a rank past 100, and an eaten agent listed after the living, can fall off the page. | Ask 927 for `me: { earners: row \| null, backed: row \| null }` when `me=` is given. Until then the card reads the top 100 by Agent ID and says "outside the top 100" when it is not there. |
 | Q4 | **One real `sign-message execute` on mainnet.** The brief says previews only on mainnet. The execute answer's signature format (r‖s without `0x` plus `signatureRecovery`) is then checked only against the wallet's docs. | Allow one execute of a Register message on the lane wallet: gasless, **never POSTed**, manifesto "preview-check". The lane wallet has no Agent ID, so the page would refuse that signature anyway (`no-agent-id`). Without it, the production path still checks every signature locally before sending (§3). |
 | Q5 | **The body coin's default pair.** | **WBNB**, as the launch preset defaults. It is the route `preview create` already passed live; backers pay in BNB, and the 0.02 BNB vote threshold is in BNB. The user may name any listed tokenized stock instead (AAPLB, NVDAB, TSLAB, …). |
 | Q6 | **The release the skill installs.** `references/setup.md` pins `--branch league-v1`, which predates `register`. | A new tag `league-v2` at this lane's seal, with `setup.md` pinned to it; the owner pushes it with `league-v1` (task 934). The alternative is re-pointing `league-v1` before its first push; it was never pushed, but 926's report names its commit. |
-| Q7 | **The risk text.** The brief says packet §6, verbatim. 927 used "the brief's" English, which differs in a few words ("investment advice", "promise no return", "priced in USDT"). | Packet §6 for the agent, the skill and the README, byte for byte, held by a test. Ask 927 to use the same, or tell me which text is canonical. |
+| Q7 | **The risk text.** The brief says packet §6, verbatim. 927, sealed at `ce268d59`, ships two variants of it:<br>• **zh:** the packet's words with full-width `，` and `；` where the packet has ASCII `,` and `;`. Its i18n gate refuses ASCII `,` and `;` in Chinese.<br>• **en:** "the brief's" wording, which differs from the packet's ("investment advice", "promise no return", "priced in USDT", "the wallet may be unavailable where you are"). | Packet §6 for the agent, the skill and the README, byte for byte, held by a test. For the zh punctuation I would follow the page (full-width), so a reader sees one text in both places; that is a one-line switch. The en wording needs one canonical text: tell me which. |
 | Q8 | **Registering without a body coin.** | Allowed, but never the default. The agent offers the launch first. If the user declines, it offers a seatless "pending" registration and says plainly that seats go in order. |
 | Q9 | **The session reminder's premise** (measured above). | Watch the earlier of `sessionExpireTime` and `signInMaxTime`. Warn once per sign-in at 6 h and 1 h before it, and once when it ends, persisted so a restart does not repeat it. This replaces today's per-process warnings and the "signed out" notice that repeats every 10 minutes. It is a change to `runtime.ts`'s wallet read, not to the money path. |
 | Q10 | **The 927 rig.** It is TLS Postgres, a Next production build and the task 743 stub chain, uncommitted, in 927's own worktree. | Not run from this lane. The tests use a fake site bound to `route.ts`'s codes and `wire.ts`'s types (§10). Optionally, once 927 seals, one run of `register` against the rig's loopback page with a fake `baw` holding the rig's throwaway key. |
@@ -670,7 +670,7 @@ Your agent runs its preset whatever the league says.
 
 > You trade with your own wallet and your own funds. Your AI agent executes trades automatically under your settings, and all gains and losses are yours; you can lose everything you put in. Feast never holds your funds, keys, wallet sessions or AI subscription accounts. The preset strategies are execution templates, not financial advice, and no return is promised. Prizes are paid by Feast in FEAST, valued in USDT at settlement; the price moves after payout. You must be 18 or older and follow your local law; some regions cannot take part or receive prizes, and the wallet service may be unavailable where you live.
 
-A test holds every copy to a golden string and its sha256. When the vault file exists, it is compared too. Note that the packet's zh uses ASCII `,` and `;` with `、` and `。`, and the test keeps it that way.
+A test holds every copy to a golden string and its sha256. When the vault file exists, it is compared too. Note that the packet's zh uses ASCII `,` and `;` with `、` and `。`; the test holds whichever punctuation Q7 settles.
 
 **Public and private** (docs and card D):
 
@@ -793,7 +793,7 @@ The sandbox has no HandleRegistry and no `baw`, so the Agent ID comes from the f
 
 ## 12. Risks
 
-1. **927 is in flight.** Its answer shape or codes may still move. The parser is tolerant (Q1), the golden vector comes from 927's builder, and I re-read `route.ts` and `wire.ts` at seal.
+1. **927 is sealed but not merged.** Its answer shape or codes may still move in review. The parser is tolerant (Q1), the golden vector comes from 927's builder at `ce268d59`, and I re-read `route.ts` and `wire.ts` at this lane's seal.
 2. **The live execute answer is unverified** unless Q4 is a yes. The production path refuses to send anything its local check cannot recover.
 3. **What `signInMaxTime` does at its moment is unverified** (§7).
 4. **Nothing installs until the push.** `npx skills add feastmeme/feast-agent` installs nothing until the repository is public, and the skill's clone needs the new tag pushed (Q6). The packet's plan puts the season start at 10/27, so the push is on the critical path.
