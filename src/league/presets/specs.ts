@@ -218,7 +218,8 @@ export function resolveParams(preset: PresetId, given: Record<string, unknown>, 
         break;
       }
       case "quotes": {
-        const value = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+        // Given as text ("WBNB,BNCB"), or already resolved to a list.
+        const value = Array.isArray(raw) ? raw.map((q) => String(q)).join(",").toUpperCase() : typeof raw === "string" ? raw.trim().toUpperCase() : "";
         if (value === "ALL") {
           params[p.key] = "all";
           break;

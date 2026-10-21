@@ -128,17 +128,89 @@ export function applyChange(
   const next: AgentConfig = { ...agent, params, limits: limits.limits, tickSeconds };
   if (options.byReview) {
     const errors = loosenedBeyond(next.limits, agent.confirmed.limits);
-    for (const [key, value] of Object.entries(next.params)) {
-      const before = agent.confirmed.params[key];
-      const raising = typeof value === "number" && typeof before === "number" && value > before;
-      if (raising && (/Bnb$/.test(key) || /^(stopLossPct|slippagePct|maxPositions|snipesPerHour|maxBuysPerDay|proportionalPct)$/.test(key))) {
-        errors.push(`${key} ${value} is above the ${before} you confirmed: only you can raise it`);
-      }
-    }
+    if (tickSeconds < agent.confirmed.tickSeconds) errors.push(`a tick of ${tickSeconds} s is faster than the ${agent.confirmed.tickSeconds} s you confirmed`);
+    if (agent.track === "script") {
+      if (Object.keys(change.params ?? {}).length > 0) errors.push("a review may not change a script's parameters");
+    } else errors.push(...reviewLoosens(next.params, agent.confirmed.params));
     if (errors.length > 0) return { ok: false, errors };
     return { ok: true, agent: next };
   }
   return { ok: true, agent: confirmAgent(next) };
+}
+
+/**
+ * Which way each preset parameter loosens. A review may move a parameter only
+ * the tighter way, or either way if it is neutral; anything not listed here
+ * may not be changed by a review at all.
+ */
+const LOOSER: Record<string, "higher" | "lower" | "neutral"> = {
+  // Sizes, counts, windows and tolerances: higher is looser.
+  buyBnb: "higher",
+  dipBuyBnb: "higher",
+  openingBuyBnb: "higher",
+  maxPositions: "higher",
+  snipesPerHour: "higher",
+  maxBuysPerDay: "higher",
+  proportionalPct: "higher",
+  maxCreatorLaunches24h: "higher",
+  maxAgeSeconds: "higher",
+  maxAgeHours: "higher",
+  slippagePct: "higher",
+  stopLossPct: "higher",
+  trailingStopPct: "higher",
+  timeStopMinutes: "higher",
+  timeStopHours: "higher",
+  maxChasePct: "higher",
+  buybackPct: "higher",
+  topN: "higher",
+  // Entry thresholds and spacing: lower is looser.
+  minVolumeBnb: "lower",
+  minNewHolders: "lower",
+  minPriceChangePct: "lower",
+  minAgeMinutes: "lower",
+  minLeaderBuyBnb: "lower",
+  everyMinutes: "lower",
+  buybackEveryMinutes: "lower",
+  delaySeconds: "lower",
+  dipPct: "lower",
+  exhaustionRatio: "lower",
+  minClaimBnb: "lower",
+  // Shapes of a signal, not its strength.
+  lookbackMinutes: "neutral",
+  exhaustionWindowMinutes: "neutral",
+  takeProfitPct: "neutral",
+  takeProfitSellPct: "neutral",
+};
+
+function reviewLoosens(next: Record<string, unknown>, confirmed: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  for (const [key, value] of Object.entries(next)) {
+    const before = confirmed[key];
+    if (same(value, before)) continue;
+    const direction = LOOSER[key];
+    if (typeof value === "number" && typeof before === "number" && direction) {
+      if (direction === "higher" && value > before) errors.push(`${key} ${value} is above the ${before} you confirmed: only you can raise it`);
+      if (direction === "lower" && value < before) errors.push(`${key} ${value} is below the ${before} you confirmed: only you can lower it`);
+      continue;
+    }
+    if (key === "takeProfitPct" && (value === null || before === null)) continue;
+    if (key === "wallets" && Array.isArray(value) && Array.isArray(before)) {
+      const allowed = new Set(before.map((w) => String(w).toLowerCase()));
+      if (value.every((w) => allowed.has(String(w).toLowerCase()))) continue;
+      errors.push("a review may drop followed wallets, never add one");
+      continue;
+    }
+    if (key === "quotes") {
+      const narrowed = Array.isArray(value) && (before === "all" || (Array.isArray(before) && value.every((q) => (before as unknown[]).includes(q))));
+      if (narrowed) continue;
+      errors.push("a review may narrow the pairs, never widen them");
+      continue;
+    }
+    if (key === "requireMetadata" && value === true) continue;
+    errors.push(`a review may not change ${key}: only you can`);
+  }
+  return errors;
 }
 
 export function loadAgent(home: string, name: string): AgentConfig | null {
