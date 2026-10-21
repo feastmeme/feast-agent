@@ -14,6 +14,13 @@ import type { SessionCode } from "./register/copy.ts";
  * The reminder speaks once per sign-in: at 6 h, at 1 h, when it ends, and
  * once more when the user has scanned again. What it has said is kept on disk,
  * keyed by the sign-in, so a restart never repeats it.
+ *
+ * THE WALLET IS THE AUTHORITY. The known end only says when to ask: once it has
+ * passed, the runtime asks the wallet at once, and only a wallet that says it is
+ * not connected (or cannot be read past the end) counts as signed out. A wallet
+ * that still says CONNECTED with its settings read is believed over its own
+ * end time and over this machine's clock, so a wrong field or a fast clock can
+ * never hold the agent's exits.
  */
 
 export type SessionView = { key: string | null; end: number | null; source: "sign-in limit" | "inactivity" | null };
@@ -45,9 +52,11 @@ export function sessionStep(memory: SessionMemory, reading: { connected: boolean
   if (reading.view) {
     // A new sign-in: everything is said afresh, after one "back" if the last one had ended.
     if (reading.view.key !== null && reading.view.key !== memory.key) {
-      if (memory.said.includes("ended") && reading.connected && !(reading.view.end !== null && now >= reading.view.end)) say.push("back");
+      if (memory.said.includes("ended") && reading.connected) say.push("back");
       next = { key: reading.view.key, end: reading.view.end, said: [] };
     } else next.end = reading.view.end;
+    // Connected, settings read, yet past the end it gave: the wallet is believed, and that end is not one.
+    if (reading.connected && next.end !== null && now >= next.end) next.end = null;
   }
   const signedOut = !reading.connected || (next.end !== null && now >= next.end);
   if (signedOut) {

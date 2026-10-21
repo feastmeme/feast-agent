@@ -38,6 +38,9 @@ export type FakeBawOptions = {
   signatureForm?: "rs" | "full";
   /** Sign with another key than the wallet's. */
   signWith?: LocalAccount;
+  /** The execute answers with an error; or the first n result polls do. */
+  failExecute?: boolean;
+  failPolls?: number;
   settings?: Record<string, unknown>;
 };
 
@@ -90,6 +93,7 @@ export function fakeBaw(options: FakeBawOptions): { runner: BawRunner; calls: st
         });
       }
       case "sign-message execute": {
+        if (options.failExecute) return { stdout: JSON.stringify({ success: false, error: { code: 500, name: "INTERNAL", message: "try later" } }), stderr: "", code: 1 };
         const typed = previews.get(value("--requestId"));
         if (!typed) return { stdout: JSON.stringify({ success: false, error: { code: 1, name: "NOT_FOUND", message: "no such request" } }), stderr: "", code: 1 };
         const signature = await sign(typed as never);
@@ -105,6 +109,7 @@ export function fakeBaw(options: FakeBawOptions): { runner: BawRunner; calls: st
         const confirm = options.confirm;
         if (!order || confirm?.kind !== "app") return { stdout: JSON.stringify({ success: false, error: { name: "NOT_FOUND" } }), stderr: "", code: 1 };
         order.polls += 1;
+        if (order.polls <= (options.failPolls ?? 0)) return { stdout: "502 Bad Gateway", stderr: "", code: 1 };
         if (order.polls < confirm.polls || confirm.then === "PENDING_CONFIRMATION") return ok({ orderId: value("--order-id"), status: "PENDING_CONFIRMATION", signature: null, signatureRecovery: null });
         if (confirm.then !== "COMPLETED") return ok({ orderId: value("--order-id"), status: confirm.then, signature: null, signatureRecovery: null });
         return ok({ orderId: value("--order-id"), status: "COMPLETED", signature: order.signature.signature, signatureRecovery: order.signature.recovery || null });
@@ -146,7 +151,7 @@ export class FakeLeaguePage {
   readonly kept = new Map<string, Kept>();
   readonly posts: Record<string, unknown>[] = [];
   /** Knobs, set by a test before a request. */
-  next: { status?: 429 | 503; dropAnswer?: boolean; refuse?: { status: number; code: string; field?: string } } = {};
+  next: { status?: 429 | 503; dropAnswer?: boolean; refuse?: { status: number; code: string; field?: string }; failAfterSave?: boolean; gateway?: number } = {};
   private server: Server | null = null;
   private seat: number;
   base = "";
@@ -294,6 +299,16 @@ export class FakeLeaguePage {
       this.next = {};
       req.socket.destroy();
       return;
+    }
+    if (this.next.failAfterSave) {
+      this.next = {};
+      return this.refuse(res, 503, "unavailable");
+    }
+    if (this.next.gateway) {
+      const status = this.next.gateway;
+      this.next = {};
+      res.writeHead(status, { "content-type": "text/html" });
+      return void res.end("<html>bad gateway</html>");
     }
     return this.json(res, 201, { agent: this.publicAgent(k), ...this.seating(k), prereg });
   }

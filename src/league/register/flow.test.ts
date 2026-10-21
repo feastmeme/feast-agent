@@ -184,6 +184,29 @@ describe("registration, end to end against the fake page (PLAN-941 §1, §10)", 
     expect((await register(w)).outcome).toMatchObject({ kind: "answer", answer: { kind: "kept", seating: { kind: "seated", seatNo: 1 } }, reconciled: true });
   });
 
+  it("reconciles a 503 that came after the page saved it, and a gateway's HTML page", async () => {
+    const after = await world();
+    after.page.next = { failAfterSave: true };
+    expect((await register(after)).outcome).toMatchObject({ answer: { kind: "kept", seating: { seatNo: 1 } }, reconciled: true });
+    const gateway = await world();
+    gateway.page.next = { gateway: 502 };
+    expect((await register(gateway)).outcome).toMatchObject({ answer: { kind: "kept" }, reconciled: true });
+    // A 503 that kept nothing stays a refusal.
+    const nothing = await world();
+    nothing.page.next = { status: 503 };
+    expect((await register(nothing)).outcome).toMatchObject({ answer: { kind: "refused", status: 503 } });
+  });
+
+  it("says the wallet failed, rather than crash, when the execute errs; a failing result poll is asked again", async () => {
+    const failing = await world({ baw: { failExecute: true } });
+    expect((await register(failing)).outcome).toMatchObject({ kind: "not-signed", why: { kind: "refused" } });
+    expect(failing.page.posts).toHaveLength(0);
+    const flaky = await world({ baw: { confirm: { kind: "app", polls: 3, then: "COMPLETED" }, failPolls: 2 } });
+    expect((await register(flaky)).outcome).toMatchObject({ answer: { kind: "kept" } });
+    const broken = await world({ baw: { confirm: { kind: "app", polls: 9, then: "COMPLETED" }, failPolls: 5 } });
+    expect((await register(broken)).outcome).toMatchObject({ kind: "not-signed", why: { kind: "refused" } });
+  });
+
   it("reads every refusal by its code", async () => {
     for (const [status, code, field] of [
       [400, "invalid-fields", "strategy"],

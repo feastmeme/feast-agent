@@ -117,9 +117,10 @@ const unixSeconds = (v: unknown): number | null => {
   return null;
 };
 
+/** The value after a flag given exactly once; empty when it is missing or repeated. */
 const after = (args: readonly string[], flag: string) => {
   const i = args.indexOf(flag);
-  return i >= 0 ? (args[i + 1] ?? "") : "";
+  return i >= 0 && args.lastIndexOf(flag) === i ? (args[i + 1] ?? "") : "";
 };
 const ID = /^[\w.:=+/-]{1,256}$/;
 
@@ -274,7 +275,12 @@ export class BawSigner implements Signer, RegistrationSigner {
       if (a.status === "EXPIRED") return { kind: "expired" };
       return { kind: "refused", reason: `the wallet answered ${String(a.status ?? "nothing")}` };
     };
-    const executed = await this.ok("sign-message execute", ["--requestId", d.requestId]);
+    let executed: unknown;
+    try {
+      executed = await this.ok("sign-message execute", ["--requestId", d.requestId]);
+    } catch (error) {
+      return { kind: "refused", reason: error instanceof BawError ? error.message : String(error) };
+    }
     const first = answer(executed);
     if (first !== "pending") return first;
     const orderId = str((executed as Record<string, unknown>).orderId);
@@ -283,9 +289,20 @@ export class BawSigner implements Signer, RegistrationSigner {
     options.onPending?.();
     const until = this.clock() + (options.waitMs ?? 10 * 60_000);
     try {
+      // A failed poll is asked again: the user may be approving in the App right now. Three in a row end the wait.
+      let failures = 0;
       while (this.clock() < until) {
         await sleep(options.pollMs ?? 5_000);
-        const next = answer(await this.ok("sign-message result", ["--order-id", orderId]));
+        let raw: unknown;
+        try {
+          raw = await this.ok("sign-message result", ["--order-id", orderId]);
+          failures = 0;
+        } catch (error) {
+          failures += 1;
+          if (failures >= 3) return { kind: "refused", reason: `the wallet's result could not be read: ${error instanceof BawError ? error.message : String(error)}` };
+          continue;
+        }
+        const next = answer(raw);
         if (next !== "pending") return next;
       }
       return { kind: "expired" };

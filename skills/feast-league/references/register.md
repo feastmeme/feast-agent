@@ -104,6 +104,7 @@ zh:
 | --- | --- | --- |
 | signed out | Sign in first: say "sign in" and scan the code in the Binance App. | 先登录：说「登录」，在 Binance App 里扫码。 |
 | Developer Mode off | Turn on Developer Mode in the Binance App first: the wallet signs the registration through it. | 先在 Binance App 里打开 Developer Mode：钱包通过它签这条报名消息。 |
+| the wallet cannot be read | The wallet couldn't be read just now (baw wallet status did not answer in JSON). Nothing was signed or sent. Try again in a minute. | 暂时读不到钱包（baw wallet status did not answer in JSON）。没有签名，也没有发送任何东西。过一分钟再试。 |
 
 ## B. Your questions, in one message
 

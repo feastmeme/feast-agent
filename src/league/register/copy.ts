@@ -499,3 +499,7 @@ export function alreadyLaunchedLine(coin: string, lang: Lang): string {
 export function queuedLaunchLine(name: string, lang: Lang): string {
   return lang === "zh" ? `已交给正在运行的 agent「${name}」，下一次运行时发出。用 feast-league status ${name} 查看。` : `Queued for the running agent "${name}"; it launches within a tick. See feast-league status ${name}.`;
 }
+
+export function walletUnreadable(reason: string, lang: Lang): string {
+  return lang === "zh" ? `暂时读不到钱包（${reason}）。没有签名，也没有发送任何东西。过一分钟再试。` : `The wallet couldn't be read just now (${reason}). Nothing was signed or sent. Try again in a minute.`;
+}

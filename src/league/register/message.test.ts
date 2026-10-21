@@ -140,5 +140,7 @@ describe("the wallet's preview of the message", () => {
     expect(previewDescribes({ ...parsed(), preCheckCode: "E1" }, FIELDS).ok).toBe(false);
     expect(previewDescribes({ messageType: "PersonalSign", message: "x" }, FIELDS).ok).toBe(false);
     expect(previewDescribes({ messageType: "SignTypedData", message: "not json" }, FIELDS).ok).toBe(false);
+    expect(previewDescribes({ ...parsed(), version: "V3" }, FIELDS).ok).toBe(false);
+    expect(previewDescribes({ ...parsed(), messageType: undefined }, FIELDS).ok).toBe(false);
   });
 });

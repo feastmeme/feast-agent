@@ -11,7 +11,7 @@ import { MAINNET } from "../sdk/networks.ts";
 import { applyChange, confirmAgent, loadAgent, planAgent, saveAgent, type AgentConfig } from "./agent.ts";
 import { AUDIT_RULES } from "./audit/static.ts";
 import { auditFile, auditRefusal, recordModelVerdict } from "./audit/verdict.ts";
-import { BawSigner, execRunner } from "./baw.ts";
+import { BawError, BawSigner, execRunner } from "./baw.ts";
 import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
@@ -46,6 +46,7 @@ import {
   signingLine,
   utc8,
   walletNotReady,
+  walletUnreadable,
   xHandleProblem,
   type Lang,
   type SessionCode,
@@ -310,7 +311,7 @@ async function main(argv: string[]): Promise<number> {
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...(data.paused ? [`paused: ${data.paused}`] : []),
           ...(data.warmup ? [`warm-up: ${data.warmup.trades} of 5 trades`] : []),
-          ...(unread.length > 0 ? ["new since the last status:", ...unread.slice(-20).map((n) => noticeLine(n, lang))] : ["latest:", ...s.notifications.slice(-8).map((n) => noticeLine(n, lang))]),
+          ...(unread.length > 0 ? ["new since the last status:", ...unreadShown(unread).map((n) => (typeof n === "string" ? n : noticeLine(n, lang)))] : ["latest:", ...s.notifications.slice(-8).map((n) => noticeLine(n, lang))]),
           ...(league ? ["", ...league.lines] : []),
         ].join("\n"),
       );
@@ -467,6 +468,16 @@ const PREVIEW_MANIFESTO = (() => {
 type Values = Record<string, string | boolean | string[] | undefined>;
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
 
+/** Every unread notice that matters is shown; of the trade lines, the last 20 and a count of the rest. Nothing is marked seen unshown. */
+function unreadShown(unread: unknown[]): (unknown | string)[] {
+  const routine = (n: unknown) => (n as { kind?: string }).kind === "trade" || (n as { kind?: string }).kind === "started";
+  const kept = unread.filter((n) => !routine(n));
+  const trades = unread.filter(routine);
+  const dropped = Math.max(0, trades.length - 20);
+  const shown = new Set([...kept, ...trades.slice(-20)]);
+  return [...(dropped > 0 ? [`  (${dropped} older trade lines: feast-league status --json lists them)`] : []), ...unread.filter((n) => shown.has(n))];
+}
+
 /** One notification as the status card shows it; a session notice in the user's language. */
 function noticeLine(n: unknown, lang: Lang): string {
   const entry = n as { at: string; kind: string; text: string; code?: SessionCode; endsAt?: string | null };
@@ -476,7 +487,7 @@ function noticeLine(n: unknown, lang: Lang): string {
 
 /** The league block of `status` (PLAN-941 §6). Best effort: it never fails `status`. */
 async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string[]; data: Record<string, unknown> }> {
-  const site = new LeagueSite(siteFromEnv());
+  const site = new LeagueSite(siteFromEnv(), fetch, 8_000);
   const me = await Promise.race([signerFor(home, null).address(), new Promise<null>((r) => setTimeout(() => r(null), 5_000))]).catch(() => null);
   const record = readLeagueRecord(home);
   let agentId = record?.agentId ?? null;
@@ -489,7 +500,9 @@ async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string
   const today = await site.league("today", me);
   const season = today && (today.state === "season" || today.state === "over") ? await site.league("season", me) : null;
   const lines = standingLines({ agentId, seating, today, season, now: Date.now() }, lang);
-  return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: today?.me ?? null } };
+  // The page's own rows, without the wallet's address: printed output keeps the home's rule.
+  const own = today?.me ? { earners: today.me.earners ? { ...today.me.earners, wallet: undefined } : null, backed: today.me.backed ? { ...today.me.backed, wallet: undefined } : null, eaten: today.me.eaten } : (today?.me ?? null);
+  return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own } };
 }
 
 /** `feast-league register` (PLAN-941 §1): the check, the card, and after the user's yes the signature and the answer. */
@@ -506,7 +519,13 @@ async function registerCommand(home: string, name: string, values: Values, json:
     log: (event, fields) => appendJsonl(paths.log, { at: new Date().toISOString(), event, ...fields }),
   };
   const say = (data: Record<string, unknown>, text: string, code: number) => (print(json, { ...data, card: text }, () => text), code);
-  const found = await check(deps, { named: str(values["body-coin"]) ?? null });
+  let found: Awaited<ReturnType<typeof check>>;
+  try {
+    found = await check(deps, { named: str(values["body-coin"]) ?? null });
+  } catch (error) {
+    const reason = error instanceof BawError ? error.message : (error as Error).message;
+    return say({ ok: false, stage: "check", result: "wallet-unreadable", reason }, walletUnreadable(reason, lang), 2);
+  }
   if (found.kind === "not-ready") return say({ ok: false, stage: "check", result: found.kind, reason: found.reason }, walletNotReady(found.reason, lang), 2);
   if (found.kind === "no-agent-id") return say({ ok: false, stage: "check", result: found.kind }, noAgentIdCard(lang), 2);
   if (found.kind === "agent-id-unreadable") return say({ ok: false, stage: "check", result: found.kind }, agentIdUnreadable(lang), 2);

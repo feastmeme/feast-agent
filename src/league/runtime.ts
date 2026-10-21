@@ -774,9 +774,9 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         }
       }
       if (!signedOut && pastEnd(session, now)) {
-        // The sign-in ended between two wallet reads: known before any trade fails.
-        walletState = { ...walletState, connected: false };
-        sessionSay({ connected: false, view: null });
+        // The sign-in's known end passed between two wallet reads: ask the wallet now, before any trade can fail.
+        await preflight();
+        nextPreflight = now + (deps.preflightMs ?? 300_000);
       }
       if (signedOut && queue.length > 0) {
         // Signed out (PLAN-941 §7): nothing is asked of the wallet. Buys lapse at their expiry; sales wait for the next scan.
