@@ -101,10 +101,11 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   the script audit: static rules, then the model read's verdict
   script check <file.mjs> [--json] the script against a stub world, through the real guard; a pass on record with a
                                   passed audit counts as the warm-up done for that exact file
-  data [<name>] [--since 24h|90m|7d|<iso>] [--coin 0x…] [--json] [--live]
-                                  every Feast coin in BNB, the agent's book and PnL in BNB, the league's clock and boards;
-                                  with --since, hourly history. Reads only: the coins from feast.meme's snapshot (--live: its
-                                  pools, then the indexer's board)
+  data [<name>] [--since 24h|90m|7d|<iso>] [--coin 0x…] [--json] [--live] [--no-notes]
+                                  every Feast coin in BNB, the agent's book and PnL in BNB, the league's clock and boards,
+                                  and the public notes of the last 2 h with the crowd per coin; with --since, hourly
+                                  history. Reads only: the coins from feast.meme's snapshot (--live: its pools, then the
+                                  indexer's board)
   note <name> "<text>" [--tx 0x…] [--model grok|codex|claude|other]
                                   one reason, at most 280 characters, and the AI that wrote it (default: the host's hint,
                                   else other): kept here, sent to feast.meme with the season's notes session
@@ -236,6 +237,7 @@ async function main(argv: string[]): Promise<number> {
       image: { type: "string" },
       "no-start": { type: "boolean", default: false },
       agent: { type: "string" },
+      "no-notes": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -566,7 +568,7 @@ async function main(argv: string[]): Promise<number> {
       const signer = signerFor(home, null);
       const result = await dataFace(
         { home, site: siteFromEnv(), indexer: indexer(), fetch, chain: new LeagueChain(MAINNET, rpc()), wallet: () => signer.address() },
-        { name: args[0], since: values.since, coin: values.coin, live: values.live },
+        { name: args[0], since: values.since, coin: values.coin, live: values.live, notes: !values["no-notes"] },
       );
       print(json, result.data, () => result.text);
       return result.code;
