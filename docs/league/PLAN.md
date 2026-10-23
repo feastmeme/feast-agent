@@ -769,7 +769,7 @@ The questions as they were put:
 
 ## 13. The league entry: `FL enter` (task 961, `league-v3`)
 
-Entering the league is one command, run once before the season: `FL enter --name <id>.ai [--yes] [--lang en|zh] [--json]`. It launches the body coin and buys today's coin, then exits. Trading starts on season day with the ordinary track (`FL plan`, then `FL start <name> --yes --detach`). The code is `src/league/enter/` (`flow.ts`, `copy.ts`, `constants.ts`); `cli.ts` only wires it.
+Entering the league is one command, run once before the season: `FL enter --name <id>.ai [--yes] [--lang en|zh] [--json]`. It launches the body coin and buys today's coin, then exits. The buy is part of entering (the agents start out holding each other's coins), not a reward: the entry reward was cancelled on 2026-10-23 (22:49 SGT), and no copy mentions one. Trading starts on season day with the ordinary track (`FL plan`, then `FL start <name> --yes --detach`). The code is `src/league/enter/` (`flow.ts`, `copy.ts`, `constants.ts`); `cli.ts` only wires it.
 
 ### 13.1 The state machine
 
@@ -779,16 +779,15 @@ Each run goes through the stages in order and stops at the first that is not don
 | --- | --- | --- |
 | name | `--name`: `<id>` or `<id>.ai`, `^[a-z0-9]{1,64}$` | 2: missing or malformed |
 | busy | the wallet lock | 2: another agent is running on this wallet. Its inbox is never written. |
-| entered | `agents/league-entry/entry.json` | 0: a buy of at least 5 USDT at or after the step-1 open is recorded. Nothing else is asked. |
+| entered | `agents/league-entry/entry.json` | 0: a buy worth at least 5 USDT when it was made is recorded. Nothing else is asked. |
 | wallet, agent-id | `baw` status, settings and address; `handleOf` on the registry | 2: signed out, Developer Mode off, no Agent ID, or the chain's id is not `--name`. 1: the Agent ID unreadable. |
 | eligibility | `GET /api/league/agent-id?wallet=` | 1: a 503 or no answer. 2: the page has no id, another id, or another wallet. |
 | unresolved | league-entry's book | 1: a launch or a buy whose outcome is still unknown after a resolve-only one-shot |
 | body coin | the book's launch; else `/v1/creators`, coins since `BODY_SINCE` (2026-10-23T00:00Z), each confirmed with `creatorOf` | 1: the indexer or the chain could not answer, or a coin of this wallet has no launch time. Never a launch on an unreadable read. |
 | launch card | `GET /api/league/avatar/<id>.png` | 2: the card, pending |
-| wait | the clock | 0: before `STEP1_OPEN` (2026-10-24T12:00Z), with the time it opens |
-| assignment | `GET /api/league/assignment?wallet=` | 0: `not-registered` (+10 min), `before-cutoff` (+5), `no-table` (+60), a 404 (+60). 1: another wallet's row, a coin that is not an address, not a Feast coin, or this wallet's own. |
+| assignment | `GET /api/league/assignment?wallet=`: the page says when entering is open, so no clock here gates it | 0: `not-registered` (+10 min), `before-cutoff` (+5), `no-table` (+60), a 404 (+60). 1: another wallet's row, a coin that is not an address, not a Feast coin, or this wallet's own. |
 | buy card | `bnbUsd()`, `refuseEarly` | 2: a limit refuses 5.10 USDT worth (`refused by L1: …`); else the card, pending |
-| bought | the one-shot | 0: the hash, the hold line, the season-day line |
+| bought | the one-shot | 0: the transaction, then "You're in. On season day run `FL start`." |
 
 **One card at a time.** A run without `--yes` prints the next card and writes `pending.json`: `{ stage, digest, at }`, with the coin and amount for a buy. `digest` is the sha256 of the card's facts: the names, the split, the picture's sha256, the coin, the amount and the slippage. A run with `--yes` acts only if `pending.json` is at most 10 minutes old and its digest is the card it would print now. Otherwise it prints the fresh card and exits 2. The buy card keeps the amount it showed while that amount still buys 5 USDT, so a small move of the BNB price is not a new card. One `--yes` never covers a card the user has not seen: after a launch, the buy card is printed and left pending.
 

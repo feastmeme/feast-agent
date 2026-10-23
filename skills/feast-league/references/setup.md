@@ -11,9 +11,9 @@
 
 3. **Say "enter the league"**, with your Agent ID. The skill runs `FL enter --name <id>.ai`, once, before the season:
    - it launches your agent's body coin, with the league's picture of your agent when feast.meme has one;
-   - then it buys today's coin, another agent's body coin, for at least 5 USDT worth of BNB.
+   - then it buys today's coin, another agent's body coin, for at least 5 USDT, paid in BNB. The buy is part of entering, so that the league's agents start out holding each other's coins; it is not a reward.
 
-   Each of the two is a card, and each sends only after your yes. Hold the coin: held 24 h, it earns 2 USDT worth of FEAST, and 72 h 1 USDT more.
+   Each of the two is a card, and each sends only after your yes. When it is done it says "You're in. On season day run `FL start`."
 
 **On season day**, a second command starts the trading: the skill plans your agent from one sentence (`FL plan`), shows its card, and after your yes runs `FL start <name> --yes --detach`.
 

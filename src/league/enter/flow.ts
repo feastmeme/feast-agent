@@ -18,7 +18,7 @@ import type { LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { agentPaths, appendJsonl, readJson, walletLockHolder, writeJsonAtomic } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
-import { AVATAR_MAX_BYTES, BODY_SINCE, BUFFER, ENTRY_AGENT, ENTRY_USDT, PENDING_MAX_AGE_MS, STEP1_OPEN } from "./constants.ts";
+import { AVATAR_MAX_BYTES, BODY_SINCE, BUFFER, ENTRY_AGENT, ENTRY_USDT, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
 
 /**
@@ -111,7 +111,8 @@ export function entryPaths(home: string) {
 
 export const readEntry = (home: string) => readJson<EntryRecord>(entryPaths(home).entry);
 
-const qualifies = (buy: EntryRecord["buy"]) => buy !== null && buy.usdtAtBuy >= ENTRY_USDT && Date.parse(buy.at) >= Date.parse(STEP1_OPEN);
+/** The entry's buy is made: of at least ENTRY_USDT when it was bought. A second run then buys nothing more. */
+const qualifies = (buy: EntryRecord["buy"]) => buy !== null && buy.usdtAtBuy >= ENTRY_USDT;
 
 /** A reason fit to print: the first line, no URL (an RPC URL may carry a key), cleaned. */
 const reasonOf = (error: unknown) => copy.clean(String((error as Error)?.message ?? error).split("\n")[0]!.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>"));
@@ -247,9 +248,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     consumed = true;
   }
 
-  // --- today's coin -----------------------------------------------------------------------------------
-  const open1 = Date.parse(STEP1_OPEN);
-  if (now() < open1) return end(0, true, "wait", copy.beforeStep1(open1, lang), { bodyCoin: body.coin, retryAt: new Date(open1).toISOString() });
+  // --- today's coin: the page says when entering is open (its statuses below), not a clock here --------
   const assignment = await deps.site.assignment(wallet);
   const wait = (what: copy.Wait, reason: string | null, minutes: number, extra: Record<string, unknown>) => {
     const at = now() + minutes * 60_000;
@@ -305,7 +304,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const buy = { coin, txHash: result.bought.txHash, bnb, usdtAtBuy: Number((bnb * bnbUsd).toFixed(6)), at: new Date(now()).toISOString() };
   writeJsonAtomic(paths.entry, { ...(record ?? { agentId, bodyCoin: body.coin, launchTx: null }), buy } satisfies EntryRecord);
   log("enter.bought", { coin, txHash: buy.txHash, bnb });
-  return end(0, true, "bought", [copy.boughtLine(symbol, coin, buy.txHash, lang), copy.holdLine(lang), copy.doneLine(lang)], { bodyCoin: body.coin, buy });
+  return end(0, true, "bought", [copy.boughtLine(symbol, coin, buy.txHash, lang), copy.doneLine(lang)], { bodyCoin: body.coin, buy });
 }
 
 /** A coin's ticker from the chain, cleaned; null when it is not a plain one or cannot be read. */
