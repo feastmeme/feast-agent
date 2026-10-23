@@ -18,14 +18,14 @@ import type { LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { agentPaths, appendJsonl, readJson, walletLockHolder, writeJsonAtomic } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
-import { AVATAR_MAX_BYTES, BODY_SINCE, BUFFER, ENTRY_AGENT, ENTRY_USDT, PENDING_MAX_AGE_MS } from "./constants.ts";
+import { AVATAR_MAX_BYTES, BODY_SINCE, ENTRY_AGENT, ENTRY_BNB, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
 
 /**
  * `FL enter --name <id>.ai` (task 961): the league entry, once. Read the wallet
  * and its Agent ID, ask feast.meme whether it may enter, launch the body coin
  * with the league's picture (unless the wallet launched one since 10/23), then
- * buy today's coin for 5 USDT worth of BNB. It never starts a trading loop and
+ * buy today's coin for 0.01 BNB. It never starts a trading loop and
  * never touches another agent: the launch and the buy go through the runtime's
  * one-shot, under `league-entry`'s own agent and the default hard limits.
  *
@@ -78,7 +78,8 @@ export type EntryRecord = {
   agentId: string;
   bodyCoin: Address | null;
   launchTx: Hex | null;
-  buy: { coin: Address; txHash: Hex; bnb: number; usdtAtBuy: number; at: string } | null;
+  /** `usdtAtBuy`: the USDT the buy was worth, kept by league-v3's records only; new records omit it (every amount is BNB). */
+  buy: { coin: Address; txHash: Hex; bnb: number; usdtAtBuy?: number; at: string } | null;
 };
 
 type Pending = { stage: "launch" | "buy"; digest: string; at: string; coin?: Address; bnb?: number };
@@ -87,11 +88,9 @@ const ID_NAME = /^([a-z0-9]{1,64})(\.ai)?$/;
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const sha256 = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 
-/** The entry's size in BNB: 5.10 USDT at this price, rounded up to the micro-BNB (a float's 8500.000000001 is 8500). */
-export function entryBnb(bnbUsd: number): number {
-  const micro = (ENTRY_USDT * BUFFER * 1e6) / bnbUsd;
-  const near = Math.round(micro);
-  return (Math.abs(micro - near) < 1e-6 ? near : Math.ceil(micro)) / 1e6;
+/** The entry's size in BNB, whatever the BNB price (the owner's ruling, 2026-10-24). */
+export function entryBnb(): number {
+  return ENTRY_BNB;
 }
 
 /** league-entry as `FL enter` writes it: no strategy, the default limits, never started as a loop. */
@@ -111,8 +110,8 @@ export function entryPaths(home: string) {
 
 export const readEntry = (home: string) => readJson<EntryRecord>(entryPaths(home).entry);
 
-/** The entry's buy is made: of at least ENTRY_USDT when it was bought. A second run then buys nothing more. */
-const qualifies = (buy: EntryRecord["buy"]) => buy !== null && buy.usdtAtBuy >= ENTRY_USDT;
+/** The entry's buy is made: of at least ENTRY_BNB. A second run then buys nothing more. */
+const qualifies = (buy: EntryRecord["buy"]) => buy !== null && buy.bnb >= ENTRY_BNB;
 
 /** A reason fit to print: the first line, no URL (an RPC URL may carry a key), cleaned. */
 const reasonOf = (error: unknown) => copy.clean(String((error as Error)?.message ?? error).split("\n")[0]!.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>"));
@@ -274,25 +273,27 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   if (!feast) return bad("not-feast");
   const symbol = copy.SAFE_SYMBOL.test(assignment.symbol) ? assignment.symbol : null;
 
-  let bnbUsd: number;
+  // The BNB price is only for the card's USDT reference: unread, the card shows none, and the entry goes on.
+  let bnbUsd: number | null = null;
   try {
-    bnbUsd = await deps.chain.bnbUsd(now());
-    if (!(Number.isFinite(bnbUsd) && bnbUsd > 0)) throw new Error("no price");
+    const read = await deps.chain.bnbUsd(now());
+    bnbUsd = Number.isFinite(read) && read > 0 ? read : null;
   } catch {
-    return end(1, false, "price", copy.priceUnreadable(lang));
+    bnbUsd = null;
   }
-  // The amount on a card the user was just shown stays while it still buys 5 USDT, so a price that moved a little is no new card.
+  // The amount on a card the user was just shown stays while it is still the entry's amount.
   const before = pendingNow();
-  const kept = before?.stage === "buy" && before.coin === coin && typeof before.bnb === "number" && before.bnb * bnbUsd >= ENTRY_USDT ? before.bnb : null;
-  const bnb = kept ?? entryBnb(bnbUsd);
+  const kept = before?.stage === "buy" && before.coin === coin && before.bnb === ENTRY_BNB ? before.bnb : null;
+  const bnb = kept ?? entryBnb();
   const slippagePct = Math.min(3, agent.limits.maxSlippagePct);
   const request: IntentRequest = { kind: "buy", coin, bnb, reason: "the league entry: today's coin" };
   const early = refuseEarly(deps.home, agent, request, now());
   if (early) return end(2, false, "limits", copy.refusedLine(early.limit, early.message, lang), { refused: early, coin, bnb });
   const facts = { stage: "buy", agentId, coin, symbol, bnb, slippagePct, approvals: 2 };
   const digest = sha256(JSON.stringify(facts));
-  const card = copy.buyCard({ agentId, coin, symbol, bnb, usdt: bnb * bnbUsd, slippagePct, maxTradeBnb: agent.limits.maxTradeBnb, budgetBnb: agent.limits.budgetBnb, maxDailySpendBnb: agent.limits.maxDailySpendBnb }, lang);
-  const shown = { bodyCoin: body.coin, coin, symbol, day: copy.clean(assignment.day), source: copy.clean(assignment.source), bnb, usdt: Number((bnb * bnbUsd).toFixed(2)), slippagePct };
+  const usdt = bnbUsd === null ? null : Number((bnb * bnbUsd).toFixed(2));
+  const card = copy.buyCard({ agentId, coin, symbol, bnb, usdt, slippagePct, maxTradeBnb: agent.limits.maxTradeBnb, budgetBnb: agent.limits.budgetBnb, maxDailySpendBnb: agent.limits.maxDailySpendBnb }, lang);
+  const shown = { bodyCoin: body.coin, coin, symbol, day: copy.clean(assignment.day), source: copy.clean(assignment.source), bnb, usdt, slippagePct };
   if (consumed || !yesFor("buy", digest)) return ask("buy", digest, card, shown, { coin, bnb }, consumed);
 
   confirm();
@@ -301,7 +302,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const result = await deps.oneShot([request]);
   if (!result.bought && result.unresolved) return end(1, false, "unresolved", copy.pendingOutcome("buy", lang), { kind: "buy", coin });
   if (!result.bought) return end(result.exit === "error" ? 1 : 2, false, "buy", copy.buyFailed(result.failure ?? `${result.exit}: ${result.reason}`, lang), { exit: result.exit, coin });
-  const buy = { coin, txHash: result.bought.txHash, bnb, usdtAtBuy: Number((bnb * bnbUsd).toFixed(6)), at: new Date(now()).toISOString() };
+  const buy = { coin, txHash: result.bought.txHash, bnb, at: new Date(now()).toISOString() };
   writeJsonAtomic(paths.entry, { ...(record ?? { agentId, bodyCoin: body.coin, launchTx: null }), buy } satisfies EntryRecord);
   log("enter.bought", { coin, txHash: buy.txHash, bnb });
   return end(0, true, "bought", [copy.boughtLine(symbol, coin, buy.txHash, lang), copy.doneLine(lang)], { bodyCoin: body.coin, buy });

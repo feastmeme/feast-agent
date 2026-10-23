@@ -17,8 +17,8 @@ import type { LeagueChain } from "../chain.ts";
 import { fakeBaw } from "../register/fakes.ts";
 import { agentIdUnreadable, noAgentIdCard, utc8, walletNotReady } from "../register/copy.ts";
 import { LeagueSite } from "../register/site.ts";
-import { agentPaths, readLedger, walletLockPath, writeFileAtomic } from "../store.ts";
-import { ENTRY_AGENT } from "./constants.ts";
+import { addToLedger, agentPaths, readLedger, walletLockPath, writeFileAtomic } from "../store.ts";
+import { ENTRY_AGENT, ENTRY_BNB } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { AVATAR_PNG, FakeEnterSite, fakeEnterChain, fakeOneShot, INDEXER, SITE, type FakeChainOptions, type FakeShotOptions, type FakeSiteOptions } from "./fakes.ts";
 import { enter, entryAgent, entryBnb, entryOneShot, type EnterDeps, type EnterInput } from "./flow.ts";
@@ -335,29 +335,55 @@ describe("FL enter: today's coin", () => {
     expect(out.text).not.toContain("🚀");
   });
 
-  it("the buy card: ceil₆(5.10 USDT / the BNB price), the slippage, and the approvals that follow", async () => {
+  it("the buy card: 0.01 BNB whatever the price, the slippage, and the approvals that follow", async () => {
     const w = world({ chain: { bnbUsd: 612.34 } });
     launched(w);
     const out = await w.run();
     expect(out).toMatchObject({ code: 2, ok: true, stage: "buy-card" });
-    expect(entryBnb(612.34)).toBe(0.008329);
-    expect(entryBnb(600)).toBe(0.0085);
-    expect(out.data).toMatchObject({ coin: TODAY_COIN, bnb: 0.008329, slippagePct: 3 });
+    expect(ENTRY_BNB).toBe(0.01);
+    expect(entryBnb()).toBe(0.01);
+    expect(out.data).toMatchObject({ coin: TODAY_COIN, bnb: 0.01, usdt: 6.12, slippagePct: 3 });
     expect(out.text).toContain("| Coin | TODAY (0x0000…0de1): today's coin, assigned from the 08:00 SGT block |");
-    expect(out.text).toContain("0.008329 BNB, about 5.10 USDT");
+    expect(out.text).toContain("| Amount | 0.01 BNB (the entry's amount) ≈ 6.12 USDT |");
+    expect(out.text).not.toMatch(/5 USDT|2% for the price/);
     expect(out.text).toContain("up to two approvals, so that a later sale is one transaction");
     expect(w.pending().stage).toBe("buy");
     expect(w.shots.requests).toEqual([]);
   });
 
-  it("5.10 USDT over L1 (BNB at $200): the limit's own line, and nothing is sent", async () => {
-    const w = world({ chain: { bnbUsd: 200 } });
+  it("the BNB price unreadable: the card shows no USDT figure, and the entry goes on to the buy", async () => {
+    const w = world({ chain: { bnbUsd: "unreadable" } });
     launched(w);
+    const out = await w.run();
+    expect(out).toMatchObject({ code: 2, ok: true, stage: "buy-card" });
+    expect(out.data).toMatchObject({ bnb: 0.01, usdt: null });
+    expect(out.text).toContain("| Amount | 0.01 BNB (the entry's amount) |");
+    expect(out.text).not.toMatch(/USDT|secret-key/);
+    const bought = await w.run({ yes: true });
+    expect(bought).toMatchObject({ code: 0, ok: true, stage: "bought" });
+    expect(w.shots.requests[0]![0]).toMatchObject({ kind: "buy", coin: TODAY_COIN, bnb: 0.01 });
+    expect(w.entry().buy).not.toHaveProperty("usdtAtBuy");
+  });
+
+  it("a buy that would pass L3 (the ledger within 0.01 BNB of the budget): the limit's own line, and nothing is sent", async () => {
+    const w = world();
+    launched(w);
+    addToLedger(w.home, { at: w.clock.now, agent: "maple", wei: 245n * 10n ** 15n, tx: "0x01" });
     const out = await w.run({ yes: true });
     expect(out).toMatchObject({ code: 2, ok: false, stage: "limits" });
-    expect(out.text).toMatch(/^refused by L1: a buy of 0\.0255 BNB is over the per-trade limit of 0\.02 BNB \(nothing was asked of the wallet\)$/m);
+    expect(out.text).toMatch(/^refused by L3: the league has put 0\.245 BNB in from this wallet; 0\.01 BNB more would pass the 0\.25 BNB budget \(nothing was asked of the wallet\)$/m);
     expect(w.shots.requests).toEqual([]);
     expect(w.sent()).toEqual([]);
+  });
+
+  it("a recorded buy of 0.01 BNB is entered; one under it (the old 5 USDT) is not", async () => {
+    const w = world();
+    launched(w);
+    const record = (bnb: number) => writeFileAtomic(join(agentPaths(w.home, ENTRY_AGENT).dir, "entry.json"), JSON.stringify({ agentId: ID, bodyCoin: BODY, launchTx: null, buy: { coin: TODAY_COIN, txHash: `0x${"cd".repeat(32)}`, bnb, at: new Date(w.clock.now).toISOString() } }));
+    record(0.01);
+    expect(await w.run()).toMatchObject({ code: 0, stage: "entered" });
+    record(0.0068);
+    expect((await w.run()).stage).toBe("buy-card");
   });
 
   it("--yes with no card shown, a stale one or a changed one: the fresh card, and nothing is sent", async () => {
@@ -400,10 +426,11 @@ describe("FL enter: today's coin", () => {
     const out = await w.run({ yes: true });
     expect(out).toMatchObject({ code: 0, ok: true, stage: "bought" });
     expect(w.shots.requests).toHaveLength(1);
-    expect(w.shots.requests[0]![0]).toMatchObject({ kind: "buy", coin: TODAY_COIN, bnb: 0.0085 });
+    expect(w.shots.requests[0]![0]).toMatchObject({ kind: "buy", coin: TODAY_COIN, bnb: 0.01 });
     expect(out.text.split("\n").slice(-2)).toEqual([expect.stringMatching(/^Bought TODAY \(0x0000…0de1\), transaction 0x0000…[0-9a-f]{4}\.$/), "You're in. On season day run `FL start`."]);
     expect(out.text).not.toMatch(/USDT worth|Hold it|24 h|72 h/);
-    expect(w.entry()).toMatchObject({ agentId: ID, bodyCoin: BODY, buy: { coin: TODAY_COIN, bnb: 0.0085, usdtAtBuy: 5.1, at: new Date(DAY_ONE).toISOString() } });
+    expect(w.entry()).toMatchObject({ agentId: ID, bodyCoin: BODY, buy: { coin: TODAY_COIN, bnb: 0.01, at: new Date(DAY_ONE).toISOString() } });
+    expect(w.entry().buy).not.toHaveProperty("usdtAtBuy");
     expect(loadAgent(w.home, ENTRY_AGENT)?.confirmed).not.toBeNull();
   });
 
@@ -527,7 +554,7 @@ describe("FL enter through the real runtime's one-shot", () => {
     saveAgent(w.home, { ...loadAgent(w.home, ENTRY_AGENT)!, confirmed: null });
     w.site.options.assignment = { status: 200, body: { ...(w.row.body as object), assigned_coin: FEAST.toLowerCase(), symbol: "FEAST" } };
     const wallet = w.wallet;
-    const size = 85n * 10n ** 14n; // 0.0085 BNB: 5.10 USDT at $600
+    const size = 10n ** 16n; // 0.01 BNB: the entry's amount
     const coins = 10_000n * 10n ** 18n;
     const trade = { address: MAINNET.contracts.hook, topics: encodeEventTopics({ abi: hookAbi, eventName: "Trade", args: { coin: FEAST, quote: WBNB, payer: wallet } }), data: encodeAbiParameters([{ type: "bool" }, { type: "uint256" }, { type: "uint256" }, { type: "uint160" }, { type: "uint256" }], [true, coins, size, 1n, size / 100n]) };
     const deposit = { address: WBNB, topics: encodeEventTopics({ abi: wrappedNativeAbi, eventName: "Deposit", args: { dst: router } } as never), data: encodeAbiParameters([{ type: "uint256" }], [size]) };
@@ -573,7 +600,7 @@ describe("FL enter through the real runtime's one-shot", () => {
     const book = parseBook(readFileSync(agentPaths(w.home, ENTRY_AGENT).state, "utf8"));
     expect(book.positions[FEAST.toLowerCase()]).toMatchObject({ costWei: size, armed: true });
     expect(readLedger(w.home).spentWei).toBe(size);
-    expect(w.entry()).toMatchObject({ buy: { coin: FEAST, txHash: `0x${"1".padStart(64, "0")}`, bnb: 0.0085, usdtAtBuy: 5.1 } });
+    expect(w.entry()).toMatchObject({ buy: { coin: FEAST, txHash: `0x${"1".padStart(64, "0")}`, bnb: 0.01 } });
     const hex = wallet.slice(2).toLowerCase();
     for (const name of ["log.jsonl", "state.json", "notifications.jsonl", "entry.json", "agent.json"]) {
       const file = join(agentPaths(w.home, ENTRY_AGENT).dir, name);

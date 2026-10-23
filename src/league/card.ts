@@ -2,6 +2,8 @@ import type { AgentConfig } from "./agent.ts";
 import type { StaticAudit } from "./audit/static.ts";
 import { LIMIT_SPECS, WARMUP_SIZE_BNB, WARMUP_TRADES } from "./limits.ts";
 import { PRESETS } from "./presets/specs.ts";
+import { LEAGUE_CAP_BNB, PAGE_IDLE_RULE } from "./prompt/constants.ts";
+import { promptHead } from "./prompt/host.ts";
 
 /**
  * The one confirmation card (PLAN.md §6 step 5). Everything the agent will do,
@@ -15,12 +17,25 @@ const shown = (value: unknown, unit?: string) => {
   return unit ? `${String(value)} ${unit}` : String(value);
 };
 
-export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null): string {
+const short = (hex: string) => `${hex.slice(0, 6)}…${hex.slice(-4)}`;
+
+/** `warmupPassed`: a passing `FL script check` is on record for the script's sha256 (task 963). */
+export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null, options: { warmupPassed?: boolean } = {}): string {
   const lines: string[] = [];
   const l = agent.limits;
   lines.push(`Your Feast agent "${agent.name}"`);
   lines.push("");
-  if (agent.preset) {
+  if (agent.track === "prompt") {
+    lines.push("Prompt mode: your own agent reads your prompt and decides when to look and what to trade, with FL data, FL buy, FL sell and FL note. The runtime calls no model and never reads the prompt as instructions.");
+    lines.push(`Prompt: ${agent.prompt!.path} (sha256 ${short(agent.prompt!.sha256)})`);
+    for (const line of promptHead(agent.prompt!.path)) lines.push(`  > ${line}`);
+    if (agent.preset && agent.autopilot) {
+      const spec = PRESETS[agent.preset];
+      lines.push(`Autopilot: preset ${agent.preset} (${spec.title}), only after ${agent.autopilot.idleMinutes} min with no FL buy, FL sell or FL note from your agent; it steps back as soon as your agent acts. It ${spec.does}.`);
+    } else {
+      lines.push(`Autopilot: none. Nothing trades on its own except the runtime's hard stop-loss (L6). The league page's rule: ${PAGE_IDLE_RULE}.`);
+    }
+  } else if (agent.preset) {
     const spec = PRESETS[agent.preset];
     lines.push(`Preset: ${spec.title}. It ${spec.does}.`);
   } else if (agent.track === "entry") {
@@ -28,8 +43,10 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null)
   } else {
     lines.push(`Your script: ${agent.script!.path}`);
     lines.push(`Audit: static rules ${audit?.verdict ?? "see feast-league audit"}; the model read must pass too before it starts.`);
-    lines.push(`Warm-up: its first ${WARMUP_TRADES} trades run at ${Math.min(WARMUP_SIZE_BNB, l.maxTradeBnb)} BNB; two failures in a row, or any limit hit, stop it and tell you.`);
+    if (options.warmupPassed) lines.push(`Warm-up: passed by FL script check (sha ${short(agent.script!.sha256)}). It trades at its own sizes, within the limits; any edit is a new file, a new audit, a new check.`);
+    else lines.push(`Warm-up: its first ${WARMUP_TRADES} trades run at ${Math.min(WARMUP_SIZE_BNB, l.maxTradeBnb)} BNB; two failures in a row, or any limit hit, stop it and tell you.`);
   }
+  if (agent.track !== "entry" && l.budgetBnb <= LEAGUE_CAP_BNB) lines.push(`Capital cap: ${LEAGUE_CAP_BNB} BNB, wallet-wide; FL enter's buy counts.`);
   if (agent.sentence) lines.push(`From your sentence: "${agent.sentence}"`);
   lines.push("");
   if (agent.preset) {
@@ -49,7 +66,11 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null)
   lines.push("| L15 | Feast coins and our own contracts only | always |");
   lines.push("| L16 | Wallet connected, Developer Mode on, quota left, no stop file | always |");
   lines.push("");
-  lines.push(`Cadence: a tick every ${agent.tickSeconds} s${agent.preset && PRESETS[agent.preset].events.length > 0 ? `, and on ${PRESETS[agent.preset].events.join(", ")} events from the Feast indexer` : ""}.`);
+  const events = agent.preset && PRESETS[agent.preset].events.length > 0 ? `, and on ${PRESETS[agent.preset].events.join(", ")} events from the Feast indexer` : "";
+  if (agent.track === "prompt") {
+    lines.push("Watching: the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call.");
+    if (agent.preset) lines.push(`Autopilot cadence: only while it trades, a tick every ${agent.tickSeconds} s${events}.`);
+  } else lines.push(`Cadence: a tick every ${agent.tickSeconds} s${events}.`);
   lines.push("Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview, then execute — one transaction at a time.");
   lines.push(`Worst case: at most ${l.maxTradesPerHour} trades an hour, at most ${l.maxDailySpendBnb} BNB of buys in any 24 h, at most ${l.budgetBnb} BNB in all.`);
   lines.push("");

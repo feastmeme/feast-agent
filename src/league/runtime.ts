@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import type { Address, Hex } from "viem";
+import { getAddress, isAddress, type Address, type Hex } from "viem";
 
 import { MAINNET, type FeastNetwork } from "../sdk/networks.ts";
 import { loadAgent, type AgentConfig } from "./agent.ts";
@@ -11,13 +11,18 @@ import { BawError, type Signer } from "./baw.ts";
 import { bookView, clearPause, emptyBook, pendingBuysWei, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { IndexerPoller } from "./events.ts";
+import { ENTRY_AGENT } from "./enter/constants.ts";
 import { Executor } from "./executor.ts";
 import { backstopExits } from "./exits.ts";
 import { guard, warmupActive, warmupAfter, type GuardInput, type GuardVerdict, type Intent, type WalletState } from "./guard.ts";
 import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type Limits } from "./limits.ts";
 import { Market } from "./market.ts";
+import { flushNotes, readNotes } from "./notes/queue.ts";
 import { presetStrategy } from "./presets/logic.ts";
+import { autopilotGate, lastHostAction, promptChanged } from "./prompt/host.ts";
 import { sessionNotice } from "./register/copy.ts";
+import { siteFromEnv } from "./register/site.ts";
+import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
 import { freshMemory, pastEnd, sessionStep, sessionView, type SessionMemory, type SessionView } from "./session.ts";
 import { addToLedger, acquireWalletLock, agentPaths, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
@@ -32,6 +37,11 @@ import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExt
  * drawdown halt L8) and asks the strategy. Every intent then takes one road:
  * the guard, the executor (allowlist, lock, preview, gate, execute, receipt),
  * the book. One at a time, exits first.
+ *
+ * A prompt agent (task 963) has no strategy of its own: the user's agent decides
+ * and acts through `FL buy` and `FL sell`, which reach this loop as inbox
+ * requests. The loop's tick is then only its safety pass. With an autopilot, the
+ * preset is asked only after the host has been silent for its idle threshold.
  */
 
 export type RunOutcome = { exit: "stopped" | "halted" | "refused" | "finished" | "error"; reason: string };
@@ -58,6 +68,8 @@ export type RuntimeDeps = {
   unresolvedCheckMs?: number;
   /** The user's resume: clear an L14 pause at start. */
   clearPause?: boolean;
+  /** feast.meme, for the notes flush (default `FEAST_LEAGUE_SITE` or https://feast.meme). */
+  site?: string;
   loopMs?: number;
   pollMs?: number;
   preflightMs?: number;
@@ -101,6 +113,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     if (sha256Of(scriptSource) !== agent.script!.sha256) return { exit: "refused", reason: "the script changed since it was planned: plan and audit it again" };
     const why = auditRefusal(deps.home, agent.script!.path, scriptSource);
     if (why) return { exit: "refused", reason: why };
+  }
+  // A prompt is the user's text for their own agent: the runtime only checks it is the one they said yes to.
+  if (agent.track === "prompt" && promptChanged(agent)) {
+    return { exit: "refused", reason: `the prompt changed since you confirmed it (or is gone): \`feast-league start ${deps.name} --prompt ${agent.prompt?.path ?? "<file>"}\` shows the new card` };
   }
 
   let lock: { release: () => void };
@@ -199,14 +215,30 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
 
     // --- the book and the strategy --------------------------------------------------------
     let book: Book = existsSync(paths.state) ? parseBook(readFileSync(paths.state, "utf8")) : emptyBook();
-    if (agent.track === "script" && book.warmup?.sha !== agent.script!.sha256) book = { ...book, warmup: { sha: agent.script!.sha256, trades: 0, consecutiveFailures: 0, launches: 0 } };
+    // A passing FL script check on record for these exact bytes, with the audit passed above, is the warm-up done (task 963).
+    const checkPassed = agent.track === "script" && scriptCheckPassed(deps.home, agent.script!.sha256);
+    if (agent.track === "script" && book.warmup?.sha !== agent.script!.sha256) book = { ...book, warmup: { sha: agent.script!.sha256, trades: checkPassed ? WARMUP_TRADES : 0, consecutiveFailures: 0, launches: 0 } };
+    else if (checkPassed && book.warmup && book.warmup.trades < WARMUP_TRADES) book = { ...book, warmup: { ...book.warmup, trades: WARMUP_TRADES } };
+    if (checkPassed) log("warmup.passed", { by: "FL script check", sha: agent.script!.sha256 });
+    // A prompt agent runs on a wallet whose body coin FL enter made: that is its launch, so a launch autopilot runs that
+    // coin (its buybacks) and never launches a second one, and a buy of it is marked as the agent's own coin.
+    if (agent.track === "prompt" && !book.launched) {
+      const entryDir = agentPaths(deps.home, ENTRY_AGENT).dir;
+      const body = readJson<{ bodyCoin?: string | null; launchTx?: string | null }>(join(entryDir, "entry.json"))?.bodyCoin;
+      if (typeof body === "string" && isAddress(body, { strict: false })) {
+        const entryBook = existsSync(join(entryDir, "state.json")) ? parseBook(readFileSync(join(entryDir, "state.json"), "utf8")) : null;
+        const same = entryBook?.launched?.coin.toLowerCase() === body.toLowerCase() ? entryBook.launched : null;
+        book = { ...book, launched: same ?? { coin: getAddress(body), poolId: "0x", at: 0, txHash: `0x${"0".repeat(64)}` } };
+        log("launch.inherited", { coin: getAddress(body), from: ENTRY_AGENT });
+      }
+    }
     if (deps.clearPause && book.paused) {
       appendJsonl(paths.log, { at: new Date(clock()).toISOString(), event: "pause.cleared", by: "user", was: book.paused });
       book = clearPause(book);
     }
     const statePath = join(paths.dir, "strategy-state.json");
     const stored = readJson<{ key: string; state: Record<string, unknown> }>(statePath);
-    const stateKey = agent.track === "script" ? agent.script!.sha256 : agent.track === "entry" ? "entry" : `preset:${agent.preset}`;
+    const stateKey = agent.track === "script" ? agent.script!.sha256 : agent.track === "entry" ? "entry" : agent.track === "prompt" ? `prompt:${agent.preset ?? "none"}` : `preset:${agent.preset}`;
     let strategyState: Record<string, unknown> = stored?.key === stateKey ? stored.state : {};
     const save = () => {
       writeFileAtomic(paths.state, serializeBook(book));
@@ -259,7 +291,22 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     };
 
     // --- one intent, start to finish -----------------------------------------------------
+    /** What became of each intent a request from the CLI asked for, by the intent's id: `FL buy` and `FL sell` wait for it. */
+    type Outcome = { outcome: "filled" | "refused" | "failed" | "unknown" | "stale" | "nothing" | "dropped"; [k: string]: unknown };
+    const outcomes = new Map<string, Outcome>();
+    const requested = new Map<string, string>();
+    const settle = (intent: Intent, outcome: Outcome) => {
+      if (requested.has(intent.id)) outcomes.set(intent.id, outcome);
+    };
+    const report = (intentId: string) => {
+      const requestId = requested.get(intentId);
+      if (!requestId) return;
+      requested.delete(intentId);
+      log("request.outcome", { requestId, ...(outcomes.get(intentId) ?? { outcome: "dropped", reason: "the runtime did not act on it" }) });
+      outcomes.delete(intentId);
+    };
     const refused = (intent: Intent, verdict: Extract<GuardVerdict, { ok: false }>) => {
+      settle(intent, { outcome: "refused", kind: intent.kind, limit: verdict.limit, message: verdict.message });
       book = recordRefusal(book);
       log("intent.refused", { id: intent.id, kind: intent.kind, limit: verdict.limit, message: verdict.message, halt: verdict.halt });
       notify("refused", `${verdict.limit}: ${verdict.message}`, { limit: verdict.limit }, `refused:${verdict.limit}`);
@@ -386,6 +433,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           },
         ],
       };
+      settle(intent, { outcome: "unknown", kind, txHash, reason });
       log("unresolved", { id: intent.id, txHash, kind, reason });
       notify("paused", `${kind} ${txHash ?? "(the wallet's answer was lost)"}: the outcome is not known yet (${reason}); entries pause until it resolves, and the runtime keeps checking`);
       save();
@@ -395,9 +443,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
 
     const failed = (intent: Intent, stage: string, reason: string, txHash?: Hex) => {
       if (stage === "stopped" || stage === "busy") {
+        settle(intent, { outcome: "dropped", kind: intent.kind, stage, reason });
         log("intent.dropped", { id: intent.id, stage, reason });
         return;
       }
+      settle(intent, { outcome: "failed", kind: intent.kind, stage, reason, txHash });
       const wasPaused = book.paused;
       book = recordFailure(book, `${stage}: ${reason}`, agent!.limits.maxConsecutiveFailures);
       log("intent.failed", { id: intent.id, kind: intent.kind, stage, reason, txHash });
@@ -441,6 +491,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const processIntent = async (intent: Intent) => {
       const now = clock();
       if (intent.kind === "buy" && intent.expiresAt !== undefined && now > intent.expiresAt) {
+        settle(intent, { outcome: "stale", kind: intent.kind });
         log("intent.stale", { id: intent.id, reason: intent.reason });
         return;
       }
@@ -501,6 +552,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         });
         if (fundedBy === "wallet") addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: sent.txHash });
         traded();
+        settle(approved, { outcome: "filled", kind: "buy", coin, symbol: prepared.value.info.symbol, bnb: weiToBnb(bnbIn), txHash: sent.txHash });
         log("buy.filled", { id: approved.id, txHash: sent.txHash, coin, coinsOut: fills.coinsOut, bnbInWei: bnbIn, feeQuote: fills.fee, gasWei: sent.gasWei, payerIsWallet: true });
         notify("trade", `bought ${prepared.value.info.symbol} for ${weiToBnb(bnbIn)} BNB (${sent.txHash})`, { txHash: sent.txHash });
         save();
@@ -513,7 +565,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (approved.kind === "sell") {
         const coin = approved.coin!;
         const position = positionOf(book, coin);
-        if (!position) return log("sell.nothing", { id: approved.id, coin });
+        if (!position) {
+          settle(approved, { outcome: "nothing", kind: "sell", coin });
+          return log("sell.nothing", { id: approved.id, coin });
+        }
         // Every sale re-checks the allowance on chain: Permit2's lasts 30 days, so "armed" once is not armed for ever.
         if (!(await arm(coin, approved))) return;
         const coins = (position.coins * BigInt(Math.round((approved.fraction ?? 1) * 1_000_000))) / 1_000_000n;
@@ -533,6 +588,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         }
         book = recordSell(book, { coin, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, gasWei: sent.gasWei, at: clock() });
         traded();
+        settle(approved, { outcome: "filled", kind: "sell", coin, symbol: prepared.value.info.symbol, bnb: weiToBnb(fills.bnbOutWei), txHash: sent.txHash });
         log("sell.filled", { id: approved.id, txHash: sent.txHash, coin, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, gasWei: sent.gasWei, payerIsWallet: true });
         notify("trade", `sold ${prepared.value.info.symbol} for ${weiToBnb(fills.bnbOutWei)} BNB (${sent.txHash})`, { txHash: sent.txHash });
         return save();
@@ -597,7 +653,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (!existsSync(paths.inbox)) return;
       for (const file of readdirSync(paths.inbox).filter((f) => f.endsWith(".json")).sort()) {
         const full = join(paths.inbox, file);
-        let request: { type?: string; request?: IntentRequest; slippagePct?: number } | null = null;
+        let request: { type?: string; request?: IntentRequest; slippagePct?: number; requestId?: unknown } | null = null;
         try {
           request = JSON.parse(readFileSync(full, "utf8"));
         } catch {
@@ -607,8 +663,20 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (request?.type === "intent" && request.request) {
           const slippage = typeof request.slippagePct === "number" ? request.slippagePct : Math.min(3, agent!.limits.maxSlippagePct);
           const normal = normalizeIntent(request.request, { snapshot: { feast, now: clock(), limits: agent!.limits }, source: "manual", slippagePct: slippage, ttlMs: 120_000 });
-          if ("error" in normal) log("inbox.refused", { problem: normal.error });
-          else enqueue([normal.intent]);
+          // The CLI's own id for the request, so `FL buy` can wait for its outcome: a plain token, never a path.
+          const requestId = typeof request.requestId === "string" && /^[a-z0-9-]{1,64}$/i.test(request.requestId) ? request.requestId : null;
+          if ("error" in normal) {
+            log("inbox.refused", { problem: normal.error });
+            if (requestId) log("request.outcome", { requestId, outcome: "refused", kind: request.request.kind, limit: null, message: normal.error });
+          } else {
+            if (requestId) requested.set(normal.intent.id, requestId);
+            enqueue([normal.intent]);
+            // A sale of a coin already queued for sale is the same sale: its request is answered now, not left waiting.
+            if (requestId && !queue.includes(normal.intent)) {
+              settle(normal.intent, { outcome: "dropped", kind: normal.intent.kind, reason: "a sale of this coin is already queued" });
+              report(normal.intent.id);
+            }
+          }
         } else if (request?.type === "unpause") {
           if (book.paused) {
             log("pause.cleared", { by: "user", was: book.paused });
@@ -659,7 +727,20 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     }
 
     // --- the strategy, for the loop only -------------------------------------------------
-    if (agent.track === "preset") {
+    // Prompt mode: the host's silence, from its last FL buy, FL sell or FL note (or the user's yes, if it has not acted).
+    const silentFor = () => clock() - Math.max(lastHostAction(deps.home, deps.name)?.at ?? 0, Date.parse(agent!.confirmed?.at ?? "") || 0);
+    const idleMs = () => (agent!.autopilot?.idleMinutes ?? 0) * 60_000;
+    const silent = () => agent!.track === "prompt" && agent!.autopilot !== null && agent!.autopilot !== undefined && agent!.preset !== null && silentFor() >= idleMs();
+    if (agent.track === "prompt" && !agent.preset) {
+      // No autopilot: no strategy. The loop only enforces: the inbox, the preflight, L6, L8, the unresolved check, the notes.
+      loaded = {
+        meta: { name: "prompt", tickSeconds: agent.tickSeconds, events: [], watch: [] },
+        params: {},
+        wants: () => [],
+        call: async (_fn, _snapshot, state) => ({ intents: [], problems: [], logs: [], state }),
+        stop() {},
+      };
+    } else if (agent.track === "preset" || agent.track === "prompt") {
       const strategy = presetStrategy(agent.preset!);
       const presetAgent = agent;
       loaded = {
@@ -677,6 +758,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         },
         stop() {},
       };
+      // An autopilot is the same preset, asked only while the host is silent; its intents keep the source "preset".
+      if (agent.track === "prompt") loaded = autopilotGate(loaded, silent);
     } else {
       const sandbox = await ScriptSandbox.start(scriptSource!);
       const params = { ...sandbox.params, ...agent.params };
@@ -706,9 +789,31 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const listens = (loaded.meta.events ?? []).length > 0;
     const poller = listens ? new IndexerPoller({ base: deps.indexer, fetch: deps.fetch }) : null;
     if (poller) await poller.start().catch((error: unknown) => log("events.start.failed", { reason: String((error as Error).message) }));
-    log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup() });
-    notify("started", `${agent.track === "preset" ? `preset ${agent.preset}` : "script"} running; tick ${agent.tickSeconds} s${warmup() ? `; warm-up: ${warmup()!.remaining} trades at ${warmup()!.sizeBnb} BNB` : ""}`);
+    log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null });
+    if (agent.track === "prompt") {
+      notify("started", `prompt mode; your agent decides; ${agent.preset && agent.autopilot ? `autopilot ${agent.preset} after ${agent.autopilot.idleMinutes} min of silence` : "no autopilot"}`);
+    } else {
+      const passed = checkPassed ? `; warm-up passed by FL script check (sha ${agent.script!.sha256.slice(0, 6)}…${agent.script!.sha256.slice(-4)})` : "";
+      notify("started", `${agent.track === "preset" ? `preset ${agent.preset}` : "script"} running; tick ${agent.tickSeconds} s${warmup() ? `; warm-up: ${warmup()!.remaining} trades at ${warmup()!.sizeBnb} BNB` : passed}`);
+    }
     save();
+
+    // The notes the user's agent wrote (FL note), sent to feast.meme when it takes them: at most once every 10 minutes, at
+    // most 20 a time, never awaited, so a slow page never holds the loop or a trade.
+    let nextNotesFlush = 0;
+    let flushing = false;
+    const flushQueuedNotes = (now: number) => {
+      if (flushing || now < nextNotesFlush) return;
+      nextNotesFlush = now + 10 * 60_000;
+      if (!readNotes(deps.home, deps.name).some((n) => n.state === "queued")) return;
+      flushing = true;
+      void flushNotes(deps.home, deps.name, wallet, { site: deps.site ?? siteFromEnv(), fetch: deps.fetch ?? fetch, now: clock, max: 20 })
+        .then((out) => (out.sent + out.refused > 0 ? log("notes.flushed", { sent: out.sent, refused: out.refused, kept: out.kept }) : undefined))
+        .catch(() => undefined)
+        .finally(() => (flushing = false));
+    };
+    // The autopilot's state, said once each way: on after the host's silence, off when it acts.
+    let autopilotOn = false;
 
     for (;;) {
       const now = clock();
@@ -725,6 +830,16 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         return { exit: "finished", reason: "the run's time is up" };
       }
       drainInbox();
+      if (agent.track === "prompt" && agent.preset && agent.autopilot) {
+        const on = silent();
+        if (on !== autopilotOn) {
+          autopilotOn = on;
+          const minutes = agent.autopilot.idleMinutes;
+          log(on ? "autopilot.on" : "autopilot.off", { preset: agent.preset, idleMinutes: minutes, silentMs: silentFor() });
+          notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : `your agent acted: autopilot ${agent.preset} steps back`);
+        }
+      }
+      flushQueuedNotes(now);
       if (now >= nextPreflight) {
         await preflight();
         nextPreflight = now + (deps.preflightMs ?? 300_000);
@@ -773,7 +888,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             ),
           );
           // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
-          const needBoard = agent.track === "script" || agent.preset === "momentum" || (agent.preset === "dca" && agent.params.targets === "topHolders");
+          const asks = agent.track !== "prompt" || autopilotOn;
+          const needBoard = asks && (agent.track === "script" || agent.preset === "momentum" || (agent.preset === "dca" && agent.params.targets === "topHolders"));
           const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard });
           await runStrategy("onTick", snapshot);
         } catch (error) {
@@ -790,8 +906,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         for (let i = queue.length - 1; i >= 0; i -= 1) {
           const held = queue[i]!;
           if (held.kind === "buy" && held.expiresAt !== undefined && now > held.expiresAt) {
+            settle(held, { outcome: "stale", kind: held.kind, signedOut: true });
             log("intent.stale", { id: held.id, reason: held.reason, signedOut: true });
             queue.splice(i, 1);
+            report(held.id);
           }
         }
         await sleep(deps.loopMs ?? 1_000);
@@ -800,6 +918,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       const next = queue.shift();
       if (next) {
         if (!stopReason(deps.home, deps.name)) await processIntent(next);
+        report(next.id);
         continue;
       }
       await sleep(deps.loopMs ?? 1_000);
