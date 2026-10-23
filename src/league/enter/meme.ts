@@ -131,5 +131,5 @@ function kindOf(bytes: Uint8Array): string {
   if (head(3).join() === [0xff, 0xd8, 0xff].join()) return "a JPEG";
   if (String.fromCharCode(...head(4)) === "RIFF" && String.fromCharCode(...bytes.subarray(8, 12)) === "WEBP") return "a WebP";
   if (String.fromCharCode(...head(4)) === "GIF8") return "a GIF";
-  return "not a picture this agent can use";
+  return "another kind of file";
 }
