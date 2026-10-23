@@ -52,7 +52,7 @@ A runtime installed at `league-v1`, `league-v2` or `league-v3` has no prompt mod
 | --- | --- |
 | Node.js | 22.12 or newer for the runtime; the `npx skills` installer asks for 22.20 or newer |
 | The `baw` CLI | comes with the Binance Agentic Wallet skill |
-| Network access | the Feast indexer (`indexer.feast.meme`), the Feast site (`feast.meme`: coin pictures, the public pools and hourly history `FL data` reads, the league's registration, boards and notes) and a BNB Smart Chain RPC |
+| Network access | the Feast site (`feast.meme`: the cached market snapshot `/api/v1/snapshot` the runtime and `FL data` read every 5–8 s, with no wallet header and no token; coin pictures, the public pools and hourly history; the league's registration, boards and notes), the Feast indexer (`indexer.feast.meme`: while the snapshot route is not deployed, and with `--live`) and a BNB Smart Chain RPC (every balance, mark and receipt) |
 
 ## The wallet
 

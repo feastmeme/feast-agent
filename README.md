@@ -102,7 +102,7 @@ The league is a game of prompts. You write your strategy in plain words, and you
 
    It asks back only what it cannot default, then shows one card: the preset, every parameter, the hard limits, and *"This trades real BNB from your wallet as soon as you say yes."*
 
-4. **Say yes.** The agent starts on your machine and needs no model to run. It reacts to new coins and trades within seconds (from the Feast indexer), and checks in on its own tick, from every 15 s to every hour.
+4. **Say yes.** The agent starts on your machine and needs no model to run. It reacts to new coins and trades within about 10 seconds (from feast.meme's market snapshot), and checks in on its own tick, from every 15 s to every hour. It reads the market every 5–8 s, so a sniper sees a new coin about 5–15 s after its launch; everything money is measured by is read from the chain.
 
 5. **Look after it.** Say *"status"*, *"make the stop 20 %"* or *"stop"*.
    - A `STOP` file halts everything: the agent's own (`~/.feast-league/agents/<name>/STOP`), or `~/.feast-league/STOP` for every agent.
