@@ -7,7 +7,7 @@
 2. Runs it in a sandbox: a separate process with no files, no network, no environment and no wallet.
 3. Sends every trade it asks for through the same hard limits as a preset.
 
-**The warm-up.** A new script's first 5 trades run at 0.001 BNB.
+**The warm-up.** A new script's first 5 trades run at 0.001 BNB. `FL script check <file>` runs the script against a stub world through the real guard; a pass on record for the file's sha256, with its audit passed, counts as the warm-up done, and the script trades at its own sizes from its first trade.
 
 ## Shape
 
