@@ -122,3 +122,129 @@ describe("ten thousand agents: the snapshot feed (task 967)", () => {
     expect(read("README.md")).toContain("within about 10 seconds (from feast.meme's market snapshot)");
   });
 });
+
+describe("one command enters and runs the agent (task 968)", () => {
+  const skill = read("skills/feast-league/SKILL.md");
+  const section9 = skill.slice(skill.indexOf("## 9."), skill.indexOf("### The older signed path"));
+
+  it("the description stays within 1024 characters and names the one-command entry and the meme", () => {
+    const description = /^description: (.*)$/m.exec(skill)![1]!;
+    expect(description.length).toBeLessThanOrEqual(1024);
+    expect(description).toMatch(/one command enters the league and runs the agent/);
+    expect(description).toMatch(/meme/);
+    expect(description).not.toMatch(/body coin/);
+  });
+
+  it("§9: one signature, --meme, feed, --image, the waiting state, and rerun FL start", () => {
+    for (const word of ["one signed message", "Register", "--meme", "`feed`", "--image", "waiting for the season", "rerun `FL start <name>`", "at most two confirmations at entry", "--no-start", "FL meme", "has not given the seat yet"]) expect(section9, word).toContain(word);
+    expect(section9).not.toMatch(/body coin|backers are its HP/);
+  });
+
+  it("the intent table, in English and in Chinese, with every row the owner named", () => {
+    const en = section9.slice(section9.indexOf("### What the player says → what you run"), section9.indexOf("### 玩家说什么 → 你运行什么"));
+    const zh = section9.slice(section9.indexOf("### 玩家说什么 → 你运行什么"), section9.indexOf("### Entering, step by step"));
+    expect(en.length).toBeGreaterThan(200);
+    expect(zh.length).toBeGreaterThan(200);
+    for (const [said, runs] of [
+      ['"enter the league"', "FL enter --name <id>.ai --prompt strategy.md"],
+      ['"launch a meme: <concept>"', "FL meme"],
+      ['"change my strategy: …"', "strategy.md"],
+      ['"pause" / "resume"', "FL stop <name>"],
+      ['"how is it doing?"', "Post it on X today to be in tonight's airdrop"],
+      ['"why did it buy X?"', "notes"],
+      ['"stop for good"', "FL stop --all"],
+    ]) {
+      const row = en.split("\n").find((l) => l.startsWith(`| ${said}`));
+      expect(row, said).toBeDefined();
+      expect(row, said).toContain(runs);
+    }
+    for (const [said, runs] of [
+      ["「报名」", "FL enter --name <id>.ai --prompt strategy.md"],
+      ["「发一个 meme：<概念>」", "FL meme"],
+      ["「改策略：…」", "strategy.md"],
+      ["「暂停」/「继续」", "FL stop <name>"],
+      ["「怎么样了」", "今天把它发到 X 上，就能参加今晚的空投"],
+      ["「为什么买 X」", "笔记"],
+      ["「彻底停止」", "FL stop --all"],
+    ]) {
+      const row = zh.split("\n").find((l) => l.startsWith(`| ${said}`));
+      expect(row, said).toBeDefined();
+      expect(row, said).toContain(runs);
+    }
+    expect(section9).toContain("The player never types an `FL` command.");
+    expect(section9).toContain("pasting the league page's one-line prompt to you and tapping the wallet's confirmations");
+    expect(section9).toMatch(/A host without a shell .* cannot run the league/);
+  });
+
+  it("the meme question, in both languages, in the skill and the README; its fee share is the launch default's", () => {
+    const en = "Want to launch your own meme too? Others can trade it and half of every trading fee goes to you. Give me a one-line concept, or say no, it doesn't affect the game.";
+    const zh = "要不要顺便发一枚你的 meme？别人可以交易它，每笔手续费的一半归你；给我一句话概念就行，不发也不影响比赛。";
+    for (const [file, text] of [["SKILL.md", skill], ["README.md", read("README.md")]]) {
+      expect(text, file).toContain(en);
+      expect(text, file).toContain(zh);
+    }
+    // Half: 100 points less the platform's 20, the burn's 20 and the referrer's 10 (src/league/register/claims.ts).
+    const claims = read("src/league/register/claims.ts");
+    expect(claims).toContain("export const BODY_COIN_SPLIT = { burn: 20, referrer: 10 } as const;");
+    expect(100 - 20 - 20 - 10).toBe(50);
+  });
+
+  it("README mirrors the intent table in both languages", () => {
+    const readme = read("README.md");
+    for (const row of ['| "enter the league" |', '| "launch a meme: <concept>" |', '| "stop for good" | `FL stop --all` |', "| 「报名」 |", "| 「彻底停止」 | `FL stop --all` |"]) expect(readme, row).toContain(row);
+  });
+
+  it("no doc names the site's season-start setting; the PLAN has §16; no HP sentence on the entry path", () => {
+    const docs = [...walk("skills"), ...walk("docs"), "README.md"].filter((f) => f.endsWith(".md"));
+    for (const file of docs) expect(read(file), file).not.toMatch(/LEAGUE_SEASON_START/);
+    expect(read("docs/league/PLAN.md")).toMatch(/^## 16\. One command: entry by one signature, an optional meme, and the agent started \(task 968\)$/m);
+    for (const file of [...walk("skills"), "README.md", ...walk("src/league/enter")]) expect(read(file), file).not.toMatch(/backers are its HP|押它的人就是它的血量/);
+  });
+
+  it("the CHANGELOG's league-v4 names the entry, the gate, the meme and the notes section", () => {
+    const log = read("docs/CHANGELOG.md");
+    const v4 = log.slice(log.indexOf("## league-v4"), log.indexOf("## league-v3"));
+    for (const word of ["One command enters the league and runs the agent", "--no-start", "--meme", "FL meme", "--image", "The season gate", "season-1 default strategy", "`notes` section"]) expect(v4, word).toContain(word);
+    expect(v4).not.toMatch(/`FL enter` is the launch only\*\*/);
+  });
+});
+
+describe("the season-1 default strategy (task 968)", () => {
+  const zh = read("docs/prompts/default-s1.md");
+  const en = read("docs/prompts/default-s1.en.md");
+  const BANNED_ZH = [/保证/, /收益/, /稳赚/, /稳赢/, /必赚/, /无风险/, /抽奖/];
+  const BANNED_EN = [/guarantee/i, /profit is/i, /risk-free/i, /sure win/i, /\byield/i, /lottery/i];
+
+  it("both files exist, titled, in six short lines: who, the arena, the goal, how, a starting point", () => {
+    expect(zh.split("\n")[0]).toBe("# 第一季默认策略 v1（Season-1 default strategy v1）");
+    expect(en.split("\n")[0]).toBe("# Season-1 default strategy v1");
+    for (const text of [zh, en]) expect(text.trimEnd().split("\n")).toHaveLength(6);
+    const [, whoZh, arenaZh, goalZh, howZh, endZh] = zh.trimEnd().split("\n");
+    expect(whoZh).toBe("你是一个在 Feast 上交易的 AI，代表 <id>.ai 参加联赛。");
+    for (const fact of ["只能交易 Feast 上的币", "0.15 BNB", "21:00", "≥3 笔", "≥0.02 BNB", "不算自己的币", "会被吃掉", "当天亏钱且盈亏垫底的两成", "一季一条命", "第一顿不吃人", "公开"]) expect(arenaZh, fact).toContain(fact);
+    expect(goalZh).toBe("目标：赛季结束时赚到的 BNB 最多，并且活到最后。");
+    for (const word of ["FL data", "活动门槛", "FL note"]) expect(howZh, word).toContain(word);
+    expect(endZh).toBe("这只是起点，随时改成你自己的策略。");
+    const [, whoEn, arenaEn, goalEn, howEn, endEn] = en.trimEnd().split("\n");
+    expect(whoEn).toContain("<id>.ai");
+    for (const fact of ["Feast coins only", "0.15 BNB", "21:00 (UTC+8)", "at least 3 trades", "0.02 BNB", "own coin left out", "bottom fifth by the day's PnL whose day lost", "one life a season", "the first dinner eats nobody", "notes are public"]) expect(arenaEn, fact).toContain(fact);
+    expect(goalEn).toMatch(/^Your goal: the most BNB/);
+    for (const word of ["FL data", "activity floor early", "FL note"]) expect(howEn, word).toContain(word);
+    expect(endEn).toMatch(/starting point/);
+  });
+
+  it("no banned word, no promise, no address, no link but feast.meme's", () => {
+    for (const pattern of BANNED_ZH) expect(zh, String(pattern)).not.toMatch(pattern);
+    for (const pattern of BANNED_EN) expect(en, String(pattern)).not.toMatch(pattern);
+    for (const text of [zh, en]) {
+      expect(text).not.toMatch(/0x[0-9a-fA-F]{40}/);
+      for (const [url] of text.matchAll(/https?:\/\/\S+/g)) expect(url).toMatch(/^https:\/\/feast\.meme\//);
+    }
+  });
+
+  it("the prompts README lists both", () => {
+    const readme = read("docs/prompts/README.md");
+    expect(readme).toContain("(default-s1.md)");
+    expect(readme).toContain("(default-s1.en.md)");
+  });
+});
