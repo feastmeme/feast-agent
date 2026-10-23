@@ -58,12 +58,13 @@ function setup() {
 }
 
 describe("feast-league enter, through the binary", () => {
-  it("--help lists enter, and what --name means for it", async () => {
+  it("--help lists enter with its prompt, meme, image and no-start, and meme", async () => {
     const { env } = setup();
     const out = await run(["--help"], env);
-    expect(out.stdout).toContain("enter --name <id>.ai [--yes] [--lang en|zh] [--json]");
-    expect(out.stdout).toContain("the league entry, once: launch the body coin, and open the notes session (one signed");
-    expect(out.stdout).toContain("nothing is bought, and it never starts trading");
+    expect(out.stdout).toContain('enter --name <id>.ai [--prompt <strategy.md>] [--meme "<concept>"] [--image <path>] [--no-start] [--yes] [--lang en|zh] [--json]');
+    expect(out.stdout).toContain('meme "<concept>" [--coin-name "<…feed>"] [--symbol T] [--description "…"] [--image <file.png>] [--yes]');
+    expect(out.stdout).toContain("waiting for the season: it trades nothing before");
+    expect(out.stdout).not.toMatch(/body coin, and open the notes session|it never starts trading/);
     const enterHelp = await run(["enter", "--help"], env);
     expect(enterHelp.code).toBe(0);
     expect(enterHelp.stdout).toContain("enter --name <id>.ai");
@@ -93,6 +94,27 @@ describe("feast-league enter, through the binary", () => {
     expect(out.stdout.trim()).toBe("The Agent ID couldn't be read from BNB Smart Chain just now. Nothing was signed or sent. Try again in a minute.");
     expect(out.stdout).not.toContain("127.0.0.1");
     expect(baw.calls().every((c) => c.startsWith("wallet "))).toBe(true);
+  }, 60_000);
+});
+
+describe("feast-league meme, through the binary", () => {
+  it("with no entry on this machine: exit 2, one line, nothing asked of the wallet; a GIF given is never read", async () => {
+    const { env, baw } = setup();
+    const dir = mkdtempSync(join(tmpdir(), "feast-league-meme-cli-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "cat.gif"), "GIF89a, a cat");
+    const out = await run(["meme", "a cat that eats noodles", "--coin-name", "Noodle Cat", "--symbol", "NOOD", "--description", "A cat.", "--image", join(dir, "cat.gif")], env);
+    expect(out.code).toBe(2);
+    expect(out.stdout.trim()).toBe("No entry on this machine: run FL enter first.");
+    expect(baw.calls()).toEqual([]);
+  }, 60_000);
+
+  it("without a concept: one error line", async () => {
+    const { env, baw } = setup();
+    const out = await run(["meme"], env);
+    expect(out.code).toBe(1);
+    expect(out.stderr).toMatch(/the meme's one-line concept/);
+    expect(baw.calls()).toEqual([]);
   }, 60_000);
 });
 

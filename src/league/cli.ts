@@ -113,10 +113,16 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   one guarded buy, through the agent's limits; into a running agent it waits up to 90 s
                                   for the outcome (filled: exit 0; refused: exit 2)
   sell <name> <coin|FEAST> <fraction|all> [--no-wait]
-  enter --name <id>.ai [--yes] [--lang en|zh] [--json]
-                                  the league entry, once: launch the body coin, and open the notes session (one signed
-                                  message, under the same yes); nothing is bought, and it never starts trading
-                                  (--name is the wallet's Agent ID here; each card needs its own --yes)
+  enter --name <id>.ai [--prompt <strategy.md>] [--meme "<concept>"] [--image <path>] [--no-start] [--yes] [--lang en|zh] [--json]
+        [--coin-name "<…feed>" --symbol T --description "…"] [--autopilot <preset>] [--agent <name>] [--no-jitter]
+                                  one command enters the league and runs your AI: one card and one yes sign the league's
+                                  Register (no coin needed, no gas) and the notes session, then start the agent detached,
+                                  waiting for the season: it trades nothing before. Without --prompt, the season-1 default
+                                  is copied to ./strategy.md (never over one that is there). --no-start registers only.
+                                  --meme launches one coin, composed by your agent, on its own card and its own yes
+                                  (--name is the wallet's Agent ID here; FL start <name> restarts the agent)
+  meme "<concept>" [--coin-name "<…feed>"] [--symbol T] [--description "…"] [--image <file.png>] [--yes]
+                                  after the entry: the meme's compose card, then its preview card; one coin per agent
   register <name> --check [--body-coin 0x…] [--lang en|zh]
                                   the league registration check: Agent ID, body coin, seat (reads only)
   register <name> --manifesto "…" [--body-coin 0x…] [--x handle] [--pending] [--lang en|zh] [--yes]
@@ -224,6 +230,12 @@ async function main(argv: string[]): Promise<number> {
       "no-jitter": { type: "boolean", default: false },
       // FL start's drawn wait, handed to a detached `run` (seconds); not for the user.
       "start-jitter": { type: "string" },
+      // FL enter and FL meme (task 968).
+      meme: { type: "string" },
+      "coin-name": { type: "string" },
+      image: { type: "string" },
+      "no-start": { type: "boolean", default: false },
+      agent: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -589,6 +601,8 @@ async function main(argv: string[]): Promise<number> {
     }
     case "enter":
       return enterCommand(home, values, json);
+    case "meme":
+      return enterCommand(home, { ...values, meme: need(args[0], 'the meme\'s one-line concept: feast-league meme "<concept>"') }, json, true);
     case "register":
       return registerCommand(home, checkAgentName(need(args[0], "an agent name")), values, json);
     case "launch":
@@ -660,9 +674,11 @@ async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string
   return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own } };
 }
 
-/** `feast-league enter` (task 961): the league entry, one card at a time; `src/league/enter/flow.ts` is the whole of it. */
-async function enterCommand(home: string, values: Values, json: boolean): Promise<number> {
+/** `feast-league enter` and `feast-league meme` (tasks 961, 968): `src/league/enter/flow.ts` is the whole of it. */
+async function enterCommand(home: string, values: Values, json: boolean, memeOnly = false): Promise<number> {
   const signer = signerFor(home, ENTRY_AGENT);
+  const idle = str(values["idle-minutes"]);
+  const concept = str(values.meme);
   const result = await enter(
     {
       home,
@@ -672,9 +688,24 @@ async function enterCommand(home: string, values: Values, json: boolean): Promis
       site: new LeagueSite(siteFromEnv(), fetch, 15_000, realRetry()),
       retry: realRetry(),
       oneShot: entryOneShot({ home, signer, rpcUrl: rpc() }),
-      signOptions: { onPending: () => process.stderr.write("Confirm the notes signature in the Binance App; waiting up to 10 minutes.\n") },
+      signOptions: { onPending: () => process.stderr.write("Confirm the signature in the Binance App; waiting up to 10 minutes.\n") },
+      // The trading agent, detached as FL start --detach starts it; it waits for the season itself.
+      start: async (name, options) => detach(home, name, options.noJitter ? ["--no-jitter"] : []),
+      cwd: process.cwd(),
     },
-    { name: str(values.name), yes: values.yes === true, lang: langOf(values.lang) },
+    {
+      name: memeOnly ? undefined : str(values.name),
+      yes: values.yes === true,
+      lang: langOf(values.lang),
+      prompt: str(values.prompt),
+      noStart: values["no-start"] === true,
+      agent: str(values.agent),
+      autopilot: str(values.autopilot),
+      idleMinutes: idle !== undefined ? Number(idle) : undefined,
+      noJitter: values["no-jitter"] === true,
+      meme: concept !== undefined ? { concept, name: str(values["coin-name"]), symbol: str(values.symbol), description: str(values.description), image: str(values.image) } : undefined,
+      memeOnly,
+    },
   );
   print(json, { ok: result.ok, stage: result.stage, ...result.data, card: result.text }, () => result.text);
   return result.code;
