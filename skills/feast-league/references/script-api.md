@@ -47,6 +47,7 @@ export function onEvent(api, event) {             // optional: on the events lis
 | `api.read.holders(coin, sinceMs?)` | holder-count samples `{ at, holders }` |
 | `api.read.launchesBy(creator, sinceMs?)` | how many coins a creator launched |
 | `api.read.launched()` | the coin this agent launched, or null |
+| `api.read.stale()` | null while the market data is fresh; while the runtime's market feed backs off, `{ sinceMs, reason }`: the coins, holders and trades are the last good read's, not refreshed since `sinceMs` (positions and the balance are read from the chain) |
 | `api.buy({ coin, bnb, reason })` | ask for a buy of `bnb` BNB |
 | `api.sell({ coin, fraction, reason })` | ask to sell a share (0–1) of a position |
 | `api.launch({ name, symbol, quote, description, burn, referrer, reason })` | ask for a launch |

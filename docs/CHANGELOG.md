@@ -17,6 +17,12 @@ The league runtime's releases, as the skill pins them (`skills/feast-league/refe
 - **`FL script check <file>`**: the script in the sandbox against a stub world (8 coins, 36 snapshots, a fixed seed), through the real guard; a pass needs at least one approved buy and one sale. A pass on record, with the audit passed, counts as the warm-up done for that exact file (`audits/<sha256>.check.json`); any edit is a new check.
 - **The safety pass** of a prompt agent (L6, L8) runs at least every 60 s, whatever its autopilot's own tick.
 - `limits.ts` and `guard()` are unchanged. `FL --help` exits 0.
+- **The snapshot feed** (task 967: 10,000 agents at once). The runtime reads its events and its board from feast.meme's cached market snapshot, `GET /api/v1/snapshot` with `If-None-Match`, every 5–8 s, instead of polling the indexer every 2 s; a tick fetches nothing and makes no chain read per board row. The event position resumes from the snapshot's cursor, and nothing is passed twice; a gap under 120 s is filled with one legacy page. Marks, balances, receipts, L6 and L8 stay on the chain. A sniper now sees a new coin about 5–15 s after its launch.
+- **`--poll <s>`** on `start`, `resume` and `run`: the interval before its 0–3 s jitter (default 5, at least 3; below is refused). It is a runtime option, not part of the card.
+- **The runtime backs off** on a 429, a 5xx or no answer: 2 s doubling to 60 s with jitter, honouring `Retry-After`, never two reads within 3 s. It keeps deciding on the last good read, marked `stale` (`api.read.stale()` for scripts), logs `feed.backoff`, `feed.stale` and `feed.ok` once an outage, and notifies once. `FL enter`'s GETs back off too (at most 3 asks, 2 minutes); no POST is ever sent twice.
+- **The start jitter.** `FL start` and `FL resume` wait a random 0–120 s before the first read of the site and the first strategy tick, and say "starts reading the market within N s"; `--no-jitter` skips it. The stop file, the inbox, L6 and L8 run from the start.
+- **`FL data` reads the snapshot** (shared with the running agent through `<home>/cache/snapshot.json`, no wallet address in it), with `source: "snapshot"` and the fields it lacks listed under `missing`; **`FL data --live`** makes the old reads (the pools, then the indexer's board). Until `/api/v1/snapshot` answers 200, the runtime and `FL data` fall back to the legacy reads at the same interval, and ask again every 10 minutes; `--live` on `start` forces them.
+- The snapshot GET carries no wallet header and no token: the CDN keeps one copy.
 
 ## league-v3
 

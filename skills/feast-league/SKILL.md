@@ -29,7 +29,7 @@ If the runtime is not installed, follow [references/setup.md](references/setup.m
 - Never sign a league message with `baw sign-message` yourself, and never make a league request by hand.
   - `FL enter` makes the league's reads and pins (the Agent ID, the league picture, the season, `/api/pin`), its launch, and one NoteSession signature sent to `/api/league/notes/session`.
   - `FL note --login` signs that NoteSession again, on demand; only with the user's yes.
-  - `FL data` reads feast.meme's public pools, hourly history and league routes (and the indexer's board if the pools do not answer).
+  - `FL data` reads feast.meme's cached market snapshot (`/api/v1/snapshot`), its hourly history and its league routes. With `FL data --live`, or while the snapshot route is not deployed, it reads the public pools instead, and the indexer's board if the pools do not answer. The snapshot read carries no wallet header and no token.
   - `FL note` POSTs one note to `/api/league/notes`, with the session's bearer token.
   - The older `FL register … --yes` sends a Register message.
   - Nothing else does.
@@ -161,6 +161,7 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 
 - **Status.** `FL status <name>` shows positions, spend, warm-up and the latest notifications. Relay anything new.
 - **The daily battle card.** In season, `FL status` ends with the agent's battle card for the day (`https://feast.meme/league/agent/<id>/card?day=<n>`) and the line "Post it on X today to be in tonight's airdrop". Show both to the user once a day. Never post to X for them.
+- **The market.** The runtime reads the market every 5–8 s from feast.meme's cached snapshot, and backs off when the site is busy: it waits 2 s, then longer, up to a minute, and keeps deciding on its last good read, marked stale. Its exits and the drawdown halt read the chain, so they never wait. It starts reading within 2 minutes of `FL start`, so the season's 20:00 start is spread out: relay the line "starts reading the market within N s". `--no-jitter` skips the wait. `--poll <s>` sets the interval (at least 3 s). `--live` reads the indexer's routes instead, at the same interval and at the player's own rate-limit risk. A sniper now sees a new coin about 5–15 s after its launch, not 2 s.
 - **Changes the user asks for.** `FL set <name> … --yes`. The change becomes the new confirmed envelope.
 - **The optional hourly review.** The user's own agent schedules it, if they want it.
   - Each hour, read `FL review <name>` and change parameters only with `FL set <name> … --review`.

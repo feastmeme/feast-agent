@@ -99,7 +99,7 @@ Step 3 differs: *"run my script ./strategy.mjs"*, or *"write me a script that �
   - **So the runtime polls the indexer.** This is the fallback the brief named, and the plan says so here.
 - **Primary event source:** the indexer's event stream, `GET https://indexer.feast.meme/v1/events?types=launch,trade&cursor=<c>&limit=<n>`.
   - Ascending by (block, logIndex), cursor-paged, no auth, 300 requests/min per caller.
-  - The poll runs every **2 s** (30 requests/min).
+  - The poll runs every **2 s** (30 requests/min). Since task 967 the runtime reads feast.meme's cached snapshot every 5–8 s instead, and this poller is its fallback (§15).
   - The start cursor is the indexer head (`asOf.block`). Without a cursor the stream replays from the chain's start.
   - Status from here: `verdict serving`, 1–2 blocks behind.
 - **The 30-second cache.** The indexer caches each exact query for 30 s. During a quiet spell, a poll that repeats the same cursor can hide a new event for up to 30 s.
@@ -134,7 +134,7 @@ Step 3 differs: *"run my script ./strategy.mjs"*, or *"write me a script that �
   5. intents
   6. the guard
   7. the executor queue
-- **Events.** An event calls `strategy.onEvent` at once, debounced to 1 s per coin. The sniper and copy presets therefore react within one poll: about 2 s plus 1–2 blocks of indexer lag.
+- **Events.** An event calls `strategy.onEvent` at once, debounced to 1 s per coin. The sniper and copy presets therefore react within one poll: about 2 s plus 1–2 blocks of indexer lag. Since task 967, about 5–15 s: one snapshot read every 5–8 s, plus the snapshot's age (§15.2).
 - **Priorities.** Exits run before entries, and a sell outranks every queued buy. A buy intent expires (30 s for event-driven, one tick otherwise), so a stale signal never trades.
 
 ### 2.4 The strategy interface (shared by presets and scripts)
@@ -669,7 +669,7 @@ They run on this machine with the test wallet and the lane caps (0.005 BNB a tra
 
 | Risk | Mitigation |
 | --- | --- |
-| No realtime feed; the indexer caches answers for 30 s | 2 s cache-aware polling (verified in build); ask for an indexer change (Q6); optional chain logs with the user's own RPC |
+| No realtime feed; the indexer caches answers for 30 s | 2 s cache-aware polling (verified in build); since task 967, feast.meme's cached snapshot every 5–8 s, the poller its fallback (§15); ask for an indexer change (Q6); optional chain logs with the user's own RPC |
 | Sell quotes for brand-new coins revert in the MixedQuoter | decode the inner refusal; fallback pool-math quote; the preview's simulation re-checks (§8.2) |
 | Binance's risk scoring of approvals and Permit2 calls is unverified | preview-only checks first; fallback: the site's EIP-712 Permit2 signature through `sign-message` |
 | MEV: the mempool route of a `contract-call` is unknown | tight slippage per preset, a 5-minute deadline, quote-vs-spot impact limit (L10) |
@@ -902,3 +902,80 @@ Post it on X today to be in tonight's airdrop
 ### 14.9 What did not change
 
 `limits.ts` and `guard()` are byte for byte as they were at `3827654`, and `limits.pinned.test.ts`, `limits.test.ts`, `guard.test.ts` and `gate.test.ts` pass unedited. Nothing new goes around `refuseEarly`, the inbox's `normalizeIntent` or the one-shot. The presets' code stays, now also as autopilots; their example prompts are `docs/prompts/`.
+
+## 15. Ten thousand agents: the snapshot feed (task 967)
+
+The owner's target for season 1 (2026-10-24): 10,000 agents online at once, with no downtime. The capacity inventory found the indexer breaks first: every running agent that listened for events polled `indexer.feast.meme/v1/events` every 2 s, uncached, on one read process, and the 20:00 start put every agent's first read in the same minute. Tasks 965 and 966 build a market snapshot behind feast.meme's CDN, regenerated every 5 s; this task moves the runtime and `FL data` onto it. The code is `src/league/feed/`.
+
+### 15.1 The reads, before and after
+
+| | Before (`league-v3`, 963) | After (task 967) |
+| --- | --- | --- |
+| Events, an agent that listens | `GET indexer/v1/events` every 2 s: 0.5 req/s, uncached | `GET feast.meme/api/v1/snapshot` every 5–8 s: about 0.15 req/s, behind the CDN (`s-maxage 5`) |
+| The board, a strategy that reads it | `GET indexer/v1/board` once a tick (15 s cache), and two chain reads a row | the same snapshot's coins: no request and no chain read on the tick |
+| A board-only strategy (no events) | the board once a tick | the snapshot once a tick |
+| A prompt agent without an autopilot, the launch preset | none | none |
+| A prompt agent with an autopilot | events while running | the snapshot only while the autopilot is on |
+| `FL data` | the pools, paged (1–20 requests), cached 30 s | one snapshot request, none when the home's copy is fresher than 5 s, a 304 when it is older |
+| At 10,000 agents | about 5,000 req/s at the indexer | about 1,540 req/s at the CDN (mostly one copy every 5 s); the indexer builds one snapshot for everyone |
+
+- **The interval.** `poll × 1000 + U(0, 3000)` ms, drawn afresh each time; `poll` is 5 s, set with `--poll <s>` on `start`, `resume` and `run`. Below 3 s is refused with one line ("the poll is at least 3 s", exit 2), never clamped. `--poll` is a runtime option, passed to a detached `run`: it is not stored in `agent.json`, so it never changes the card or needs a new yes. The runtime's loop steps each second, so a read comes 5–9 s after the one before.
+- **The ETag.** Every read sends `If-None-Match` with the last ETag. A 304 keeps the snapshot held: no parse, no chain read. A 200 replaces it, unless it is an older copy than the one held (a CDN's, after a newer one), by its cursor, else its block.
+- **The board's rows** (`CoinRow`). From the snapshot: `coin` (its `address`), `symbol` (null when the server could not fill it: unknown), `quote` (an address), `creator` (in full), `launchedAt`, `ageSeconds`, `holders`, `volume24hBnb`, `trades24h`, `priceBnb` (the server's figure) and `hasMetadata` (from `metadataHash`). A `priceBnb` the server gives as null is `priceQuote` times the quote's BNB value (one cached chain read per quote, not per row), else null: never zero. Neutral fill-ins where a row lacks a field: `holders`, `volume24hBnb` and `trades24h` 0, `hasMetadata` true, `launchedAt` 0; a missing creator is the factory's (`coinInfo`, cached per coin), else the row is left out. Holder samples are kept at most once a minute per coin, so the window does not grow with a 5 s read.
+- **On the chain, as before.** Every mark (`chain.markWei`), every balance, L6, L8, every receipt and every amount money is measured by. The default RPC is unchanged.
+
+### 15.2 The events and the cursor
+
+- Every event in `events[]` keeps the indexer's `/v1/events` row shape (ruling C3): `type`, `cursor`, `blockNumber`, `logIndex`, `at`, `coin`, `poolId`, `txHash`, the full `creator`, `quote` and `metadataHash` of a launch, the full `payer`, `buy`, `coinAmount`, `quoteAmount`, `fee` and `sqrtPriceX96` of a trade. It goes through `normalizeEvent` and `market.ingest`, as the poller's did.
+- **The position** is a `(block, logIndex)`, read from those two fields or decoded from the cursor (base64url `{"b", "i"}`, the inverse of `cursorAt`), and exclusive. The first snapshot only sets it, to the snapshot's `toCursor` (else `cursor`), as the head read did: a restart begins at the head, and the cursor is not kept across restarts. Each later snapshot passes on the events strictly after it, in order, and the position moves to the snapshot's end, never back: a snapshot served twice, or an older copy after a newer one, passes nothing twice. An event without a readable position is never passed.
+- **Gaps** (ruling C1: the snapshot carries `fromCursor`, the exclusive start of `events[]`, `toCursor`, `truncated`, and a rolling tail of at least 120 s, at most 2,000 events). A gap is a position before `fromCursor`. One that starts less than 120 s back is filled with one legacy `/v1/events?cursor=<position>` page, at most once every 30 s, under the same backoff, and none while it backs off. One that starts further back is not filled: the runtime's freshness filter would drop those events anyway, and an outage's end would otherwise bring every agent to the indexer at once; `events.gap` says so, once a gap. Without `fromCursor` a gap cannot be told from a quiet spell: nothing is filled, `events.gap.unknown` is logged once a run, and events between two snapshots may be missed.
+- **Latency.** A read every 5–8 s plus the CDN copy's age (up to 5 s): a sniper sees a new coin about 5–15 s after its launch, against about 2 s before (ruling C5, accepted). `--live` keeps the old path for a player who wants it, at the same interval and at their own rate-limit risk.
+
+### 15.3 The backoff
+
+- On a 429, a 503, any other 5xx or other refusal, a network error or a timeout (10 s), attempt k (from 0) waits `min(60 s, 2 s × 2^k) × U(0.75, 1.25)`, clamped to [2 s, 60 s]. A `Retry-After` (seconds or a date) raises the wait to at least its value, still capped at 60 s. A 200 or a 304 starts again at k = 0.
+- No two reads of one runtime are less than 3 s apart, ever, and never two at once. The legacy reads and a gap's fill live under the same backoff.
+- **While it backs off**, the runtime keeps deciding on the last good snapshot: the board's rows and the held events stay in use, and the strategy's snapshot carries `stale: { sinceMs, reason }` (scripts: `api.read.stale()`; null when fresh). The field is additive: nothing a script read before changed. L6, L8, the inbox and the host's own `FL buy` and `FL sell` never wait on the feed. A stale snapshot loosens nothing.
+- **The log**: one line per change of state, never one per failed read: `feed.backoff` (with the status) on the first failure, `feed.stale` after the third, `feed.ok` (with how long it lasted) on the first good read. One notification an outage, at the third failure. This replaces the old `events.failed` on every failed poll.
+- **`FL enter`** keeps its flow; only its GETs back off: the Agent ID read, the season, the league picture and the indexer's launches (`launchesBy`), at most 3 asks and 2 minutes each, then today's "unavailable" line. Its POSTs (`/api/league/notes/session`, `/api/pin`, and `FL register`'s) get no added attempt: a signed request is never sent twice.
+
+### 15.4 The start jitter
+
+- `FL start` and `FL resume` draw a wait of U(0, 120) s unless `--no-jitter` is given, print "starts reading the market within N s" (in the foreground and with `--detach`, for an agent that reads the market), and pass it to the runtime (to a detached `run` as `--start-jitter <s>`). `run` without it waits nothing, so tests and dry runs stay quick.
+- **What waits**: the first read of feast.meme or the indexer, the first strategy tick, the first autopilot decision, and the notes flush. **What does not**: the stop files, the inbox (a queued `FL buy` is processed at once), the preflight, the unresolved check, L6 and L8. A stop during the wait stops at once.
+
+### 15.5 No wallet header (ruling C4)
+
+The brief proposed an `X-Feast-Wallet` header on every request, for per-wallet rate limits. The coordinator dropped it: the snapshot GET carries no wallet header, no token and no cookie, so the CDN keeps one copy for everyone and a bearer token never rides on tens of thousands of requests a minute. Per-wallet limits apply to authenticated POSTs only (the notes, with their bearer token). Nothing in this task adds a header to any request.
+
+### 15.6 Before tasks 965 and 966 deploy
+
+On 2026-10-24 the route answered 404. On a 404 or a 410 the runtime logs `snapshot.unavailable` once and falls back to the legacy reads (the indexer's `/v1/events`, with its `limit` still cycling, and its `/v1/board` for a tick, at most every 15 s) at the same 5–8 s interval, never 2 s, under the same backoff. It asks the route again every 10 minutes, and when it answers logs `snapshot.available` once and goes on from the poller's cursor. `--live` forces the legacy reads, at the same interval, and never asks the route. `FL data` remembers a 404 for 10 minutes in the home's cache and reads the pools meanwhile.
+
+### 15.7 The home's one snapshot cache, and `FL data`
+
+- The newest good snapshot's coins and its ETag are kept in `<home>/cache/snapshot.json`, written atomically by the runtime on each 200 and 304, and by `FL data`; its events are not kept. Before writing, every occurrence of the wallet's own address (any case, with or without `0x`) is written as `"self"`; "self" maps back in memory only. With the wallet unreadable, nothing is written.
+- `FL data` reads the snapshot by default (`source: "snapshot"`): no request when the home's copy is fresher than 5 s, a 304 with its ETag when it is older. A field the snapshot does not carry is null, never a guess, and listed under `missing` (`coins[].trades24h`, say). A 429 gives the existing rate line, `partial: true`, and the home's last copy marked `stale: { since, reason }` if one is held. `FL data --live` makes today's reads exactly: the pools, then the indexer's board (`source: "pools" | "indexer"`).
+
+### 15.8 The load test (`src/league/feed/load.test.ts`)
+
+1,000 runtime instances in one process, each a real `SnapshotClient` with its own seeded random, against a stub snapshot (a fresh ETag every 5 simulated seconds, a 304 otherwise), on virtual time. Measured on 2026-10-24:
+
+| | Measured | Bound |
+| --- | --- | --- |
+| Steady, 120 s, no start jitter | 18,992 requests (791 per 5 s) | 14,000–25,000; at most 1,000 per 5 s |
+| The start, 1 s peak of first reads | 16 with the jitter; 1,000 without | at most 25 |
+| 429s from 60 s to 240 s, its last 60 s | 1,162 requests (19.4/s, against 162.4/s steady) | at most 1,333 |
+| The longest wait; every instance back | 60.0 s; 60.0 s after the outage's end | at most 75 s |
+| After it, 315–375 s | 9,220 requests | 6,500–13,000 |
+| The smallest gap of any instance | 5.0 s steady; 3.0 s in the outage | at least 3 s |
+
+Each instance logged `feed.backoff`, `feed.stale` and `feed.ok` once for the outage.
+
+### 15.9 The dry run
+
+`npx tsx src/league/feed/dryrun.ts` runs a momentum agent and a prompt agent with a sniper autopilot, with the real loop, on the test fakes and one virtual clock, against a stub on 127.0.0.1: the start jitter, the steady state, a stretch of 429s, the recovery, then the 404 fallback and its recheck 10 minutes on. Its transcript is `docs/league/capacity-dryrun-20261023T1818Z.md`. The phases take 3 simulated minutes; the run goes on to 13 so the recheck shows.
+
+### 15.10 What did not change
+
+`limits.ts` and `guard()` are byte for byte as they were at `a66cfd5`, and `limits.pinned.test.ts`, `limits.test.ts`, `guard.test.ts` and `gate.test.ts` pass unedited. Nothing new goes around `refuseEarly`, `normalizeIntent` or the one-shot. The runtime calls no model, and makes no network call but the ones it made, the snapshot route, and the legacy fill and fallback above. The notes session, its 401 handling and the declared model are 963's, unchanged. Everything in the snapshot is data: its events pass `normalizeEvent`, its symbols are untrusted in `FL data`'s JSON and cleaned in human output, and nothing from it goes into a URL but a validated cursor.
