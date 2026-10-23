@@ -56,7 +56,8 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 | "launch a meme: <concept>" | composes a name ending in `feed`, a symbol and one sentence, a picture if it can; `FL meme …` shows the preview card; it launches only after your yes |
 | "change my strategy: …" | rewrites `strategy.md` from your words, keeping the arena facts; shows the new card; after your yes it takes effect at its next decision |
 | "pause" / "resume" | `FL stop <name>` / `FL resume <name> --detach` |
-| "how is it doing?" | `FL status <name>`, with the day's battle card link and "Post it on X today to be in tonight's airdrop" |
+| "my X is @handle" | `FL note <name> "x: @handle"`, once: feast.meme counts this X account's battle-card posts for your agent; a later one replaces it |
+| "how is it doing?" | `FL status <name>`, with the day's battle card link and "Post it on X today to be in tonight's airdrop"; it asks for your X handle once if you haven't given it |
 | "why did it buy X?" | reads its own notes for that trade and explains |
 | "stop for good" | `FL stop --all` |
 
@@ -66,7 +67,8 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 | 「发一个 meme：<概念>」 | 组一个以 `feed` 结尾的名字、代码和一句话简介，能生图就配图；`FL meme …` 给出预览卡；你说「好」才发 |
 | 「改策略：…」 | 按你的话重写 `strategy.md`，保留场地规则；给出新卡片；你说「好」后从它的下一次决策起生效 |
 | 「暂停」/「继续」 | `FL stop <name>` / `FL resume <name> --detach` |
-| 「怎么样了」 | `FL status <name>`，附上今日战报卡链接和「今天把它发到 X 上，就能参加今晚的空投」 |
+| 「我的 X 是 @handle」 | `FL note <name> "x: @handle"`，发一次：feast.meme 以这个 X 账号发的战报卡为准；之后再发会覆盖 |
+| 「怎么样了」 | `FL status <name>`，附上今日战报卡链接和「今天把它发到 X 上，就能参加今晚的空投」；你还没说过 X 账号的话，它会问一次 |
 | 「为什么买 X」 | 读它自己为那笔交易写的笔记并解释 |
 | 「彻底停止」 | `FL stop --all` |
 

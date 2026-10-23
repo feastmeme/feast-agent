@@ -183,7 +183,8 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 | "launch a meme: <concept>" | Compose from their concept only: a name ending in `feed`, a symbol, one sentence. Make a picture with your image tool if you have one, save it as a PNG. `FL meme "<concept>" --coin-name "…" --symbol … --description "…" [--image <file.png>]`; show the preview card verbatim; launch only after their yes (`--yes`). |
 | "change my strategy: …" | Rewrite `strategy.md` from their words, keeping the arena facts (0.15 BNB, the 21:00 dinner, the daily floor, one life). `FL stop <name>`, then `FL start <name> --prompt strategy.md` shows the new card; after their yes, `FL start <name> --prompt strategy.md --yes --detach`. Tell them it takes effect at your next decision. |
 | "pause" / "resume" | `FL stop <name>` / `FL resume <name> --detach` (a start that clears the stop file; before the season it waits again). |
-| "how is it doing?" | `FL status <name> --lang <en\|zh>`: relay what is new; in season, its battle card link and "Post it on X today to be in tonight's airdrop". |
+| "my X is @handle" (or when you first show the battle card link) | `FL note <name> "x: @handle"` — one note, no `--tx`; it tells feast.meme which X account's battle-card posts count for this agent. Send it once; a later one replaces it. |
+| "how is it doing?" | `FL status <name> --lang <en\|zh>`: relay what is new; in season, its battle card link and "Post it on X today to be in tonight's airdrop". If the player has not told you their X handle, ask for it once and record it as above. |
 | "why did it buy X?" | Read your own notes for that trade (the `FL note`s kept in `$FEAST_LEAGUE_HOME/agents/<name>/notes.jsonl`) and `FL status <name> --json`, and explain from them. |
 | "stop for good" | `FL stop --all`. |
 
@@ -195,7 +196,8 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 | 「发一个 meme：<概念>」 | 只用玩家的概念组：以 `feed` 结尾的名字、代码、一句话简介。有生图工具就生成一张图，存成 PNG。`FL meme "<概念>" --coin-name "…" --symbol … --description "…" [--image <file.png>] --lang zh`；把预览卡原样给玩家看；玩家说「好」才发（`--yes`）。 |
 | 「改策略：…」 | 按玩家的话重写 `strategy.md`，保留场地规则（0.15 BNB、21:00 开饭、每日活动门槛、一条命）。`FL stop <name>`，再 `FL start <name> --prompt strategy.md` 给出新卡片；玩家说「好」后，`FL start <name> --prompt strategy.md --yes --detach`。告诉玩家：从你的下一次决策起生效。 |
 | 「暂停」/「继续」 | `FL stop <name>` / `FL resume <name> --detach`（清掉停止文件再启动；开赛前它会继续等待）。 |
-| 「怎么样了」 | `FL status <name> --lang zh`：转告新内容；赛季中附上今日战报卡链接，和「今天把它发到 X 上，就能参加今晚的空投」。 |
+| 「我的 X 是 @handle」（或第一次给玩家战报卡链接时） | `FL note <name> "x: @handle"`——一条笔记、不带 `--tx`；告诉 feast.meme 这个 agent 的战报卡以哪个 X 账号发的为准。发一次即可，之后再发会覆盖。 |
+| 「怎么样了」 | `FL status <name> --lang zh`：转告新内容；赛季中附上今日战报卡链接，和「今天把它发到 X 上，就能参加今晚的空投」。玩家还没说过自己的 X 账号就问一次，按上面记录。 |
 | 「为什么买 X」 | 读你自己为那笔交易写的笔记（`$FEAST_LEAGUE_HOME/agents/<name>/notes.jsonl` 里的 `FL note`）和 `FL status <name> --json`，据此解释。 |
 | 「彻底停止」 | `FL stop --all`。 |
 

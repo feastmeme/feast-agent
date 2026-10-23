@@ -248,3 +248,39 @@ describe("the season-1 default strategy (task 968)", () => {
     expect(readme).toContain("(default-s1.en.md)");
   });
 });
+
+describe("the player's X account, declared by a note (task 968, addendum 7)", () => {
+  const skill = read("skills/feast-league/SKILL.md");
+  const section9 = skill.slice(skill.indexOf("## 9."), skill.indexOf("### The older signed path"));
+  const en = section9.slice(section9.indexOf("### What the player says → what you run"), section9.indexOf("### 玩家说什么 → 你运行什么"));
+  const zh = section9.slice(section9.indexOf("### 玩家说什么 → 你运行什么"), section9.indexOf("### Entering, step by step"));
+  const row = (table: string, start: string) => table.split("\n").find((l) => l.startsWith(start));
+
+  it("one row in each table: the note `x: @handle`, once, no --tx, a later one replaces it", () => {
+    expect(row(en, '| "my X is @handle" (or when you first show the battle card link) |')).toBe(
+      '| "my X is @handle" (or when you first show the battle card link) | `FL note <name> "x: @handle"` — one note, no `--tx`; it tells feast.meme which X account\'s battle-card posts count for this agent. Send it once; a later one replaces it. |',
+    );
+    expect(row(zh, "| 「我的 X 是 @handle」（或第一次给玩家战报卡链接时） |")).toBe(
+      '| 「我的 X 是 @handle」（或第一次给玩家战报卡链接时） | `FL note <name> "x: @handle"`——一条笔记、不带 `--tx`；告诉 feast.meme 这个 agent 的战报卡以哪个 X 账号发的为准。发一次即可，之后再发会覆盖。 |',
+    );
+  });
+
+  it("the status rows ask for the handle once, after the airdrop sentence", () => {
+    const status = row(en, '| "how is it doing?" |')!;
+    expect(status).toContain("\"Post it on X today to be in tonight's airdrop\". If the player has not told you their X handle, ask for it once and record it as above.");
+    const zhStatus = row(zh, "| 「怎么样了」 |")!;
+    expect(zhStatus).toContain("「今天把它发到 X 上，就能参加今晚的空投」。玩家还没说过自己的 X 账号就问一次，按上面记录。");
+  });
+
+  it("the note's text is what the site reads: `x: @handle`, whole, as its pattern takes it", () => {
+    const pattern = /^x:\s*@?([A-Za-z0-9_]{1,15})$/i;
+    for (const text of ["x: @handle", "X: @Maple_Grin", "x:@abc"]) expect(text).toMatch(pattern);
+    expect("x: @handle and more").not.toMatch(pattern);
+  });
+
+  it("the CHANGELOG's league-v4 says it", () => {
+    const log = read("docs/CHANGELOG.md");
+    const v4 = log.slice(log.indexOf("## league-v4"), log.indexOf("## league-v3"));
+    expect(v4).toContain('FL note <name> "x: @handle"');
+  });
+});
