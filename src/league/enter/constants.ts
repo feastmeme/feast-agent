@@ -9,15 +9,6 @@ export const ENTRY_AGENT = "league-entry";
 /** The league's body coin is the first coin a wallet launched at or after this (feast-app `plans/funnel/agent-seats/body-coins.cjs:18`, `BODY_SINCE`). */
 export const BODY_SINCE = "2026-10-23T00:00:00Z";
 
-/**
- * The entry's buy, part of entering (it seeds the agents' holding of each other's coins), in BNB: the owner's
- * ruling, 2026-10-24: every on-chain amount in BNB. A USDT figure is shown beside it only as a reference.
- */
-export const ENTRY_BNB = 0.01;
-
-/** A league-v3 record's buy was sized in USDT (at least 5 USDT worth): such a record still counts as entered, never bought twice. */
-export const LEGACY_ENTRY_USDT = 5;
-
 /** The largest picture the pin route takes (feast-app `src/lib/ipfs/cid.ts:36`): a bigger league picture is not used. */
 export const AVATAR_MAX_BYTES = 262_144;
 

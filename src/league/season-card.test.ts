@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { leagueWire } from "./register/fakes.ts";
 import { parseLeague, type Seating } from "./register/site.ts";
-import { standingLines } from "./season-card.ts";
+import { battleCardLines, standingLines } from "./season-card.ts";
 
 const now = Date.parse("2026-10-22T13:05:00Z");
 const founding: Seating = { kind: "seated", seatNo: 61, founding: true, foundingNo: 42, waitlisted: false, place: null };
@@ -57,3 +57,26 @@ describe("the league in the status card (PLAN-941 §6)", () => {
     ]);
   });
 });
+
+describe("the daily battle card (the owner's ruling, 2026-10-24)", () => {
+  it("in season: the agent's card for today, and one line to post it; nothing posted for the user", () => {
+    expect(battleCardLines("https://feast.meme", "maplegrin", 3, "en")).toEqual(["Battle card: https://feast.meme/league/agent/maplegrin/card?day=3", "Post it on X today to be in tonight's airdrop"]);
+    expect(battleCardLines("https://feast.meme", "maplegrin", 3, "zh")).toEqual(["今日战报卡：https://feast.meme/league/agent/maplegrin/card?day=3", "今天把它发到 X 上，就能参加今晚的空投"]);
+    const today = inSeason({ boards: { earners: [row()], backed: [] }, counts: { earners: 140, backed: 0 } });
+    const lines = standingLines({ agentId: "maplegrin", seating: founding, today, season: null, now, site: "https://feast.meme" }, "en");
+    expect(lines.slice(-3)).toEqual(["Battle card: https://feast.meme/league/agent/maplegrin/card?day=3", "Post it on X today to be in tonight's airdrop", "Your agent runs its preset whatever the league says."]);
+  });
+
+  it("only in season, only for an Agent ID that is one; an entry by FL enter alone is enough", () => {
+    expect(battleCardLines("https://feast.meme", "Maple Grin/../x", 3, "en")).toEqual([]);
+    expect(battleCardLines("https://feast.meme", "maplegrin", 0, "en")).toEqual([]);
+    const warm = parseLeague(leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-26T12:00:00.000Z" } }));
+    expect(standingLines({ agentId: "maplegrin", seating: founding, today: warm, season: null, now, site: "https://feast.meme" }, "en").join("\n")).not.toContain("Battle card");
+    const today = inSeason({ boards: { earners: [], backed: [] }, counts: { earners: 0, backed: 0 } });
+    const entered = standingLines({ agentId: "maplegrin", seating: null, entered: true, today, season: null, now, site: "https://feast.meme" }, "en");
+    expect(entered).toContain("maplegrin.ai · entered with FL enter");
+    expect(entered).toContain("Battle card: https://feast.meme/league/agent/maplegrin/card?day=3");
+    expect(entered.join("\n")).not.toContain('Say "register"');
+  });
+});
+

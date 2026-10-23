@@ -8,7 +8,7 @@
  * agent (the owner's ruling, 2026-10-24: every on-chain amount is in BNB, and the
  * cap is 0.15 BNB). It is not a limit of `limits.ts`: L3's default (0.25) and its
  * ceiling (10) stay, and the cap only tightens the `budgetBnb` of an agent the
- * user plans. FL enter's buy counts, since L3's ledger is wallet-wide.
+ * user plans. L3's ledger is wallet-wide: every agent on this wallet counts.
  */
 export const LEAGUE_CAP_BNB = 0.15;
 

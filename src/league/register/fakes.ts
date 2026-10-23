@@ -52,11 +52,14 @@ export function fakeBaw(options: FakeBawOptions): { runner: BawRunner; calls: st
   const ok = (data: unknown) => ({ stdout: JSON.stringify({ success: true, data }), stderr: "", code: 0 });
   const sign = async (typed: { domain: Record<string, unknown>; types: Record<string, unknown>; primaryType: string; message: Record<string, unknown> }) => {
     const { EIP712Domain: _domain, ...types } = typed.types as Record<string, unknown>;
+    // Every uint256 of the message (Register's issuedAt, NoteSession's season) as the integer it is.
+    const fields = ((types as Record<string, { name: string; type: string }[]>)[typed.primaryType] ?? []).filter((f) => f.type === "uint256").map((f) => f.name);
+    const message = Object.fromEntries(Object.entries(typed.message).map(([k, v]) => [k, fields.includes(k) ? BigInt(String(v)) : v]));
     const full = await (options.signWith ?? options.account).signTypedData({
       domain: typed.domain,
       types: types as never,
       primaryType: typed.primaryType,
-      message: { ...typed.message, issuedAt: BigInt(String(typed.message.issuedAt)) },
+      message,
     } as never);
     const v = Number.parseInt(full.slice(130), 16);
     return options.signatureForm === "full" ? { signature: full, recovery: "" } : { signature: full.slice(2, 130), recovery: v === 28 ? "01" : "00" };

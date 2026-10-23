@@ -10,8 +10,10 @@ import type { FaceChain } from "./face.ts";
  *
  * `FakeFeast`: feast.meme's public reads as the data face asks them —
  * `/api/v1/pools` (paged by `nextCursor`), `/api/v1/ohlcv`, `/api/league`
- * and the notes route — and the indexer's `/v1/board`, as one in-process
- * `fetch`: nothing reaches a network. It writes down every request.
+ * and the notes routes (`/api/league/notes`, `/api/league/notes/session`) —
+ * and the indexer's `/v1/board`, as one in-process `fetch`: nothing reaches a
+ * network. It writes down every request, every note posted with its
+ * Authorization header, and every session asked for.
  *
  * `fakeFaceChain`: the chain reads the face makes. Every address is made up,
  * built by hand; no coin here is one on the live pools API.
@@ -104,13 +106,19 @@ export type FakeFeastOptions = {
   league?: Answer;
   ohlcv?: Record<string, unknown[]>;
   ohlcvAnswer?: Answer;
-  notes?: Answer;
+  /** The notes route's answer, or one answer per POST in turn (the last one repeats). */
+  notes?: Answer | Answer[];
+  /** `/api/league/notes/session`'s answer. */
+  session?: Answer;
   board?: Answer;
 };
 
 export class FakeFeast {
   readonly calls: string[] = [];
   readonly posts: unknown[] = [];
+  /** Each note POST's Authorization header, or null. */
+  readonly auths: (string | null)[] = [];
+  readonly sessions: unknown[] = [];
 
   constructor(readonly options: FakeFeastOptions = {}) {}
 
@@ -148,7 +156,14 @@ export class FakeFeast {
     if (url.origin === SITE && url.pathname === "/api/league") return this.reply(o.league ?? { status: 200, body: defaultLeague() }, init?.signal);
     if (url.origin === SITE && url.pathname === "/api/league/notes" && init?.method === "POST") {
       this.posts.push(JSON.parse(String(init.body)));
-      return this.reply(o.notes ?? { status: 404, body: { error: "not-found" } }, init.signal);
+      this.auths.push(new Headers(init.headers).get("authorization"));
+      const answers = o.notes ?? { status: 404, body: { error: "not-found" } };
+      const answer = Array.isArray(answers) ? answers[Math.min(this.posts.length - 1, answers.length - 1)]! : answers;
+      return this.reply(answer, init.signal);
+    }
+    if (url.origin === SITE && url.pathname === "/api/league/notes/session" && init?.method === "POST") {
+      this.sessions.push(JSON.parse(String(init.body)));
+      return this.reply(o.session ?? { status: 404, body: { error: "not-found" } }, init.signal);
     }
     if (url.origin === INDEXER && url.pathname === "/v1/board") return this.reply(o.board ?? { status: 503, body: {} }, init?.signal);
     return new Response("{}", { status: 404 });

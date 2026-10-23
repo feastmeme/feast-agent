@@ -1,5 +1,5 @@
 import { seasonLine, seatLine, shortUsd, type Lang } from "./register/copy.ts";
-import { shownName } from "./register/message.ts";
+import { AGENT_ID, shownName } from "./register/message.ts";
 import type { BackedRow, EarnerRow, LeagueRead, Seating } from "./register/site.ts";
 
 /**
@@ -11,6 +11,10 @@ import type { BackedRow, EarnerRow, LeagueRead, Seating } from "./register/site.
  * Its own rows come from the page's `me` (927 API.md §3: from the whole
  * boards, past the top 100); without one, from the top 100 by its Agent ID,
  * and "outside the top 100" when it is not there.
+ *
+ * In season it also gives the agent's battle card for the day, and one line
+ * asking the user to post it on X (the owner's ruling, 2026-10-24). Nothing is
+ * posted for the user.
  */
 
 export type StandingInput = {
@@ -21,6 +25,10 @@ export type StandingInput = {
   /** Read during and after the season only. */
   season: LeagueRead | null;
   now: number;
+  /** feast.meme, for the battle card's link; without it, no card line. */
+  site?: string;
+  /** The wallet entered with `FL enter` (a body coin on record), with or without a registration. */
+  entered?: boolean;
 };
 
 type Mine = { earner: EarnerRow | null; backed: BackedRow | null; earnerCut: boolean; backedCut: boolean; eaten: number | null };
@@ -64,11 +72,20 @@ export function eatenLine(day: number, lang: Lang): string {
     : `Eaten at dinner on day ${day}: out of this season's prizes. Its coin keeps trading, your agent keeps running its preset, and it can enter the next season.`;
 }
 
+/** The day's battle card: its link, and the one line asking the user to post it. Only for a real Agent ID and a season day. */
+export function battleCardLines(site: string, agentId: string, day: number, lang: Lang): string[] {
+  if (!AGENT_ID.test(agentId) || !Number.isInteger(day) || day < 1 || day > 99) return [];
+  const url = `${site.replace(/\/+$/, "")}/league/agent/${agentId}/card?day=${day}`;
+  return lang === "zh" ? [`今日战报卡：${url}`, "今天把它发到 X 上，就能参加今晚的空投"] : [`Battle card: ${url}`, "Post it on X today to be in tonight's airdrop"];
+}
+
 /** The league block of `feast-league status`. */
 export function standingLines(input: StandingInput, lang: Lang): string[] {
   const zh = lang === "zh";
   const lines = [`${zh ? "联赛" : "League"} · ${seasonLine(input.today, input.now, lang)}`];
-  if (!input.agentId || !input.seating) {
+  if (input.agentId && !input.seating && input.entered) {
+    lines.push(zh ? `${shownName(input.agentId)} · 已用 FL enter 报名` : `${shownName(input.agentId)} · entered with FL enter`);
+  } else if (!input.agentId || !input.seating) {
     lines.push(zh ? "还没报名联赛。说「报名」即可参加。" : 'Not in the league yet. Say "register" to join.');
   } else {
     const seat = seatLine(input.seating, lang);
@@ -90,6 +107,8 @@ export function standingLines(input: StandingInput, lang: Lang): string[] {
       }
     }
   }
+  const day = input.today?.state === "season" ? input.today.season.day : null;
+  if (input.site && input.agentId && day !== null && (input.seating || input.entered)) lines.push(...battleCardLines(input.site, input.agentId, day, lang));
   lines.push(zh ? "不管联赛怎样，你的 agent 都照常跑它的策略。" : "Your agent runs its preset whatever the league says.");
   return lines;
 }

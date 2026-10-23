@@ -67,7 +67,7 @@ describe("the CLI's new commands, through the binary", () => {
     const { env } = setup();
     const out = await run(["--help"], env);
     expect(out.code).toBe(0);
-    for (const word of ["data [<name>]", "note <name>", "script check <file.mjs>", "--prompt <strategy.md>", "--autopilot", "--idle-minutes", "--no-wait"]) expect(out.stdout, word).toContain(word);
+    for (const word of ["data [<name>]", "note <name>", "script check <file.mjs>", "--prompt <strategy.md>", "--autopilot", "--idle-minutes", "--no-wait", "--model grok|codex|claude|other", "note --login"]) expect(out.stdout, word).toContain(word);
     expect(out.stdout).not.toMatch(/\btick <|FL tick/);
   }, 60_000);
 
@@ -76,6 +76,16 @@ describe("the CLI's new commands, through the binary", () => {
     const out = await run(["note", "maple", "x".repeat(281)], env);
     expect(out.code).toBe(2);
     expect(out.stdout.trim()).toBe("a note is 1–280 characters (got 281)");
+  }, 60_000);
+
+  it("note --model outside the four: one line, exit 2; note --login with no Agent ID readable: one plain line, nothing signed", async () => {
+    const { env } = setup();
+    const model = await run(["note", "maple", "bought it", "--model", "gpt"], env);
+    expect(model.code).toBe(2);
+    expect(model.stdout.trim()).toBe("--model is one of grok, codex, claude, other");
+    const login = await run(["note", "--login"], env);
+    expect(login.code).toBe(1);
+    expect(login.stdout.trim()).toBe("The Agent ID could not be read from BNB Smart Chain just now: try again in a minute. Nothing was signed.");
   }, 60_000);
 
   it("data with feast.meme on a closed port: a plain failure line, exit 1", async () => {

@@ -1,33 +1,36 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { getAddress, isAddress, type Address, type Hex } from "viem";
+import type { Address, Hex } from "viem";
 
 import { confirmAgent, loadAgent, saveAgent, type AgentConfig } from "../agent.ts";
-import type { Signer } from "../baw.ts";
+import type { Signer, SignOptions } from "../baw.ts";
 import type { Book } from "../book.ts";
 import type { AgentIdRead, CoinInfo, LeagueChain } from "../chain.ts";
 import { refuseEarly } from "../early.ts";
 import { INDEXER_URL } from "../events.ts";
 import { DEFAULT_LIMITS, resolveLimits } from "../limits.ts";
 import { BODY_COIN_QUOTE, BODY_COIN_SPLIT, bodyCoinNames, launchesBy } from "../register/claims.ts";
-import { agentIdUnreadable, launchCard, launchedLine, noAgentIdCard, walletNotReady, type Lang } from "../register/copy.ts";
+import { openSession, notesDev, sessionSaid, type SessionOutcome, type SessionSigner } from "../notes/session.ts";
+import { agentIdUnreadable, launchCard, noAgentIdCard, walletNotReady, type Lang } from "../register/copy.ts";
 import { readLeagueRecord, readWallet, type WalletRead } from "../register/flow.ts";
 import { AGENT_ID } from "../register/message.ts";
 import type { LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { agentPaths, appendJsonl, readJson, walletLockHolder, writeJsonAtomic } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
-import { AVATAR_MAX_BYTES, BODY_SINCE, ENTRY_AGENT, ENTRY_BNB, LEGACY_ENTRY_USDT, PENDING_MAX_AGE_MS } from "./constants.ts";
+import { AVATAR_MAX_BYTES, BODY_SINCE, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
 
 /**
  * `FL enter --name <id>.ai` (task 961): the league entry, once. Read the wallet
- * and its Agent ID, ask feast.meme whether it may enter, launch the body coin
- * with the league's picture (unless the wallet launched one since 10/23), then
- * buy today's coin for 0.01 BNB. It never starts a trading loop and
- * never touches another agent: the launch and the buy go through the runtime's
- * one-shot, under `league-entry`'s own agent and the default hard limits.
+ * and its Agent ID, ask feast.meme whether it may enter, and launch the body
+ * coin with the league's picture (unless the wallet launched one since 10/23).
+ * The launch is the entry (the owner's ruling, 2026-10-24): nothing is bought.
+ * The same yes then opens the season's notes session (`notes/session.ts`): one
+ * signed message, no transaction. It never starts a trading loop and never
+ * touches another agent: the launch goes through the runtime's one-shot, under
+ * `league-entry`'s own agent and the default hard limits.
  *
  * Each stage is a card. A run without --yes prints the next card and leaves it
  * pending; a run with --yes acts on that one card only if it was printed in
@@ -40,7 +43,6 @@ export type EnterChain = {
   creatorOf(coin: Address): Promise<Address | null | "unreadable">;
   coinInfo(coin: Address): Promise<CoinInfo | null>;
   isFeastCoin(coin: Address): Promise<boolean>;
-  bnbUsd(now?: number): Promise<number>;
 };
 
 /** What a one-shot run of league-entry did, read back from its book and its log. */
@@ -48,19 +50,18 @@ export type OneShotResult = {
   exit: RunOutcome["exit"];
   reason: string;
   launched: { coin: Address; txHash: Hex | null } | null;
-  bought: { coin: Address; txHash: Hex; bnbWei: bigint } | null;
   /** The last refusal or failure of the run, for the user. */
   failure: string | null;
-  /** A launch or a buy was sent and its outcome is not known yet (the runtime keeps it, and asks again on the next run). */
+  /** A launch was sent and its outcome is not known yet (the runtime keeps it, and asks again on the next run). */
   unresolved?: boolean;
 };
 
-/** The runtime's one-shot for league-entry: these requests and what follows from them (an arm after a buy), then exit. No requests: only ask about earlier outcomes not known. */
+/** The runtime's one-shot for league-entry: these requests, then exit. No requests: only ask about earlier outcomes not known. */
 export type OneShot = (requests: IntentRequest[]) => Promise<OneShotResult>;
 
 export type EnterDeps = {
   home: string;
-  signer: Pick<Signer, "status" | "settings" | "address">;
+  signer: Pick<Signer, "status" | "settings" | "address"> & SessionSigner;
   chain: EnterChain;
   site: LeagueSite;
   indexer?: string;
@@ -68,6 +69,10 @@ export type EnterDeps = {
   fetch?: typeof fetch;
   now?: () => number;
   oneShot: OneShot;
+  /** LEAGUE_NOTES_DEV=1: no notes signature (the default reads the environment). */
+  notesDev?: boolean;
+  /** How the notes signature waits for the App's confirmation (tests make it instant). */
+  signOptions?: SignOptions;
 };
 
 export type EnterInput = { name: string | undefined; yes: boolean; lang: Lang };
@@ -78,20 +83,17 @@ export type EntryRecord = {
   agentId: string;
   bodyCoin: Address | null;
   launchTx: Hex | null;
-  /** `usdtAtBuy`: the USDT the buy was worth, kept by league-v3's records only; new records omit it (every amount is BNB). */
-  buy: { coin: Address; txHash: Hex; bnb: number; usdtAtBuy?: number; at: string } | null;
+  /** What the notes session came to when the entry asked for it; null until it has. */
+  notes?: SessionOutcome["kind"] | null;
+  /** A record from before the owner's ruling of 2026-10-24 kept its buy here; nothing writes one now. */
+  buy?: { coin: Address; txHash: Hex; bnb: number; usdtAtBuy?: number; at: string } | null;
 };
 
-type Pending = { stage: "launch" | "buy"; digest: string; at: string; coin?: Address; bnb?: number };
+type Pending = { stage: "launch" | "notes"; digest: string; at: string };
 
 const ID_NAME = /^([a-z0-9]{1,64})(\.ai)?$/;
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const sha256 = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
-
-/** The entry's size in BNB, whatever the BNB price (the owner's ruling, 2026-10-24). */
-export function entryBnb(): number {
-  return ENTRY_BNB;
-}
 
 /** league-entry as `FL enter` writes it: no strategy, the default limits, never started as a loop. */
 export function entryAgent(now = new Date()): AgentConfig {
@@ -109,9 +111,6 @@ export function entryPaths(home: string) {
 }
 
 export const readEntry = (home: string) => readJson<EntryRecord>(entryPaths(home).entry);
-
-/** The entry's buy is made: of at least ENTRY_BNB, or a league-v3 record's 5 USDT worth. A second run then buys nothing more. */
-const qualifies = (buy: EntryRecord["buy"]) => buy !== null && (buy.bnb >= ENTRY_BNB || (typeof buy.usdtAtBuy === "number" && buy.usdtAtBuy >= LEGACY_ENTRY_USDT));
 
 /** A reason fit to print: the first line, no URL (an RPC URL may carry a key), cleaned. */
 const reasonOf = (error: unknown) => copy.clean(String((error as Error)?.message ?? error).split("\n")[0]!.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>"));
@@ -133,9 +132,9 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const stored = loadAgent(deps.home, ENTRY_AGENT);
   if (stored && !isEntryAgent(stored)) return end(2, false, "agent", copy.entryAgentChanged(lang));
   let record = readEntry(deps.home);
-  if (record && record.agentId === given && record.buy && qualifies(record.buy)) {
-    const buy = record.buy;
-    return end(0, true, "entered", copy.alreadyEntered({ agentId: given, coin: buy.coin, txHash: buy.txHash, atMs: Date.parse(buy.at) }, lang), { agentId: given, bodyCoin: record.bodyCoin, buy });
+  // Entered: the body coin, and the notes session asked for once (or a record from before the ruling, with its buy).
+  if (record && record.agentId === given && record.bodyCoin && ((record.notes ?? null) !== null || record.buy)) {
+    return end(0, true, "entered", copy.alreadyEntered({ agentId: given, coin: record.bodyCoin, notes: record.notes ?? null }, lang), { agentId: given, bodyCoin: record.bodyCoin, notes: record.notes ?? null });
   }
 
   // --- the wallet and its Agent ID ------------------------------------------------------------
@@ -163,9 +162,9 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   if (page.agentId === null) return end(2, false, "eligibility", copy.notEligible("no-agent-id", null, lang));
   if (page.agentId !== agentId) return end(2, false, "eligibility", copy.notEligible("differs", page.agentId, lang));
 
-  // --- outcomes an earlier run could not learn -------------------------------------------------
+  // --- a launch an earlier run could not learn the outcome of ------------------------------------
   const book = (): Book | null => statusOf(deps.home, ENTRY_AGENT).book;
-  const open = () => book()?.unresolved.find((u) => u.kind === "launch" || u.kind === "buy") ?? null;
+  const open = () => book()?.unresolved.find((u) => u.kind === "launch") ?? null;
   if (open()) {
     // Only asked about: the one-shot with no request learns what it can, and sends nothing.
     await deps.oneShot([]);
@@ -189,21 +188,33 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     return Number.isFinite(at) && now() - at <= PENDING_MAX_AGE_MS && at <= now() + 60_000 ? p : null;
   };
   /** The card stays pending for the user's yes: exit 2. With a --yes that did not match, say so first. */
-  const ask = (stage: "launch" | "buy", digest: string, card: string, data: Record<string, unknown>, extra: Partial<Pending> = {}, consumed = false): EnterResult => {
-    writeJsonAtomic(paths.pending, { stage, digest, at: new Date(now()).toISOString(), ...extra } satisfies Pending);
+  const ask = (stage: Pending["stage"], digest: string, card: string, data: Record<string, unknown>): EnterResult => {
+    writeJsonAtomic(paths.pending, { stage, digest, at: new Date(now()).toISOString() } satisfies Pending);
     log("enter.card", { stage, digest });
-    const parts = input.yes && !consumed ? [copy.cardChanged(lang), "", card] : [card];
+    const parts = input.yes ? [copy.cardChanged(lang), "", card] : [card];
     return end(2, true, `${stage}-card`, [...parts, "", copy.needsYes(lang)], { ...data, digest });
   };
-  const yesFor = (stage: "launch" | "buy", digest: string) => {
+  const yesFor = (stage: Pending["stage"], digest: string) => {
     if (!input.yes) return false;
     const p = pendingNow();
     return p !== null && p.stage === stage && p.digest === digest;
   };
 
+  // The notes session is for this season: the page says which; a page that does not answer leaves it at 1.
+  const season = (await deps.site.league("today", null).catch(() => null))?.season.number ?? 1;
+  const dev = deps.notesDev ?? notesDev();
+  /** The notes session, under a yes already given: one signature, or none in dev mode. Never stops the entry. */
+  const notesStep = async (bodyCoin: Address): Promise<string> => {
+    const outcome: SessionOutcome = dev ? { kind: "dev" } : await openSession({ home: deps.home, signer: deps.signer, site: deps.site, agentId, season, now, signOptions: deps.signOptions });
+    const notes: EntryRecord["notes"] = outcome.kind;
+    record = { ...(record ?? { agentId, bodyCoin, launchTx: null }), agentId, bodyCoin, notes };
+    writeJsonAtomic(paths.entry, record);
+    log("enter.notes", { session: outcome.kind, season });
+    return sessionSaid(outcome, { agentId, season }, lang, "entry");
+  };
+
   // --- the body coin --------------------------------------------------------------------------------
   let body: { coin: Address; symbol: string | null } | null = null;
-  let consumed = false;
   const launched = book()?.launched ?? null;
   if (launched) body = { coin: launched.coin, symbol: await symbolOf(deps.chain, launched.coin) };
   else {
@@ -213,99 +224,48 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   }
 
   if (body) {
+    // The wallet's body coin exists: entering is the notes session, on its own card and its own yes.
     lines.push(copy.alreadyLaunched(body.symbol, body.coin, lang));
     if (!record || record.bodyCoin === null) {
-      record = { agentId, bodyCoin: body.coin, launchTx: launched?.txHash ?? null, buy: record?.buy ?? null };
+      record = { agentId, bodyCoin: body.coin, launchTx: launched?.txHash ?? null, notes: null };
       writeJsonAtomic(paths.entry, record);
     }
-  } else {
-    const names = bodyCoinNames(agentId);
-    const description = readLeagueRecord(deps.home)?.manifesto?.trim().slice(0, 280) || null;
-    const picture = await leaguePicture(deps.site, agentId, paths.avatar);
-    const facts = { stage: "launch", agentId, name: names.name, symbol: names.symbol, quote: BODY_COIN_QUOTE, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, description, picture: picture.source === "league" ? picture.sha256 : "ticker" };
-    const digest = sha256(JSON.stringify(facts));
-    const card = launchCard({ agentId, name: names.name, symbol: names.symbol, quote: BODY_COIN_QUOTE, description, picture: picture.source === "league" ? "league" : "ticker-fallback" }, lang);
-    const shown = { ...names, quote: BODY_COIN_QUOTE, description, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, picture: picture.source === "league" ? { source: "league", sha256: picture.sha256 } : { source: "ticker", reason: picture.reason } };
-    const notice = picture.source === "ticker" ? [copy.avatarFallback(picture.reason, lang), ""] : [];
-    const request: IntentRequest = { kind: "launch", name: names.name, symbol: names.symbol, quote: BODY_COIN_QUOTE, description: description ?? undefined, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, reason: "the league entry's body coin", ...(picture.source === "league" ? { image: { path: paths.avatar, sha256: picture.sha256 } } : {}) };
-    // The limits that need no wallet are read before the card, so a yes is never asked for a launch they refuse.
-    const early = refuseEarly(deps.home, agent, request, now());
-    if (early) return end(2, false, "limits", copy.refusedLine(early.limit, early.message, lang), { refused: early });
-    if (!yesFor("launch", digest)) return ask("launch", digest, [...notice, card].join("\n"), shown);
-
-    // The user's yes on this card confirms league-entry, and the one launch goes through its limits.
-    confirm();
-    rmSync(paths.pending, { force: true });
-    log("enter.launch", { symbol: names.symbol, picture: facts.picture });
-    const result = await deps.oneShot([request]);
-    if (!result.launched && result.unresolved) return end(1, false, "unresolved", copy.pendingOutcome("launch", lang), { kind: "launch" });
-    if (!result.launched) return end(result.exit === "error" ? 1 : 2, false, "launch", copy.launchFailed(result.failure ?? `${result.exit}: ${result.reason}`, lang), { exit: result.exit });
-    body = { coin: result.launched.coin, symbol: names.symbol };
-    record = { agentId, bodyCoin: body.coin, launchTx: result.launched.txHash, buy: null };
-    writeJsonAtomic(paths.entry, record);
-    lines.push(launchedLine(names.symbol, body.coin, result.launched.txHash, lang), "");
-    consumed = true;
+    if (!dev) {
+      const digest = sha256(JSON.stringify({ stage: "notes", agentId, season }));
+      if (!yesFor("notes", digest)) return ask("notes", digest, copy.notesCard({ agentId, season }, lang), { bodyCoin: body.coin, season });
+      rmSync(paths.pending, { force: true });
+    }
+    const said = await notesStep(body.coin);
+    return end(0, true, "done", [said, copy.doneLine(lang)], { bodyCoin: body.coin, notes: record!.notes, season });
   }
 
-  // --- today's coin: the page says when entering is open (its statuses below), not a clock here --------
-  const assignment = await deps.site.assignment(wallet);
-  const wait = (what: copy.Wait, reason: string | null, minutes: number, extra: Record<string, unknown>) => {
-    const at = now() + minutes * 60_000;
-    return end(0, true, "wait", copy.comeBack(what, reason, at, lang), { bodyCoin: body!.coin, waiting: what, retryAt: new Date(at).toISOString(), ...extra });
-  };
-  if (assignment.kind === "missing") return wait("missing", null, 60, { status: assignment.status });
-  if (assignment.kind === "unreadable") return end(1, false, "assignment", copy.assignmentUnreadable(assignment.reason, lang));
-  if (assignment.kind === "status") {
-    const minutes = { "not-registered": 10, "before-cutoff": 5, "no-table": 60 }[assignment.status];
-    return wait(assignment.status, assignment.reason, minutes, { day: copy.clean(assignment.day), reason: copy.clean(assignment.reason) });
-  }
-  const bad = (why: copy.BadRow) => end(1, false, "assignment", copy.badRow(why, lang), { problem: why });
-  if (assignment.wallet.toLowerCase() !== wallet.toLowerCase()) return bad("wallet");
-  if (!isAddress(assignment.coin, { strict: false })) return bad("address");
-  const coin = getAddress(assignment.coin);
-  if (coin.toLowerCase() === body.coin.toLowerCase()) return bad("own-coin");
-  let feast: boolean;
-  try {
-    feast = await deps.chain.isFeastCoin(coin);
-  } catch {
-    return bad("unchecked");
-  }
-  if (!feast) return bad("not-feast");
-  const symbol = copy.SAFE_SYMBOL.test(assignment.symbol) ? assignment.symbol : null;
-
-  // The BNB price is only for the card's USDT reference: unread, the card shows none, and the entry goes on.
-  let bnbUsd: number | null = null;
-  try {
-    const read = await deps.chain.bnbUsd(now());
-    bnbUsd = Number.isFinite(read) && read > 0 ? read : null;
-  } catch {
-    bnbUsd = null;
-  }
-  // The amount on a card the user was just shown stays while it is still the entry's amount.
-  const before = pendingNow();
-  const kept = before?.stage === "buy" && before.coin === coin && before.bnb === ENTRY_BNB ? before.bnb : null;
-  const bnb = kept ?? entryBnb();
-  const slippagePct = Math.min(3, agent.limits.maxSlippagePct);
-  const request: IntentRequest = { kind: "buy", coin, bnb, reason: "the league entry: today's coin" };
-  const early = refuseEarly(deps.home, agent, request, now());
-  if (early) return end(2, false, "limits", copy.refusedLine(early.limit, early.message, lang), { refused: early, coin, bnb });
-  const facts = { stage: "buy", agentId, coin, symbol, bnb, slippagePct, approvals: 2 };
+  const names = bodyCoinNames(agentId);
+  const description = readLeagueRecord(deps.home)?.manifesto?.trim().slice(0, 280) || null;
+  const picture = await leaguePicture(deps.site, agentId, paths.avatar);
+  const facts = { stage: "launch", agentId, name: names.name, symbol: names.symbol, quote: BODY_COIN_QUOTE, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, description, picture: picture.source === "league" ? picture.sha256 : "ticker", notes: dev ? "dev" : season };
   const digest = sha256(JSON.stringify(facts));
-  const usdt = bnbUsd === null ? null : Number((bnb * bnbUsd).toFixed(2));
-  const card = copy.buyCard({ agentId, coin, symbol, bnb, usdt, slippagePct, maxTradeBnb: agent.limits.maxTradeBnb, budgetBnb: agent.limits.budgetBnb, maxDailySpendBnb: agent.limits.maxDailySpendBnb }, lang);
-  const shown = { bodyCoin: body.coin, coin, symbol, day: copy.clean(assignment.day), source: copy.clean(assignment.source), bnb, usdt, slippagePct };
-  if (consumed || !yesFor("buy", digest)) return ask("buy", digest, card, shown, { coin, bnb }, consumed);
+  const card = launchCard({ agentId, name: names.name, symbol: names.symbol, quote: BODY_COIN_QUOTE, description, picture: picture.source === "league" ? "league" : "ticker-fallback" }, lang);
+  const shown = { ...names, quote: BODY_COIN_QUOTE, description, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, picture: picture.source === "league" ? { source: "league", sha256: picture.sha256 } : { source: "ticker", reason: picture.reason }, season };
+  const notice = picture.source === "ticker" ? [copy.avatarFallback(picture.reason, lang), ""] : [];
+  const request: IntentRequest = { kind: "launch", name: names.name, symbol: names.symbol, quote: BODY_COIN_QUOTE, description: description ?? undefined, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, reason: "the league entry's body coin", ...(picture.source === "league" ? { image: { path: paths.avatar, sha256: picture.sha256 } } : {}) };
+  // The limits that need no wallet are read before the card, so a yes is never asked for a launch they refuse.
+  const early = refuseEarly(deps.home, agent, request, now());
+  if (early) return end(2, false, "limits", copy.refusedLine(early.limit, early.message, lang), { refused: early });
+  if (!yesFor("launch", digest)) return ask("launch", digest, [...notice, card, ...(dev ? [] : ["", copy.notesOnLaunch({ agentId, season }, lang)])].join("\n"), shown);
 
+  // The user's yes on this card confirms league-entry, and the one launch goes through its limits.
   confirm();
   rmSync(paths.pending, { force: true });
-  log("enter.buy", { coin, bnb, bnbUsd });
+  log("enter.launch", { symbol: names.symbol, picture: facts.picture });
   const result = await deps.oneShot([request]);
-  if (!result.bought && result.unresolved) return end(1, false, "unresolved", copy.pendingOutcome("buy", lang), { kind: "buy", coin });
-  if (!result.bought) return end(result.exit === "error" ? 1 : 2, false, "buy", copy.buyFailed(result.failure ?? `${result.exit}: ${result.reason}`, lang), { exit: result.exit, coin });
-  const buy = { coin, txHash: result.bought.txHash, bnb, at: new Date(now()).toISOString() };
-  writeJsonAtomic(paths.entry, { ...(record ?? { agentId, bodyCoin: body.coin, launchTx: null }), buy } satisfies EntryRecord);
-  log("enter.bought", { coin, txHash: buy.txHash, bnb });
-  return end(0, true, "bought", [copy.boughtLine(symbol, coin, buy.txHash, lang), copy.doneLine(lang)], { bodyCoin: body.coin, buy });
+  if (!result.launched && result.unresolved) return end(1, false, "unresolved", copy.pendingOutcome("launch", lang), { kind: "launch" });
+  if (!result.launched) return end(result.exit === "error" ? 1 : 2, false, "launch", copy.launchFailed(result.failure ?? `${result.exit}: ${result.reason}`, lang), { exit: result.exit });
+  record = { agentId, bodyCoin: result.launched.coin, launchTx: result.launched.txHash, notes: null };
+  writeJsonAtomic(paths.entry, record);
+  lines.push(copy.launchedTx(names.symbol, result.launched.coin, result.launched.txHash, lang));
+  // The same yes opens the notes session: the card said so.
+  const said = await notesStep(result.launched.coin);
+  return end(0, true, "done", [said, copy.doneLine(lang)], { bodyCoin: result.launched.coin, launchTx: result.launched.txHash, notes: record!.notes, season });
 }
 
 /** A coin's ticker from the chain, cleaned; null when it is not a plain one or cannot be read. */
@@ -378,17 +338,14 @@ export function entryOneShot(options: { home: string; signer: Signer; rpcUrl?: s
           return [];
         }
       });
-    const wanted = requests.find((r) => r.kind === "buy");
-    const filled = wanted ? lines.find((l) => l.event === "buy.filled" && typeof l.coin === "string" && l.coin.toLowerCase() === String(wanted.coin).toLowerCase() && typeof l.txHash === "string") : undefined;
     const last = [...lines].reverse().find((l) => l.event === "intent.failed" || l.event === "intent.refused");
     const failure = last ? (last.event === "intent.refused" ? `refused by ${String(last.limit)}: ${String(last.message)}` : `failed at ${String(last.stage)}: ${String(last.reason)}`) : null;
     return {
       exit: outcome.exit,
       reason: outcome.reason,
       launched: after?.launched && after.launched.coin !== launchedBefore ? { coin: after.launched.coin, txHash: after.launched.txHash ?? null } : null,
-      bought: filled ? { coin: getAddress(String(filled.coin)), txHash: filled.txHash as Hex, bnbWei: BigInt(String(filled.bnbInWei ?? "0")) } : null,
       failure,
-      unresolved: (after?.unresolved ?? []).some((u) => u.kind === "launch" || u.kind === "buy"),
+      unresolved: (after?.unresolved ?? []).some((u) => u.kind === "launch"),
     };
   };
 }

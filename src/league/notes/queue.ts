@@ -6,30 +6,55 @@ import type { Address } from "viem";
 import { normalizeManifesto } from "../register/message.ts";
 import { recordHostAction, within } from "../prompt/host.ts";
 import { agentPaths, appendJsonl } from "../store.ts";
+import { invalidateSession, liveToken, notesDev } from "./session.ts";
 
 /**
- * `FL note <name> "<text>" [--tx <hash>]` (task 963): one reason, at most 280
- * characters, for the trade the user's agent just made, or the one it chose not
- * to make. It is kept on this machine first, in `agents/<name>/notes.jsonl`
+ * `FL note <name> "<text>" [--tx <hash>] [--model grok|codex|claude|other]`
+ * (task 963): one reason, at most 280 characters, for the trade the user's
+ * agent just made, or the one it chose not to make, with the AI it declares
+ * wrote it. It is kept on this machine first, in `agents/<name>/notes.jsonl`
  * (append-only, and with no wallet address in it), then POSTed to feast.meme's
- * `/api/league/notes` when that route answers. A route that is not there yet,
- * a 5xx or a timeout leaves it queued for a later flush; any other 4xx marks it
- * refused for good. A note never touches the wallet, the book or a limit, and
- * never blocks a trade.
+ * `/api/league/notes` with the season's notes session (`session.ts`). A route
+ * that is not there yet, a 5xx or no answer leaves it queued for a later flush;
+ * a 409 drops it (the page has it); any other 4xx refuses it for good. A note
+ * never touches the wallet, the book or a limit, and never blocks a trade.
  *
- * The POST is `{ id, wallet, ts, text, tx? }`, unsigned: the route (task 964)
- * decides how it trusts a wallet. The wallet is added at send time only.
+ * The POST is `{ id, wallet, ts, text, model, tx? }` with `Authorization:
+ * Bearer <token>`; the wallet is added at send time only.
  */
 
 export const NOTE_MAX = 280;
 export const NOTE_TIMEOUT_MS = 10_000;
 export const KEPT = "kept on this machine; sent when feast.meme takes notes";
+export const KEPT_NO_SESSION = "kept on this machine; sent once your notes session is open (FL note --login)";
 const TX = /^0x[0-9a-f]{64}$/;
 const ADDRESS = /(?:0x)?[0-9a-f]{40}/gi;
 
-export type NoteState = { id: string; ts: string; text: string; tx: string | null; state: "queued" | "sent" | "refused"; status?: number; at?: string };
+/** The AI a note says wrote it (the owner's ruling, 2026-10-24): declared by the agent, never checked. */
+export const MODELS = ["grok", "codex", "claude", "other"] as const;
+export type Model = (typeof MODELS)[number];
 
-type Line = { id: string; ts?: string; text?: string; tx?: string | null; sent?: boolean; refused?: number; at?: string };
+export function checkModel(raw: string): { ok: true; model: Model } | { ok: false; reason: string } {
+  const model = raw.trim().toLowerCase();
+  return (MODELS as readonly string[]).includes(model) ? { ok: true, model: model as Model } : { ok: false, reason: `--model is one of ${MODELS.join(", ")}` };
+}
+
+/**
+ * The model a note declares when `--model` is not given: `FEAST_LEAGUE_MODEL` when it names one of the four,
+ * else what the host's own environment says of it (Claude Code sets `CLAUDECODE=1`; the Codex CLI's sandbox
+ * sets `CODEX_SANDBOX`), else "other". A hint only: the declaration is the agent's.
+ */
+export function modelHint(env: Record<string, string | undefined> = process.env): Model {
+  const given = checkModel(env.FEAST_LEAGUE_MODEL ?? "");
+  if (given.ok) return given.model;
+  if (env.CLAUDECODE === "1") return "claude";
+  if (env.CODEX_SANDBOX || env.CODEX_SANDBOX_NETWORK_DISABLED) return "codex";
+  return "other";
+}
+
+export type NoteState = { id: string; ts: string; text: string; tx: string | null; model: Model; state: "queued" | "sent" | "refused" | "dropped"; status?: number; at?: string };
+
+type Line = { id: string; ts?: string; text?: string; tx?: string | null; model?: string; sent?: boolean; refused?: number; dropped?: number; at?: string };
 
 export const notesPath = (home: string, name: string) => join(agentPaths(home, name).dir, "notes.jsonl");
 
@@ -44,7 +69,7 @@ export function checkNote(raw: string, wallet: Address | null): { ok: true; text
   return { ok: true, text };
 }
 
-/** Every note, folded to its latest state (the first sent or refused mark wins). Oldest first. */
+/** Every note, folded to its latest state (the first sent, refused or dropped mark wins). Oldest first. */
 export function readNotes(home: string, name: string): NoteState[] {
   const path = notesPath(home, name);
   if (!existsSync(path)) return [];
@@ -59,31 +84,56 @@ export function readNotes(home: string, name: string): NoteState[] {
     }
     if (typeof line.id !== "string") continue;
     const known = notes.get(line.id);
-    if (typeof line.text === "string" && !known) notes.set(line.id, { id: line.id, ts: String(line.ts), text: line.text, tx: line.tx ?? null, state: "queued" });
-    else if (known && known.state === "queued" && line.sent === true) notes.set(line.id, { ...known, state: "sent", at: line.at });
+    if (typeof line.text === "string" && !known) {
+      const model = checkModel(line.model ?? "");
+      notes.set(line.id, { id: line.id, ts: String(line.ts), text: line.text, tx: line.tx ?? null, model: model.ok ? model.model : "other", state: "queued" });
+    } else if (known && known.state === "queued" && line.sent === true) notes.set(line.id, { ...known, state: "sent", at: line.at });
     else if (known && known.state === "queued" && typeof line.refused === "number") notes.set(line.id, { ...known, state: "refused", status: line.refused, at: line.at });
+    else if (known && known.state === "queued" && typeof line.dropped === "number") notes.set(line.id, { ...known, state: "dropped", status: line.dropped, at: line.at });
   }
   return [...notes.values()];
 }
 
-export type SendDeps = { site: string; fetch: typeof fetch; now?: () => number; timeoutMs?: number; max?: number };
-export type Flushed = { sent: number; kept: number; refused: number; lastRefused: number | null; reason: string | null };
+export type SendDeps = {
+  site: string;
+  fetch: typeof fetch;
+  now?: () => number;
+  timeoutMs?: number;
+  max?: number;
+  /** LEAGUE_NOTES_DEV=1: unsigned, with no session (the default reads the environment). */
+  dev?: boolean;
+  /** Open the session again after a 401, once (`FL note` only: a background flush never signs). True when it opened. */
+  relogin?: () => Promise<boolean>;
+};
+export type Flushed = { sent: number; kept: number; refused: number; dropped: number; lastRefused: number | null; reason: string | null };
 
 /**
- * The queued notes, oldest first, at most `max`. It stops at the first answer that says the route is not
- * there (404, 405, a 5xx, a timeout): the rest wait for the next flush. Each note is asked once per flush.
+ * The queued notes, oldest first, at most `max`, each with the season's bearer token. With no live session
+ * (and not in dev mode) nothing is sent. It stops at the first answer that says the route is not there (404,
+ * 405, 429, a 5xx, no answer): the rest wait for the next flush. A 401 spends the session: `relogin` opens it
+ * again once and the note is sent again; without one, the session is marked spent. A 409 is a note the page
+ * has already: the copy here is dropped. Any other 4xx refuses the note for good.
  */
 export async function flushNotes(home: string, name: string, wallet: Address, deps: SendDeps): Promise<Flushed> {
   const now = deps.now ?? Date.now;
+  const dev = deps.dev ?? notesDev();
   const queued = readNotes(home, name).filter((n) => n.state === "queued");
-  const out: Flushed = { sent: 0, kept: queued.length, refused: 0, lastRefused: null, reason: null };
-  for (const note of queued.slice(0, deps.max ?? 20)) {
+  const out: Flushed = { sent: 0, kept: queued.length, refused: 0, dropped: 0, lastRefused: null, reason: null };
+  let token = dev ? null : liveToken(home);
+  if (!dev && !token) return queued.length > 0 ? { ...out, reason: "no-session" } : out;
+  let relogged = false;
+  const settle = (note: NoteState, mark: Record<string, unknown>) => {
+    appendJsonl(notesPath(home, name), { id: note.id, ...mark, at: new Date(now()).toISOString() });
+    out.kept -= 1;
+  };
+  for (let i = 0; i < Math.min(queued.length, deps.max ?? 20); i += 1) {
+    const note = queued[i]!;
     let status: number;
     try {
       const response = await deps.fetch(`${deps.site.replace(/\/+$/, "")}/api/league/notes`, {
         method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ id: note.id, wallet, ts: note.ts, text: note.text, ...(note.tx ? { tx: note.tx } : {}) }),
+        headers: { "content-type": "application/json", accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ id: note.id, wallet, ts: note.ts, text: note.text, model: note.model, ...(note.tx ? { tx: note.tx } : {}) }),
         signal: AbortSignal.timeout(deps.timeoutMs ?? NOTE_TIMEOUT_MS),
       });
       status = response.status;
@@ -93,30 +143,48 @@ export async function flushNotes(home: string, name: string, wallet: Address, de
       break;
     }
     if (status >= 200 && status < 300) {
-      appendJsonl(notesPath(home, name), { id: note.id, sent: true, at: new Date(now()).toISOString() });
+      settle(note, { sent: true });
       out.sent += 1;
-      out.kept -= 1;
+      continue;
+    }
+    if (status === 401 && !dev) {
+      if (deps.relogin && !relogged) {
+        relogged = true;
+        token = (await deps.relogin().catch(() => false)) ? liveToken(home) : null;
+        if (token) {
+          i -= 1;
+          continue;
+        }
+      }
+      invalidateSession(home);
+      out.reason = "unauthorized";
+      break;
+    }
+    if (status === 409) {
+      settle(note, { dropped: 409 });
+      out.dropped += 1;
       continue;
     }
     if (status === 404 || status === 405 || status === 429 || status >= 500) {
       out.reason = `HTTP ${status}`;
       break;
     }
-    appendJsonl(notesPath(home, name), { id: note.id, refused: status, at: new Date(now()).toISOString() });
+    settle(note, { refused: status });
     out.refused += 1;
-    out.kept -= 1;
     out.lastRefused = status;
   }
   return out;
 }
 
-export type NoteDeps = SendDeps & { home: string; name: string; wallet: () => Promise<Address | null> };
+export type NoteDeps = SendDeps & { home: string; name: string; wallet: () => Promise<Address | null>; env?: Record<string, string | undefined> };
 
-/** `FL note`: check, keep, then try to send the queue (this note last). Exit 2 only for a note that is not one. */
-export async function noteCommand(deps: NoteDeps, input: { text: string; tx?: string }): Promise<{ code: 0 | 1 | 2; text: string; data: Record<string, unknown> }> {
+/** `FL note`: check, keep, then try to send the queue (oldest first). Exit 2 only for a note that is not one. */
+export async function noteCommand(deps: NoteDeps, input: { text: string; tx?: string; model?: string }): Promise<{ code: 0 | 1 | 2; text: string; data: Record<string, unknown> }> {
   const now = deps.now ?? Date.now;
   const tx = input.tx === undefined ? null : input.tx.trim().toLowerCase();
   if (tx !== null && !TX.test(tx)) return { code: 2, text: "--tx must be a transaction hash: 0x and 64 hex digits", data: { ok: false, problem: "tx" } };
+  const declared = input.model === undefined ? { ok: true as const, model: modelHint(deps.env) } : checkModel(input.model);
+  if (!declared.ok) return { code: 2, text: declared.reason, data: { ok: false, problem: "model" } };
   const first = checkNote(input.text, null);
   if (!first.ok) return { code: 2, text: first.reason, data: { ok: false, problem: first.reason } };
   const wallet = await within(deps.wallet(), 5_000);
@@ -128,11 +196,14 @@ export async function noteCommand(deps: NoteDeps, input: { text: string; tx?: st
   }
   recordHostAction(deps.home, deps.name, "note", now());
   const id = randomUUID();
-  appendJsonl(notesPath(deps.home, deps.name), { id, ts: new Date(now()).toISOString(), text: checked.text, tx, sent: false });
-  if (!wallet) return { code: 0, text: KEPT, data: { ok: true, id, state: "queued" } };
+  appendJsonl(notesPath(deps.home, deps.name), { id, ts: new Date(now()).toISOString(), text: checked.text, tx, model: declared.model, sent: false });
+  if (!wallet) return { code: 0, text: KEPT, data: { ok: true, id, model: declared.model, state: "queued" } };
   const flushed = await flushNotes(deps.home, deps.name, wallet, deps);
   const mine = readNotes(deps.home, deps.name).find((n) => n.id === id)!;
-  if (mine.state === "sent") return { code: 0, text: "sent to feast.meme", data: { ok: true, id, state: "sent" } };
-  if (mine.state === "refused") return { code: 0, text: `feast.meme refused this note (HTTP ${mine.status}); it stays on this machine and is never sent again`, data: { ok: true, id, state: "refused", status: mine.status } };
-  return { code: 0, text: KEPT, data: { ok: true, id, state: "queued", reason: flushed.reason } };
+  const data = { ok: true, id, model: declared.model };
+  if (mine.state === "sent") return { code: 0, text: "sent to feast.meme", data: { ...data, state: "sent" } };
+  if (mine.state === "dropped") return { code: 0, text: "feast.meme has this note already; the copy here is dropped", data: { ...data, state: "dropped" } };
+  if (mine.state === "refused") return { code: 0, text: `feast.meme refused this note (HTTP ${mine.status}); it stays on this machine and is never sent again`, data: { ...data, state: "refused", status: mine.status } };
+  const noSession = flushed.reason === "no-session" || flushed.reason === "unauthorized";
+  return { code: 0, text: noSession ? KEPT_NO_SESSION : KEPT, data: { ...data, state: "queued", reason: flushed.reason } };
 }

@@ -516,7 +516,7 @@ function human(view: { coins: CoinOut[]; self: SelfView | null; selfNote: string
     lines.push(`Your agent "${s.agent}" (${s.track === "prompt" ? "prompt mode" : s.track}${s.running ? ", running" : ", not running"})`);
     lines.push(`  positions: ${s.positions.length > 0 ? s.positions.map(position).join("; ") : "none"}`);
     lines.push(`  PnL: realized ${signed(s.pnl.realizedBnb)}, unrealized ${signed(s.pnl.unrealizedBnb)}${usd(s.pnl.realizedBnb + s.pnl.unrealizedBnb)}; gas ${bnb(s.pnl.gasBnb)}`);
-    lines.push(`  capital: ${bnb(s.capital.spentBnb)} of ${s.capital.capBnb} BNB, wallet-wide (FL enter's buy counts)`);
+    lines.push(`  capital: ${bnb(s.capital.spentBnb)} of ${s.capital.capBnb} BNB, wallet-wide (every agent on this wallet)`);
     if (s.ownCoin.length > 0) lines.push(`  your own coin (not counted): ${s.ownCoin.map(position).join("; ")}`);
     if (s.otherBooks.length > 0) lines.push(`  other agents on this machine (not counted): ${s.otherBooks.map((b) => `${b.agent}: ${b.positions.map(position).join("; ")}`).join(" | ")}`);
     lines.push(`  last trade ${ago(s.lastTradeAt, view.now)}; last action by your agent ${ago(s.lastActionAt, view.now)}`);
