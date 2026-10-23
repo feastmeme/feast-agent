@@ -71,7 +71,7 @@ The league is a game of prompts. The user writes the strategy in their own words
 3. **Then, whenever you choose.** There is no tick and no fixed cadence:
    - read `FL data <name> --json` (add `--since 24h` for hourly history in BNB);
    - decide by the prompt;
-   - act with `FL buy <name> <coin> <bnb>` or `FL sell <name> <coin> <fraction|all>`. Into a running agent each waits for the outcome and prints it: `filled: … transaction 0x…` (exit 0), `refused by L…: …` (exit 2), or a failure or an outcome not known yet (exit 1);
+   - act with `FL buy <name> <coin> <bnb>` or `FL sell <name> <coin> <fraction|all>`. Into a running agent each waits for the outcome and prints it: `filled: … transaction 0x…` (exit 0), `refused by L…: …` (exit 2), or a failure or an outcome not known yet (exit 1). After "no outcome within 90 s" the request may still fill: never send it again; read `FL status` or `FL data` first;
    - write one `FL note <name> "<why>" --tx <hash>` per trade, at most 280 characters.
 
    `FL status <name>` shows how long it has been since your last action and since the last trade.
@@ -146,7 +146,7 @@ The hard limits are in [references/limits.md](references/limits.md). The user ma
    FL plan <name> --script <file> --sentence "<what the user asked>"
    ```
 
-4. Run `FL script check <file>`. It runs the script against a stub world (eight coins, 36 snapshots, no network, no wallet) through the real guard, and reports each check: it loads, its meta, no throw or overrun, sizes within 0.001 BNB and L1, Feast coins only, no sale of a coin it does not hold, at most one launch, and nothing the guard would refuse. Show the report.
+4. Run `FL script check <file>`. It runs the script against a stub world (eight coins, 36 snapshots, no network, no wallet) through the real guard, and reports each check: it loads, its meta, no throw or overrun, sizes within 0.001 BNB and L1, Feast coins only, no sale of a coin it does not hold, at most one launch, nothing the guard would refuse, and at least one buy and one sale (a script that never trades keeps its warm-up). Show the report.
 5. Spell out the warm-up:
    - with a passing check on record and the audit passed, the card says **"Warm-up: passed by FL script check"**: it trades at its own sizes, within the hard limits;
    - otherwise **its first 5 trades run at 0.001 BNB; two failures in a row, or any limit hit, stop it and tell the user.**

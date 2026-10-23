@@ -28,7 +28,7 @@ import { stubWorld, type StubWorld } from "./world.ts";
  * sha256: a new audit, a new check, a new warm-up.
  */
 
-export type CheckId = "load" | "meta" | "calls" | "normalize" | "size" | "feast" | "held" | "launch" | "guard";
+export type CheckId = "load" | "meta" | "calls" | "normalize" | "size" | "feast" | "held" | "launch" | "guard" | "trades";
 export type CheckLine = { id: CheckId; label: string; pass: boolean; detail?: string; snapshot?: number; request?: string };
 export type CheckReport = {
   version: 1;
@@ -86,6 +86,8 @@ export async function checkScript(source: string, options: { file?: string; seed
     { id: "held", label: "every sale names a coin the stub book holds", pass: true },
     { id: "launch", label: "at most one launch", pass: true },
     { id: "guard", label: "the real guard, with the stub book, refuses nothing (L2, L4, L5 and the rest)", pass: true },
+    // A script that never trades in the stub world passes nothing the warm-up would have tested: it keeps its warm-up.
+    { id: "trades", label: "it trades in the stub world: at least one buy and one sale, each approved", pass: true },
   ];
   const stats = { ticks: 0, events: 0, requests: 0, buys: 0, sells: 0, launches: 0, refusals: 0 };
   const fail = (id: CheckId, detail: string, at: { snapshot?: number; request?: unknown } = {}) => {
@@ -243,6 +245,7 @@ export async function checkScript(source: string, options: { file?: string; seed
       }
     }
     if (!checks[2]!.pass) for (const line of checks.slice(3)) if (line.pass && stats.requests === 0) Object.assign(line, { pass: false, detail: "not run" });
+    if (stats.buys === 0 || stats.sells === 0) fail("trades", `${stats.buys} buys and ${stats.sells} sales approved: the check cannot vouch for trades it never saw, so the warm-up still applies`);
     return report();
   } finally {
     sandbox.stop();

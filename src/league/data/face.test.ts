@@ -173,6 +173,22 @@ describe("FL data: the JSON", () => {
     const w = world();
     expect((await w.run({ name: "nobody" })).code).toBe(2);
     expect(((await w.run({})).data as Json).self.agent).toBe("demo");
+    // A stray entry in agents/ (Finder's .DS_Store) is not an agent, and breaks nothing.
+    writeFileAtomic(join(w.home, "agents", ".DS_Store"), "");
+    expect(((await w.run({})).data as Json).self.agent).toBe("demo");
+  });
+
+  it("a pool without its key: the coin's side read from the address order (currency0 is the lower)", async () => {
+    const { pool } = await import("./fakes.ts");
+    const { getAddress } = await import("viem");
+    // Made up, and above WBNB's address: in a real pool such a coin is currency1.
+    const HIGH = getAddress("0xfffffffffffffffffffffffffffffffffffc0d06");
+    const low = { ...pool(C1), poolKey: undefined };
+    const high = { ...pool(HIGH, { currency1: true }), poolKey: undefined };
+    const out = await world({ feast: { pools: [[low, high]] } }).run({});
+    const coins = (out.data as Json).coins as Json[];
+    expect(coins.find((c) => c.coin === C1)?.priceBnb).toBeCloseTo(2 ** -20, 15);
+    expect(coins.find((c) => c.coin === HIGH)?.priceBnb).toBeCloseTo(2 ** -20, 15);
   });
 });
 
@@ -225,6 +241,13 @@ describe("FL data: rates and failures", () => {
     expect(out.text).toContain("feast.meme's rate limit (60): try again in a minute");
     expect(out.data).toMatchObject({ ok: false, partial: true, coins: [] });
     expect(w.feast.calls.filter((c) => c.includes("/api/v1/pools"))).toHaveLength(1);
+  });
+
+  it("a 429 on a later page keeps the pages read before it, marked partial", async () => {
+    const out = await world({ feast: { poolsAnswer: { 1: { status: 429, body: {} } } } }).run({});
+    expect(out.code).toBe(1);
+    expect(out.data).toMatchObject({ partial: true });
+    expect(((out.data as Json).coins as Json[]).map((c) => c.coin)).toEqual([C1, C2, C3]);
   });
 
   it("a 503 on /api/league still prints the coins, with one line naming what failed", async () => {

@@ -112,7 +112,7 @@ The league is a game of prompts. You write your strategy in plain words, and you
 - **The audit.** It goes through two stages: deterministic rules (no wallet or process access, no imports, no network, no secrets, bounded loops, only the runtime's `buy` / `sell` / `launch` / `read`), then a read by your agent against a fixed checklist.
 - **The sandbox.** It runs in a separate process with no files, no network, no environment and no wallet.
 - **The warm-up.** Its first five trades are forced to 0.001 BNB, and two failures in a row or any limit hit stop it.
-- **The check.** `FL script check <file>` runs it against a stub world (no network, no wallet) through the real guard. A pass on record, with the audit passed, counts as the warm-up done for that exact file; any edit is a new file.
+- **The check.** `FL script check <file>` runs it against a stub world (no network, no wallet) through the real guard; it must buy and sell there, and the guard must refuse nothing. A pass on record, with the audit passed, counts as the warm-up done for that exact file; any edit is a new file.
 
 **The hard limits,** with defaults. You may tighten each one, and loosen it only to its ceiling:
 

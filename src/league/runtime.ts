@@ -19,6 +19,7 @@ import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type
 import { Market } from "./market.ts";
 import { flushNotes, readNotes } from "./notes/queue.ts";
 import { presetStrategy } from "./presets/logic.ts";
+import { SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
 import { autopilotGate, lastHostAction, promptChanged } from "./prompt/host.ts";
 import { sessionNotice } from "./register/copy.ts";
 import { siteFromEnv } from "./register/site.ts";
@@ -128,6 +129,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
   mkdirSync(paths.dir, { recursive: true });
   writeFileSync(paths.pid, String(process.pid));
   let loaded: Loaded | null = null;
+  /** Answers every request still queued when the loop ends, so no `FL buy` waits on one that will never run. */
+  let dropQueued: ((reason: string) => void) | null = null;
 
   try {
     const wallet = await deps.signer.address();
@@ -304,6 +307,12 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       requested.delete(intentId);
       log("request.outcome", { requestId, ...(outcomes.get(intentId) ?? { outcome: "dropped", reason: "the runtime did not act on it" }) });
       outcomes.delete(intentId);
+    };
+    dropQueued = (reason: string) => {
+      for (const intentId of [...requested.keys()]) {
+        if (!outcomes.has(intentId)) outcomes.set(intentId, { outcome: "dropped", reason });
+        report(intentId);
+      }
     };
     const refused = (intent: Intent, verdict: Extract<GuardVerdict, { ok: false }>) => {
       settle(intent, { outcome: "refused", kind: intent.kind, limit: verdict.limit, message: verdict.message });
@@ -696,7 +705,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
 
     // --- the loop -------------------------------------------------------------------------
     const startedAt = clock();
-    const tickMs = () => agent!.tickSeconds * 1_000;
+    // A prompt agent's safety pass (L6, L8) runs at least every SAFETY_PASS_SECONDS, whatever its autopilot's own tick;
+    // the autopilot preset is asked on its own tick, below.
+    const tickMs = () => (agent!.track === "prompt" ? Math.min(SAFETY_PASS_SECONDS, agent!.tickSeconds) : agent!.tickSeconds) * 1_000;
+    let nextStrategyTick = 0;
     let nextPoll = 0;
     let nextTick = 0;
     let nextPreflight = clock() + (deps.preflightMs ?? 300_000);
@@ -821,11 +833,13 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (stop) {
         log("halted", { reason: stop });
         notify("halted", `stopped: ${stop}`);
+        dropQueued(`the agent stopped before it ran: ${stop}`);
         save();
         return { exit: existsSync(paths.stop) && readFileSync(paths.stop, "utf8").trim() !== "stop requested by the user" ? "halted" : "stopped", reason: stop };
       }
       if (deps.maxRuntimeMs !== undefined && now - startedAt >= deps.maxRuntimeMs) {
         log("finished", { afterMs: now - startedAt });
+        dropQueued("the agent's run ended before it ran");
         save();
         return { exit: "finished", reason: "the run's time is up" };
       }
@@ -834,6 +848,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         const on = silent();
         if (on !== autopilotOn) {
           autopilotOn = on;
+          if (on) nextStrategyTick = 0;
           const minutes = agent.autopilot.idleMinutes;
           log(on ? "autopilot.on" : "autopilot.off", { preset: agent.preset, idleMinutes: minutes, silentMs: silentFor() });
           notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : `your agent acted: autopilot ${agent.preset} steps back`);
@@ -887,11 +902,15 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
               now,
             ),
           );
-          // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
-          const asks = agent.track !== "prompt" || autopilotOn;
-          const needBoard = asks && (agent.track === "script" || agent.preset === "momentum" || (agent.preset === "dca" && agent.params.targets === "topHolders"));
-          const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard });
-          await runStrategy("onTick", snapshot);
+          // The strategy on its own tick: a prompt agent's autopilot only while it is on, a preset's or a script's every tick.
+          const asks = agent.track !== "prompt" || (autopilotOn && now >= nextStrategyTick);
+          if (asks) {
+            if (agent.track === "prompt") nextStrategyTick = now + agent.tickSeconds * 1_000;
+            // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
+            const needBoard = agent.track === "script" || agent.preset === "momentum" || (agent.preset === "dca" && agent.params.targets === "topHolders");
+            const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard });
+            await runStrategy("onTick", snapshot);
+          } else save();
         } catch (error) {
           log("tick.failed", { reason: String((error as Error).message).slice(0, 300) });
         }
@@ -925,6 +944,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
+    try {
+      dropQueued?.(`the runtime stopped on an error: ${reason.slice(0, 200)}`);
+    } catch {
+      // The outcome lines are best effort on the way out.
+    }
     return { exit: "error", reason };
   } finally {
     loaded?.stop();
