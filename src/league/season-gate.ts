@@ -1,0 +1,46 @@
+import { join } from "node:path";
+
+import { utc8 } from "./register/copy.ts";
+import type { LeagueRead } from "./register/site.ts";
+import { agentPaths, readJson, writeJsonAtomic } from "./store.ts";
+
+/**
+ * When an agent `FL enter` started may trade (task 968; the coordinator's ruling C8). feast.meme's season starts at
+ * a dinner, 21:00 UTC+8 ("dinner 0"), and the clients learn it only as `/api/league`'s countdown: the start before
+ * it, the next dinner during the season. Trading opens one hour before dinner 1: the start plus 23 hours (season 1:
+ * Monday 10/26, 20:00 UTC+8). Until then the waiting agent trades nothing; with no start announced it waits until
+ * told. The gate only holds trading back: it loosens nothing.
+ */
+
+export const OPENS_AFTER_START_MS = 23 * 3_600_000;
+export const OPENS_BEFORE_DINNER_MS = 3_600_000;
+/** How often a closed gate reads the league again. */
+export const GATE_READ_MS = 5 * 60_000;
+
+export type Opening = { kind: "open" } | { kind: "at"; at: number } | { kind: "unknown" };
+
+/** The instant trading opens, from one read of `/api/league`; `unknown` when the page names no start (or cannot be read). */
+export function tradingOpens(read: LeagueRead | null): Opening {
+  if (!read) return { kind: "unknown" };
+  if (read.state === "over") return { kind: "open" };
+  const countdown = read.season.countdownTo;
+  if (read.state === "season") {
+    // Day 2 on, dinner 1 is behind: open. On day 1 the countdown is dinner 1.
+    if ((read.season.day !== null && read.season.day >= 2) || countdown === null) return { kind: "open" };
+    return { kind: "at", at: countdown - OPENS_BEFORE_DINNER_MS };
+  }
+  if ((read.state === "warm-up" || read.state === "coming-soon") && countdown !== null) return { kind: "at", at: countdown + OPENS_AFTER_START_MS };
+  return { kind: "unknown" };
+}
+
+/** What the runtime last knew of its gate, for `FL status` (no address in it). */
+export type GateState = { state: "waiting" | "open"; opensAt: string | null; at: string };
+
+export const gatePath = (home: string, name: string) => join(agentPaths(home, name).dir, "season.json");
+export const readGate = (home: string, name: string) => readJson<GateState>(gatePath(home, name));
+export const writeGate = (home: string, name: string, state: GateState) => writeJsonAtomic(gatePath(home, name), state);
+
+/** The line a refused request and `FL status` say while the gate is closed. */
+export function seasonClosedLine(opensAt: number | null): string {
+  return opensAt === null ? "the season has not started; it opens when feast.meme announces the start" : `the season has not started; it opens at ${utc8(opensAt)} (UTC+8)`;
+}

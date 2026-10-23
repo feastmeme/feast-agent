@@ -45,6 +45,11 @@ export type AgentConfig = {
   sentence: string | null;
   createdAt: string;
   confirmed: Confirmed | null;
+  /**
+   * Task 968: an agent `FL enter` started waits for the season: it trades nothing until feast.meme's season opens
+   * (`season-gate.ts`), and `FL start` after a restart keeps waiting. Not part of the card: it never needs a new yes.
+   */
+  league?: { waitForSeason: boolean } | null;
 };
 
 export type PlanInput = {
