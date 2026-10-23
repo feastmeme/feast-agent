@@ -48,6 +48,8 @@ export class MarketFeed {
   private unavailableSaid = false;
   private availableSaid = false;
   private boardFrom: FeastSnapshot | null = null;
+  /** A snapshot whose inline tail was cut short of the position: the whole tail is read at the next slot (task 966). */
+  private pendingTail: FeastSnapshot | null = null;
 
   constructor(private readonly d: FeedDeps) {
     this.indexer = (d.indexer ?? INDEXER_URL).replace(/\/+$/, "");
@@ -72,11 +74,13 @@ export class MarketFeed {
   reset(): void {
     this.stream.reset();
     this.poller = null;
+    this.pendingTail = null;
   }
 
   /** One read, if one is due: the events after the position (`events`), and the newest coins for the next tick. */
   async step(o: { events: boolean }): Promise<LeagueEvent[]> {
     if (!this.due()) return [];
+    if (this.pendingTail) return this.fromTail(o);
     if (this.mode === "snapshot" || (!this.d.live && this.d.now() >= this.recheckAt)) return this.fromSnapshot(o);
     return o.events ? this.fromLegacy() : [];
   }
@@ -111,7 +115,27 @@ export class MarketFeed {
       this.stream.resume(this.poller?.position ?? null);
       this.poller = null;
     }
-    return out.kind === "new" && o.events ? this.stream.take(out.snapshot) : [];
+    if (out.kind !== "new" || !o.events) return [];
+    // The inline tail was cut, and does not reach back to the position: the whole tail, at the next slot, from the
+    // site's events_url, never the legacy route. Until then nothing of this snapshot is passed, so nothing is out of order.
+    if (this.stream.needsTail(out.snapshot)) {
+      this.pendingTail = out.snapshot;
+      this.d.log("events.tail", { path: out.snapshot.eventsUrl, why: "the snapshot's events were cut short of the position" });
+      return [];
+    }
+    return this.stream.take(out.snapshot, { fill: !(out.snapshot.truncated && out.snapshot.eventsUrl) });
+  }
+
+  /** The whole tail a cut snapshot pointed at; if it cannot be read, the cut snapshot's own events, the gap said. */
+  private async fromTail(o: { events: boolean }): Promise<LeagueEvent[]> {
+    const cut = this.pendingTail!;
+    const got = await this.client.readTail(cut.eventsUrl!);
+    if (got.kind === "wait") return [];
+    this.pendingTail = null;
+    if (!o.events) return [];
+    if (got.kind === "tail") return this.stream.take(got.tail, { fill: false });
+    this.d.log("events.tail.failed", { status: got.failure.status, reason: got.failure.reason });
+    return this.stream.take(cut, { fill: false });
   }
 
   private async fromLegacy(): Promise<LeagueEvent[]> {

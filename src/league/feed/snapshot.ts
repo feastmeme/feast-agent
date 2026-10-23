@@ -52,8 +52,15 @@ export type FeastSnapshot = {
   block: number | null;
   /** The position after the snapshot's last event (`toCursor`, else `cursor`); always one that matches CURSOR_RE. */
   cursor: string | null;
-  /** The exclusive start of `events` (ruling C1); null when the snapshot does not say. */
+  /**
+   * The FIRST event the tail includes (the site's contract, task 966; when the tail is empty, the same as
+   * `afterCursor`); null when the snapshot does not say.
+   */
   fromCursor: string | null;
+  /** The exclusive start of `events`: the newest event the tail does NOT include (task 966); null when not given. */
+  afterCursor: string | null;
+  /** Where the whole tail is, when `events` was cut (`truncated`): a path on the site, checked (`EVENTS_PATH`); else null. */
+  eventsUrl: string | null;
   truncated: boolean;
   coins: Record<string, unknown>[];
   events: Record<string, unknown>[];
@@ -66,6 +73,9 @@ const time = (v: unknown): number | null => {
   return Number.isFinite(t) ? t : null;
 };
 
+/** `events_url` as the site names it: a path of its own under /api/v1/, never another origin or a query. */
+export const EVENTS_PATH = /^\/api\/v1\/[a-z0-9_/-]{1,100}$/;
+
 /** A snapshot, or null for anything that is not one. */
 export function parseSnapshot(body: unknown): FeastSnapshot | null {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
@@ -74,7 +84,18 @@ export function parseSnapshot(body: unknown): FeastSnapshot | null {
   const events = b.events === undefined ? [] : objects(b.events);
   if (!coins || !events) return null;
   const block = typeof b.block === "number" && Number.isSafeInteger(b.block) && b.block >= 0 ? b.block : null;
-  return { generatedAt: time(b.generatedAt), block, cursor: cursorOf(b.toCursor) ?? cursorOf(b.cursor), fromCursor: cursorOf(b.fromCursor), truncated: b.truncated === true, coins, events };
+  const afterCursor = cursorOf(b.afterCursor);
+  // The position after the snapshot: its newest event, else (an empty tail) where the tail begins.
+  const cursor = cursorOf(b.toCursor) ?? cursorOf(b.cursor) ?? afterCursor;
+  const eventsUrl = typeof b.events_url === "string" && EVENTS_PATH.test(b.events_url) && !b.events_url.includes("..") ? b.events_url : null;
+  return { generatedAt: time(b.generatedAt), block, cursor, fromCursor: cursorOf(b.fromCursor), afterCursor, eventsUrl, truncated: b.truncated === true, coins, events };
+}
+
+/** The site's events document (`events_url`): the whole tail and its cursors, no coins; null for anything else. */
+export function parseTail(body: unknown): FeastSnapshot | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body) || !Array.isArray((body as { events?: unknown }).events)) return null;
+  const tail = parseSnapshot({ ...(body as Record<string, unknown>), coins: [] });
+  return tail ? { ...tail, eventsUrl: null } : null;
 }
 
 /** Whether `a` is an older copy than `b`: by the cursor, else the block, else the time it was made. */
@@ -340,6 +361,44 @@ export class SnapshotClient {
     }
     this.pacer.end(failure);
     return failure ? { kind: "failed", failure } : outcome;
+  }
+
+  private tailEtag: string | null = null;
+  private tail: FeastSnapshot | null = null;
+
+  /**
+   * The whole tail from `events_url` (task 966), when the snapshot's inline `events` were cut: one ask under the same
+   * pacing and backoff as the snapshot (never within 3 s of another, never two at once), with its own ETag; a 304
+   * answers the tail held. Its events are never written to the home: the cache keeps coins only.
+   */
+  async readTail(path: string): Promise<{ kind: "tail"; tail: FeastSnapshot } | { kind: "failed"; failure: Failure } | { kind: "wait" }> {
+    if (!EVENTS_PATH.test(path) || !this.pacer.begin()) return { kind: "wait" };
+    let failure: Failure | null = null;
+    let tail: FeastSnapshot | null = null;
+    try {
+      const headers: Record<string, string> = { accept: "application/json" };
+      if (this.tailEtag && this.tail) headers["if-none-match"] = this.tailEtag;
+      const timeout = this.o.timeoutMs ?? 10_000;
+      const response = await this.o.fetch(`${this.o.site.replace(/\/+$/, "")}${path}`, { headers, ...(timeout > 0 ? { signal: AbortSignal.timeout(timeout) } : {}) });
+      const now = this.o.now();
+      if (response.status === 304 && this.tail) tail = this.tail;
+      else if (response.status === 200) {
+        try {
+          tail = parseTail(JSON.parse(await response.text()));
+        } catch {
+          tail = null;
+        }
+        if (!tail) failure = { status: 200, reason: "HTTP 200, not the events tail" };
+        else {
+          this.tail = tail;
+          this.tailEtag = response.headers.get("etag");
+        }
+      } else failure = failureOf(response.status, response.headers.get("retry-after"), now) ?? { status: response.status, reason: `HTTP ${response.status}` };
+    } catch (error) {
+      failure = { status: null, reason: plainReason(error) };
+    }
+    this.pacer.end(failure);
+    return failure || !tail ? { kind: "failed", failure: failure ?? { status: null, reason: "no tail" } } : { kind: "tail", tail };
   }
 
   private keep(now: number): void {
