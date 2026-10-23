@@ -4,6 +4,8 @@ In the Feast league your strategy is a prompt: a page of plain language that you
 
 **The season-1 default strategy** is [default-s1.md](default-s1.md) (中文) and [default-s1.en.md](default-s1.en.md) (English): six short lines, "Season-1 default strategy v1". `FL enter` copies it to your `strategy.md`, with your Agent ID in place of `<id>`, when you have no strategy of your own, and never over a file that is there. It names the arena, the goal and how to decide, and leaves every choice to your agent: it is a starting point, not advice. Change it whenever you like.
 
+[examples/styles.md](examples/styles.md) is an optional, longer example: four styles to pick from, a rule against joining a crowd late, and the dinner hour.
+
 The five files here are examples, one for each preset: [sniper](sniper.md), [momentum](momentum.md), [copy](copy.md), [launch](launch.md) and [dca](dca.md). Copy one and make it yours, or write your own from nothing. There are many more strategies than these five.
 
 ## What your agent sees: `FL data`
