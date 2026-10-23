@@ -65,7 +65,14 @@ function world(o: WorldOptions = {}) {
     writeFileSync(agentPaths(home, name).pid, String(process.pid));
     return 4242;
   };
-  const deps: EnterDeps = { home, signer: new BawSigner(runner), chain, site: new LeagueSite(SITE, site.fetch, 50, retry), indexer: INDEXER, fetch: site.fetch, now: () => clock.now, oneShot: shots.run, notesDev: o.notesDev ?? false, retry, start, cwd, signOptions: { pollMs: 1, sleep: async () => {} } };
+  const paused: { name: string; stop: string }[] = [];
+  /** The paused agent's runtime sees its stop file and exits, as a real one does. */
+  const waitForExit = async (name: string) => {
+    paused.push({ name, stop: readFileSync(agentPaths(home, name).stop, "utf8").trim() });
+    rmSync(agentPaths(home, name).pid, { force: true });
+    return true;
+  };
+  const deps: EnterDeps = { home, signer: new BawSigner(runner), chain, site: new LeagueSite(SITE, site.fetch, 50, retry), indexer: INDEXER, fetch: site.fetch, now: () => clock.now, oneShot: shots.run, notesDev: o.notesDev ?? false, retry, start, waitForExit, cwd, signOptions: { pollMs: 1, sleep: async () => {} } };
   const run = (input: Partial<EnterInput> = {}) => enter(deps, { name: `${ID}.ai`, yes: false, lang: "en", ...input });
   /** Each league message the wallet was asked to sign: its type and its fields. */
   const signed = () =>
@@ -79,7 +86,7 @@ function world(o: WorldOptions = {}) {
   const posts = () => site.calls.filter((c) => c.startsWith("POST"));
   const pending = () => JSON.parse(readFileSync(join(agentPaths(home, ENTRY_AGENT).dir, "pending.json"), "utf8")) as { stage: string; digest: string };
   const entry = () => readEntry(home) as unknown as Record<string, unknown>;
-  return { deps, site, chain, shots, calls, signed, executed, posts, starts, account, wallet, home, cwd, clock, run, pending, entry };
+  return { deps, site, chain, shots, calls, signed, executed, posts, starts, paused, account, wallet, home, cwd, clock, run, pending, entry };
 }
 
 const lastLine = (text: string) => text.split("\n").at(-1);
@@ -546,6 +553,27 @@ describe("FL enter --meme and FL meme", () => {
     expect(w.entry()).toMatchObject({ bodyCoin: BODY, meme: { coin: BODY, symbol: "NOODFEED", name: "Noodle Catfeed", concept: MEME.concept } });
     expect(out.text).toContain("Launched NOODFEED (0x0000…0d1e). Transaction: 0x");
     expect(lastLine(out.text)).toBe("Your seat: 7.");
+    // One runtime per wallet: the agent the entry started paused for the launch, and started again after it.
+    expect(afterEntry.text).toContain('"maplegrin" is running: it pauses for the launch and starts again right after');
+    expect(w.paused).toEqual([{ name: ID, stop: "paused for the meme's launch (FL meme)" }]);
+    expect(w.starts.map((s) => s.name)).toEqual([ID, ID]);
+    expect(existsSync(agentPaths(w.home, ID).stop)).toBe(false);
+    expect(out.text).toContain('started "maplegrin" in the background (pid 4242)');
+  });
+
+  it("FL meme while the entry's agent holds the wallet lock: not busy; an agent that does not stop in time: nothing launched, still running", async () => {
+    const w = await entered();
+    writeFileSync(walletLockPath(w.home), JSON.stringify({ pid: process.pid, agent: ID, at: new Date().toISOString() }));
+    const card = await w.run({ name: undefined, memeOnly: true, meme: MEME });
+    expect(card).toMatchObject({ code: 2, stage: "meme-card" });
+    w.deps.waitForExit = async () => false;
+    const out = await w.run({ name: undefined, memeOnly: true, meme: MEME, yes: true });
+    expect(out).toMatchObject({ code: 1, stage: "paused", text: copy.pauseFailed(ID, "en") });
+    expect(w.shots.requests).toEqual([]);
+    expect(existsSync(agentPaths(w.home, ID).stop)).toBe(false);
+    // Another agent on the wallet is still a stop.
+    writeFileSync(walletLockPath(w.home), JSON.stringify({ pid: process.pid, agent: "maple", at: new Date().toISOString() }));
+    expect(await w.run({ name: undefined, memeOnly: true, meme: MEME })).toMatchObject({ code: 2, stage: "busy" });
   });
 
   it("the host's PNG is used: its sha256 on the card's digest and on the request, copied into the home", async () => {
