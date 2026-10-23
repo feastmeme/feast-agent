@@ -634,6 +634,19 @@ describe("FL enter --meme and FL meme", () => {
     expect(w.shots.requests).toHaveLength(1);
   });
 
+  it("the meme is the agent's coin: the trading agent's runtime inherits it from entry.json", async () => {
+    const w = await entered();
+    await w.run({ meme: MEME });
+    await w.run({ meme: MEME, yes: true });
+    rmSync(agentPaths(w.home, ID).pid);
+    const { tradeWorld } = await import("../prompt/fakes.ts");
+    const { runAgent } = await import("../runtime.ts");
+    const tw = tradeWorld({ now: () => w.clock.now });
+    await runAgent({ home: w.home, name: ID, signer: tw.signer, chain: tw.chain, fetch: w.site.fetch, site: SITE, now: () => w.clock.now, sleep: async () => void (w.clock.now += 1_000), loopMs: 1_000, maxRuntimeMs: 3_000, out: () => {} });
+    const log = readFileSync(agentPaths(w.home, ID).log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { event: string; coin?: string });
+    expect(log.find((l) => l.event === "launch.inherited")).toMatchObject({ coin: BODY });
+  });
+
   it("a launch that does not land says why; the record keeps no meme", async () => {
     const w = await entered({ shot: { fail: "launch" } });
     await w.run({ meme: MEME });
