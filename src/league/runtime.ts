@@ -23,7 +23,7 @@ import { flushNotes, readNotes } from "./notes/queue.ts";
 import { presetStrategy } from "./presets/logic.ts";
 import { SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
 import { autopilotGate, lastHostAction, promptChanged } from "./prompt/host.ts";
-import { sessionNotice } from "./register/copy.ts";
+import { sessionNotice, utc8 } from "./register/copy.ts";
 import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { GATE_READ_MS, seasonClosedLine, tradingOpens, writeGate } from "./season-gate.ts";
 import { scriptCheckPassed } from "./script/check.ts";
@@ -892,7 +892,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       saveGate();
     };
     log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null, feed: feed ? feed.mode : null, pollMs: deps.pollMs ?? 5_000, startJitterMs, ...(waits ? { waitForSeason: true, opensAt: gate.opensAt === null ? null : new Date(gate.opensAt).toISOString() } : {}) });
-    if (!gate.open) notify("season", `waiting for the season: it trades nothing until ${seasonClosedLine(gate.opensAt).replace(/^the season has not started; it opens /, "it opens ")}`);
+    if (!gate.open) notify("season", gate.opensAt === null ? "waiting for the season: it trades nothing until feast.meme announces the start" : `waiting for the season: it trades nothing before ${utc8(gate.opensAt)} (UTC+8)`);
     if (agent.track === "prompt") {
       notify("started", `prompt mode; your agent decides; ${agent.preset && agent.autopilot ? `autopilot ${agent.preset} after ${agent.autopilot.idleMinutes} min of silence` : "no autopilot"}`);
     } else {

@@ -200,7 +200,7 @@ export function entryCard(view: { agentId: string; season: number; notes: boolea
     table(rows),
     "",
     zh
-      ? `你说「好」之后，钱包会请你签 ${count === 2 ? "最多两条" : "一条"}消息；Binance App 可能要你逐条确认。`
+      ? `你说「好」之后，钱包会请你签${count === 2 ? "最多两条" : "一条"}消息；Binance App 可能要你逐条确认。`
       : `Your wallet asks for ${count === 2 ? "at most two signatures" : "one signature"} as soon as you say yes; the Binance App may ask you to confirm ${count === 2 ? "each" : "it"}.`,
   ].join("\n");
 }
@@ -308,8 +308,20 @@ function memePictureRow(picture: MemePictureShown, lang: Lang): string {
   return zh ? "按代码生成的图案" : "the ticker's identicon";
 }
 
+/** `meme.ts`'s reasons, in Chinese. */
+const PICTURE_WHY_ZH: Record<string, string> = {
+  "there is no file at that path": "这个路径下没有文件",
+  "it is not a file": "它不是一个文件",
+  "it could not be read": "读不出来",
+  "it is over 262,144 bytes": "超过 262,144 字节",
+  "it is a JPEG, not a PNG": "它是 JPEG，不是 PNG",
+  "it is a WebP, not a PNG": "它是 WebP，不是 PNG",
+  "it is a GIF, not a PNG": "它是 GIF，不是 PNG",
+  "it is another kind of file, not a PNG": "它不是 PNG 图片",
+};
+
 export function hostPictureNotUsed(why: string, lang: Lang): string {
-  return lang === "zh" ? `你的图片没有用上：${plain(why)}；改用联赛形象。` : `Your picture was not used: ${plain(why)}; the league creature is used instead.`;
+  return lang === "zh" ? `你的图片没有用上：${PICTURE_WHY_ZH[why] ?? plain(why)}；改用联赛形象。` : `Your picture was not used: ${plain(why)}; the league creature is used instead.`;
 }
 
 /** The meme's preview card: what will launch, and the yes it needs. */
