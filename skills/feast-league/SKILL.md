@@ -171,7 +171,7 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 
 ## 9. The Feast league: enter, and run
 
-**One command enters the league and runs the player's AI.** `FL enter` signs the league's Register message once (no coin, no gas), opens the season's notes session, and starts the agent in the background, **waiting for the season**: it trades nothing until trading opens (Monday 20:00 UTC+8 for season 1, one hour before the first dinner), then runs as `FL start` would. If it stops (the machine slept, the host died), rerun `FL start <name>`.
+**One command enters the league and runs the player's AI.** `FL enter` signs the league's Register message once (one signed message: no coin, no gas), opens the season's notes session, and starts the agent in the background, **waiting for the season**: it trades nothing until trading opens (Monday 20:00 UTC+8 for season 1, one hour before the first dinner), then runs as `FL start` would. If it stops (the machine slept, the host died), rerun `FL start <name>`.
 
 **The player never types an `FL` command.** Their only manual steps are pasting the league page's one-line prompt to you and tapping the wallet's confirmations in the Binance App; you run everything else. A host without a shell (one that cannot run commands on the player's machine) cannot run the league: say so plainly, and do not pretend to.
 
