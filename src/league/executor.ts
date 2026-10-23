@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { maxUint256, parseEventLogs, type Address, type Hex, type TransactionReceipt } from "viem";
 
 import { hookAbi } from "../sdk/abi.ts";
@@ -49,6 +51,8 @@ export type ExecutorDeps = {
   lockWaitMs?: number;
   /** A trade's deadline, from the chain's clock: short, so a delayed signal never fills late. */
   deadlineSeconds?: number;
+  /** What a launch pins its picture and metadata through (the Feast site's `/api/pin`); tests pass a fake. */
+  fetch?: typeof fetch;
 };
 
 export type PreparedBuy = { call: Call; info: CoinInfo; quotedOut: bigint; minOut: bigint; impactPct: number; sizeWei: bigint; payIn: "native" | "quote" };
@@ -340,12 +344,22 @@ export class Executor {
     }
   }
 
-  /** A launch: the existing SDK path (metadata pinned through the site unless a digest is given). */
-  async prepareLaunch(launch: { name: string; symbol: string; quote: string; description?: string; burn?: number; referrer?: number; metadataHash?: Hex }): Promise<Prepared<{ call: Call; predicted: Address; quote: Address }>> {
+  /**
+   * A launch: the existing SDK path (metadata pinned through the site unless a digest is given). A picture
+   * named on the request is read here and pinned only if its bytes are still the ones the card showed;
+   * without one, the SDK draws the ticker's identicon.
+   */
+  async prepareLaunch(launch: { name: string; symbol: string; quote: string; description?: string; burn?: number; referrer?: number; metadataHash?: Hex; image?: { path: string; sha256: string } }): Promise<Prepared<{ call: Call; predicted: Address; quote: Address }>> {
     try {
-      const feast = new FeastClient({ network: { ...this.deps.network, rpcUrl: this.deps.rpcUrl } });
+      let image: Uint8Array | undefined;
+      if (launch.image) {
+        const bytes = new Uint8Array(readFileSync(launch.image.path));
+        if (createHash("sha256").update(bytes).digest("hex") !== launch.image.sha256) return { ok: false, reason: "the launch picture is not the one the card showed (its sha256 differs): nothing was pinned" };
+        image = bytes;
+      }
+      const feast = new FeastClient({ network: { ...this.deps.network, rpcUrl: this.deps.rpcUrl }, fetch: this.deps.fetch });
       const prepared = await feast.prepareLaunch(
-        { name: launch.name, symbol: launch.symbol, quote: launch.quote, description: launch.description, burn: launch.burn, referrer: launch.referrer, metadataHash: launch.metadataHash },
+        { name: launch.name, symbol: launch.symbol, quote: launch.quote, description: launch.description, burn: launch.burn, referrer: launch.referrer, metadataHash: launch.metadataHash, image },
         this.deps.wallet,
       );
       return { ok: true, value: { call: { to: prepared.request.to, data: prepared.request.data, value: prepared.request.value }, predicted: prepared.predicted, quote: prepared.quote.address } };

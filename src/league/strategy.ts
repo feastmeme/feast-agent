@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { getAddress, isAddress, type Address } from "viem";
 
 import type { Intent } from "./guard.ts";
@@ -69,7 +70,7 @@ export type StrategyEvent =
 export type IntentRequest =
   | { kind: "buy"; coin: unknown; bnb: unknown; reason?: unknown }
   | { kind: "sell"; coin: unknown; fraction?: unknown; reason?: unknown }
-  | { kind: "launch"; name: unknown; symbol: unknown; quote?: unknown; description?: unknown; burn?: unknown; referrer?: unknown; reason?: unknown };
+  | { kind: "launch"; name: unknown; symbol: unknown; quote?: unknown; description?: unknown; burn?: unknown; referrer?: unknown; reason?: unknown; image?: unknown };
 
 export type Meta = { name: string; tickSeconds: number; events: ("coin.created" | "trade" | "price.move")[]; watch: string[] };
 
@@ -116,10 +117,18 @@ export function resolveCoin(snapshot: Pick<Snapshot, "feast">, coin: unknown): A
   return isAddress(coin, { strict: false }) ? getAddress(coin) : null;
 }
 
+/** A launch's picture on a request: a file on this machine and the sha256 of its bytes as the user's card showed them. */
+function launchImage(raw: unknown): { path: string; sha256: string } | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const { path, sha256 } = raw as { path?: unknown; sha256?: unknown };
+  return typeof path === "string" && isAbsolute(path) && typeof sha256 === "string" && /^[0-9a-f]{64}$/.test(sha256) ? { path, sha256 } : undefined;
+}
+
 /**
  * A strategy's request as an intent, or the reason it is not one. Shared by
  * presets and the script sandbox, so a script can set nothing a preset cannot:
- * no `fundedBy`, no source, no expiry of its own.
+ * no `fundedBy`, no source, no expiry of its own, and no file: a launch's
+ * picture is kept only on a manual request (`FL enter`'s), never a strategy's.
  */
 export function normalizeIntent(
   request: IntentRequest,
@@ -145,6 +154,7 @@ export function normalizeIntent(
     if (typeof request.name !== "string" || typeof request.symbol !== "string") return { error: "launch: name and symbol are text" };
     const quote = typeof request.quote === "string" ? request.quote : "WBNB";
     const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+    const image = ctx.source === "manual" ? launchImage(request.image) : undefined;
     return {
       intent: {
         id: nextId("launch", now),
@@ -156,6 +166,7 @@ export function normalizeIntent(
           description: typeof request.description === "string" ? request.description.slice(0, 280) : undefined,
           burn: num(request.burn),
           referrer: num(request.referrer),
+          ...(image ? { image } : {}),
         },
         ...base,
       },

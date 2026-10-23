@@ -197,6 +197,71 @@ export function parseLeague(body: unknown): LeagueRead | null {
   return read;
 }
 
+// --- the league entry's reads (task 960's routes, for `FL enter`) ---------------------------
+
+/** `GET /api/league/agent-id?wallet=`: the page's own read of the wallet's Agent ID and its coins. */
+export type PageAgentId =
+  | { state: "read"; wallet: string | null; agentId: string | null; coins: { coin: Address; launchedAt: number }[] | null }
+  /** 503, a timeout, or no answer at all: ask again in a few minutes. */
+  | { state: "unavailable"; reason: string }
+  /** Any other answer: not one this agent can read. */
+  | { state: "unreadable"; reason: string };
+
+/** `GET /api/league/assignment?wallet=`: today's coin (a row), why there is none yet (a status), no route yet, or no answer. */
+export type Assignment =
+  | { kind: "row"; day: string; wallet: string; coin: string; symbol: string; seed: string; assignedAt: string; source: string }
+  | { kind: "status"; day: string; status: "not-registered" | "no-table" | "before-cutoff"; reason: string }
+  | { kind: "missing"; status: number }
+  | { kind: "unreadable"; reason: string };
+
+/** `GET /api/league/avatar/<id>.png`, as it came: the agent decides whether to use it. */
+export type AvatarAnswer = { state: "answered"; status: number; contentType: string; bytes: Uint8Array; truncated: boolean } | { state: "unavailable"; reason: string };
+
+const ASSIGNMENT_STATUSES = ["not-registered", "no-table", "before-cutoff"] as const;
+const text = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
+
+export function parseAssignment(status: number, body: unknown): Assignment {
+  const b = (typeof body === "object" && body !== null ? body : null) as Record<string, unknown> | null;
+  if (b && typeof b.status === "string") {
+    if ((ASSIGNMENT_STATUSES as readonly string[]).includes(b.status)) return { kind: "status", day: text(b.day), status: b.status as (typeof ASSIGNMENT_STATUSES)[number], reason: text(b.reason) };
+    return { kind: "unreadable", reason: `an unknown status (HTTP ${status})` };
+  }
+  if (b && typeof b.assigned_coin === "string") {
+    return { kind: "row", day: text(b.day), wallet: text(b.wallet), coin: b.assigned_coin, symbol: text(b.symbol), seed: text(b.seed), assignedAt: text(b.assigned_at), source: text(b.source) };
+  }
+  if (status === 404) return { kind: "missing", status };
+  return { kind: "unreadable", reason: `HTTP ${status}, not an answer this agent knows` };
+}
+
+/** A body read up to `max` bytes and no further: a picture that is too big is known to be, without holding it. */
+async function readCapped(response: Response, max: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  if (!response.body) return { bytes: new Uint8Array(), truncated: false };
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    size += value.length;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      break;
+    }
+  }
+  const bytes = new Uint8Array(Math.min(size, max + 1));
+  let at = 0;
+  for (const part of parts) {
+    const take = part.subarray(0, Math.min(part.length, bytes.length - at));
+    bytes.set(take, at);
+    at += take.length;
+    if (at >= bytes.length) break;
+  }
+  return { bytes, truncated: size > max };
+}
+
+const isTransportError = (error: unknown) => !(error instanceof SyntaxError);
+
 // --- the client ----------------------------------------------------------------------------
 
 export class LeagueSite {
@@ -248,6 +313,84 @@ export class LeagueSite {
       return parseRegisterAnswer(response.status, parsed);
     } catch (error) {
       return { kind: "no-answer", reason: (error as Error).message };
+    }
+  }
+
+  /** One GET, asked again once if no answer came (a timeout, a refused connection); an answer, whatever its status, is never asked again. */
+  private async getOnce<T>(ask: () => Promise<T>): Promise<T> {
+    try {
+      return await ask();
+    } catch (error) {
+      if (!isTransportError(error)) throw error;
+      return ask();
+    }
+  }
+
+  private async getRaw(path: string): Promise<{ status: number; text: string; contentType: string }> {
+    const response = await this.fetchImpl(`${this.base}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(this.timeoutMs) });
+    return { status: response.status, text: await response.text(), contentType: response.headers.get("content-type") ?? "" };
+  }
+
+  /** The page's read of this wallet's Agent ID (task 960): `{ wallet, agentId, coins }`, or 503 `upstream-unavailable`. */
+  async agentIdOnPage(wallet: Address): Promise<PageAgentId> {
+    let got: { status: number; text: string };
+    try {
+      got = await this.getOnce(() => this.getRaw(`/api/league/agent-id?wallet=${wallet.toLowerCase()}`));
+    } catch (error) {
+      return { state: "unavailable", reason: (error as Error).message };
+    }
+    if (got.status === 503) return { state: "unavailable", reason: "HTTP 503" };
+    if (got.status !== 200) return { state: "unreadable", reason: `HTTP ${got.status}` };
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(got.text) as Record<string, unknown>;
+    } catch {
+      return { state: "unreadable", reason: "HTTP 200, not JSON" };
+    }
+    if (typeof body !== "object" || body === null || !("agentId" in body)) return { state: "unreadable", reason: "HTTP 200 without an agentId" };
+    const coins = Array.isArray(body.coins)
+      ? body.coins.flatMap((c: unknown) => {
+          const row = c as { coin?: unknown; launchedAt?: unknown };
+          const coin = addr(row?.coin);
+          return coin ? [{ coin, launchedAt: Date.parse(typeof row.launchedAt === "string" ? row.launchedAt : "") || 0 }] : [];
+        })
+      : null;
+    return { state: "read", wallet: typeof body.wallet === "string" ? body.wallet.toLowerCase() : null, agentId: typeof body.agentId === "string" ? body.agentId : null, coins };
+  }
+
+  /** Today's coin for this wallet (task 960). The body is read whatever the status: a 503 carries `no-table`. */
+  async assignment(wallet: Address): Promise<Assignment> {
+    let got: { status: number; text: string };
+    try {
+      got = await this.getOnce(() => this.getRaw(`/api/league/assignment?wallet=${wallet.toLowerCase()}`));
+    } catch (error) {
+      return { kind: "unreadable", reason: (error as Error).message };
+    }
+    let body: unknown = null;
+    try {
+      body = JSON.parse(got.text);
+    } catch {
+      body = null;
+    }
+    return parseAssignment(got.status, body);
+  }
+
+  /** The league's picture of an agent (task 960), read up to `maxBytes` (and one byte more, to know it is too big). */
+  async avatar(agentId: string, maxBytes: number): Promise<AvatarAnswer> {
+    try {
+      return await this.getOnce(async () => {
+        const response = await this.fetchImpl(`${this.base}/api/league/avatar/${agentId}.png`, { headers: { accept: "image/png" }, signal: AbortSignal.timeout(this.timeoutMs) });
+        const declared = Number(response.headers.get("content-length") ?? "");
+        const contentType = response.headers.get("content-type") ?? "";
+        if (response.status !== 200 || (Number.isFinite(declared) && declared > maxBytes)) {
+          await response.body?.cancel().catch(() => {});
+          return { state: "answered" as const, status: response.status, contentType, bytes: new Uint8Array(), truncated: response.status === 200 };
+        }
+        const { bytes, truncated } = await readCapped(response, maxBytes);
+        return { state: "answered" as const, status: response.status, contentType, bytes, truncated };
+      });
+    } catch (error) {
+      return { state: "unavailable", reason: (error as Error).message };
     }
   }
 

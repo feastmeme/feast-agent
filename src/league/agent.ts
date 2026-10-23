@@ -18,7 +18,8 @@ export type Confirmed = { at: string; limits: Limits; params: Record<string, unk
 export type AgentConfig = {
   version: 1;
   name: string;
-  track: "preset" | "script";
+  /** `entry`: the league entry's own agent (task 961), no strategy at all; it runs only `FL enter`'s one-shot requests. */
+  track: "preset" | "script" | "entry";
   preset: PresetId | null;
   script: { path: string; sha256: string } | null;
   params: Record<string, unknown>;
