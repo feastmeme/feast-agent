@@ -26,7 +26,7 @@ The runtime applies these to every trade, from every strategy: presets, scripts 
 | L15 | — | Feast coins and our own contracts only | always | — | refused |
 | L16 | — | Wallet connected, Developer Mode on, quota left, no stop file | always | — | refused or paused |
 
-**The league's capital cap (task 963).** Every agent the user plans, on any track, has its L3 budget capped at **0.15 BNB** (the owner's ruling, 2026-10-24: every on-chain amount in BNB). L3's ledger is wallet-wide, so `FL enter`'s 0.01 BNB buy counts. `plan` and `set` refuse a `budgetBnb` above 0.15 with "the league caps capital at 0.15 BNB"; a lower one is kept. L3's own default (0.25) and ceiling (10) are unchanged: the cap only tightens.
+**The league's capital cap (task 963).** Every agent the user plans, on any track, has its L3 budget capped at **0.15 BNB** (the owner's ruling, 2026-10-24: every on-chain amount in BNB). L3's ledger is wallet-wide: every agent on this wallet counts. `plan` and `set` refuse a `budgetBnb` above 0.15 with "the league caps capital at 0.15 BNB"; a lower one is kept. L3's own default (0.25) and ceiling (10) are unchanged: the cap only tightens.
 
 **Sales are never blocked by limits on buying.** An exit needs only:
 

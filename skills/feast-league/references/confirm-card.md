@@ -11,7 +11,7 @@
 ## What it contains
 
 - the preset, and what it will do, in one sentence (or, for a script: the file, the audit result and the warm-up, or "passed by FL script check"; in prompt mode: the prompt's path, its sha256 as 6+4 and its first three lines, and the autopilot or "none")
-- the league's capital cap: "Capital cap: 0.15 BNB, wallet-wide; FL enter's buy counts."
+- the league's capital cap: "Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts."
 - every parameter, marked **from your sentence** or **default**
 - the hard limits L1–L16
 - the cadence; in prompt mode instead, "the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call", and the autopilot preset's own tick while it trades
