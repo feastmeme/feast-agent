@@ -68,7 +68,9 @@ import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
 import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./script/check.ts";
 import { standingLines } from "./season-card.ts";
+import { readGate } from "./season-gate.ts";
 import { sessionView } from "./session.ts";
+import { prepareStart } from "./start.ts";
 import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
 import type { IntentRequest } from "./strategy.ts";
 
@@ -161,6 +163,9 @@ function detach(home: string, name: string, extra: string[] = []): number {
   child.unref();
   return child.pid ?? 0;
 }
+
+/** What `FL start` says of an agent that waits for the season (task 968). */
+const waitingLine = (name: string) => `"${name}" waits for the season: it trades nothing before it opens; feast-league status ${name} shows when`;
 
 async function waitForExit(home: string, name: string, seconds: number): Promise<boolean> {
   const until = Date.now() + seconds * 1_000;
@@ -289,54 +294,34 @@ async function main(argv: string[]): Promise<number> {
       const given = values["start-jitter"];
       if (given !== undefined && !(/^\d{1,3}$/.test(given) && Number(given) * 1_000 <= START_JITTER_MS)) throw new Error("--start-jitter is FL start's own: 0–120 whole seconds");
       const name = notEntry(need(args[0], "an agent name"));
-      let agent = loadAgent(home, name);
-      let replanned = false;
-      // start --prompt: plan first when there is no agent yet, or its prompt, autopilot, parameters or limits changed.
-      if (values.prompt !== undefined) {
-        if (command !== "start") throw new Error("--prompt goes with plan or start");
-        const planned = planAgent(planInput(name));
-        if (!planned.ok) {
-          print(json, { ok: false, errors: planned.errors }, () => `not planned:\n- ${planned.errors.join("\n- ")}`);
-          return 2;
-        }
-        const shape = (a: AgentConfig) => JSON.stringify([a.track, a.prompt ?? null, a.preset, a.autopilot ?? null, a.params, a.limits, a.tickSeconds]);
-        if (!agent || shape(agent) !== shape(planned.agent)) {
-          if (agent && statusOf(home, name).running) throw new Error(`agent "${name}" is running; stop it first (feast-league stop ${name}), then start it with the new prompt`);
-          saveAgent(home, planned.agent);
-          agent = planned.agent;
-          replanned = true;
-        }
-      }
-      if (!agent) throw new Error(`no agent "${name}": plan it first`);
+      if (values.prompt !== undefined && command !== "start") throw new Error("--prompt goes with plan or start");
       if (command === "resume") {
+        if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
         removeStop(agentPaths(home, name).stop);
         if (existsSync(join(home, "STOP"))) {
           if (!values.all) throw new Error("the global stop file is present too (feast-league stop --all wrote it); resume with --all to remove it");
           removeStop(join(home, "STOP"));
         }
       }
-      if (command !== "run" && !agent.confirmed) {
-        if (!values.yes) {
-          console.log(`${renderCard(agent, null, { warmupPassed: agent.track === "script" && scriptCheckPassed(home, agent.script!.sha256) })}\n\nNot started: this needs the user's explicit yes (--yes).`);
-          return 2;
-        }
-        if (replanned) console.log(`${renderCard(agent)}\n`);
-        agent = confirmAgent(agent);
-        saveAgent(home, agent);
-      }
-      if (agent.track === "prompt" && promptChanged(agent)) {
-        const why = `the prompt changed since you confirmed it (or is gone): feast-league start ${name} --prompt ${agent.prompt?.path ?? "<file>"} shows the new card`;
-        print(json, { ok: false, refused: why }, () => `not started: ${why}`);
+      // start --prompt: plan first when there is no agent yet, or its prompt, autopilot, parameters or limits changed.
+      const checked = prepareStart(home, name, { plan: values.prompt !== undefined ? planInput(name) : null, yes: values.yes === true, confirm: command !== "run" });
+      if (checked.kind === "not-planned") {
+        print(json, { ok: false, errors: checked.errors }, () => `not planned:\n- ${checked.errors.join("\n- ")}`);
         return 2;
       }
-      if (agent.track === "script") {
-        const why = auditRefusal(home, agent.script!.path);
-        if (why) {
-          print(json, { ok: false, refused: why }, () => `not started: ${why}`);
-          return 2;
-        }
+      if (checked.kind === "running") throw new Error(`agent "${name}" is running; stop it first (feast-league stop ${name}), then start it with the new prompt`);
+      if (checked.kind === "no-agent") throw new Error(`no agent "${name}": plan it first`);
+      if (checked.kind === "needs-yes") {
+        console.log(`${checked.card}\n\nNot started: this needs the user's explicit yes (--yes).`);
+        return 2;
       }
-      const extra = [...(values["max-runtime"] ? ["--max-runtime", values["max-runtime"]] : []), ...(values.poll !== undefined ? ["--poll", String(poll.seconds)] : []), ...(values.live ? ["--live"] : [])];
+      if (checked.kind === "refused") {
+        print(json, { ok: false, refused: checked.why }, () => `not started: ${checked.why}`);
+        return 2;
+      }
+      const agent = checked.agent;
+      if (checked.replanned && checked.confirmedNow) console.log(`${renderCard(agent)}\n`);
+      const extra = [...(values["max-runtime"] ? ["--max-runtime", values["max-runtime"]] : []), ...(values.poll !== undefined ? ["--poll", String(poll.seconds)] : []), ...(values.live ? ["--live"] : []), ...(values["no-jitter"] ? ["--no-jitter"] : [])];
       // FL start (and resume, which is a start) spreads the 20:00 start; `run` waits only what it is handed.
       const jitterMs = command === "run" ? Number(given ?? 0) * 1_000 : values["no-jitter"] ? 0 : drawStartJitter();
       const readsMarket = agent.track === "script" || (agent.preset !== null && agent.preset !== "launch");
@@ -355,6 +340,7 @@ async function main(argv: string[]): Promise<number> {
         const pid = detach(home, name, [...extra, ...(command === "resume" ? ["--clear-pause"] : []), ...(jitterMs > 0 ? ["--start-jitter", String(Math.ceil(jitterMs / 1_000))] : [])]);
         console.log(`started "${name}" in the background (pid ${pid}); feast-league status ${name}`);
         if (jitterLine) console.log(jitterLine);
+        if (agent.league?.waitForSeason) console.log(waitingLine(name));
         return 0;
       }
       if (jitterLine && command !== "run") console.log(jitterLine);
@@ -370,6 +356,7 @@ async function main(argv: string[]): Promise<number> {
         pollMs: poll.seconds * 1_000,
         live: values.live,
         startJitterMs: jitterMs,
+        noJitter: values["no-jitter"],
       });
       console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
       return outcome.exit === "error" ? 1 : outcome.exit === "refused" ? 2 : 0;
@@ -426,7 +413,11 @@ async function main(argv: string[]): Promise<number> {
         notifications: s.notifications,
         unread,
         league: league?.data ?? null,
+        // Task 968: an agent FL enter started waits for the season's opening.
+        season: s.agent.league?.waitForSeason ? (readGate(home, name) ?? { state: "waiting", opensAt: null, at: null }) : null,
       };
+      const gate = data.season;
+      const waiting = gate && gate.state === "waiting" ? [`waiting for the season (${gate.opensAt ? `opens ${utc8(Date.parse(gate.opensAt))} UTC+8` : "opens when feast.meme announces the start"}): it trades nothing before`] : [];
       const ago = (at: string | null) => (at ? `${duration(Date.now() - Date.parse(at), "en")} ago` : "never");
       const signed = (n: number) => `${n >= 0 ? "+" : ""}${Number(n.toPrecision(6))} BNB`;
       const selfLines = mine
@@ -447,6 +438,7 @@ async function main(argv: string[]): Promise<number> {
           `${name}: ${s.running ? "running" : "not running"}${s.stop ? ` (stop file: ${s.stop})` : ""}; ${s.agent!.track === "preset" ? `preset ${s.agent!.preset}` : s.agent!.track === "entry" ? "the league entry (FL enter)" : s.agent!.track === "prompt" ? "prompt mode" : "script"}`,
           `positions: ${data.positions.length ? data.positions.map((p) => `${p.symbol} ${p.costBnb} BNB${p.armed ? "" : " (exit not armed)"}`).join(", ") : "none"}`,
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
+          ...waiting,
           ...(data.paused ? [`paused: ${data.paused}`] : []),
           ...(data.warmup ? [`warm-up: ${data.warmup.trades >= 5 ? "done" : `${data.warmup.trades} of 5 trades`}`] : []),
           ...selfLines,
