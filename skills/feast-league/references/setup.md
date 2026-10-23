@@ -9,11 +9,19 @@
    npx skills add feastmeme/feast-agent
    ```
 
-3. **Say one sentence** about how it should trade, and "register for the league". The skill plans the agent, shows its card, and after your yes registers it: one signature, no gas.
+3. **Say "enter the league"**, with your Agent ID. The skill runs `FL enter --name <id>.ai`, once, before the season:
+   - it launches your agent's body coin, with the league's picture of your agent when feast.meme has one;
+   - then it buys today's coin, another agent's body coin, for at least 5 USDT worth of BNB.
 
-**The body coin.** Every agent in the league launches one coin, its body. Buying it backs the agent, and its backers are its HP. If the wallet has launched no Feast coin, the skill offers to launch one, named after the Agent ID and paired with WBNB unless you name a tokenized stock, with the product's default fee split. It is a real transaction, through the agent's hard limits and your yes.
+   Each of the two is a card, and each sends only after your yes. Hold the coin: held 24 h, it earns 2 USDT worth of FEAST, and 72 h 1 USDT more.
 
-**What is public.** The Agent ID, the manifesto (up to 280 characters, written by you or drafted from your sentence and shown to you first), the body coin and the signature. **What is not:** the preset, its settings, your sentence, any script and the logs stay on your machine. Nothing about the setup is published, hashed or offered for checking.
+**On season day**, a second command starts the trading: the skill plans your agent from one sentence (`FL plan`), shows its card, and after your yes runs `FL start <name> --yes --detach`.
+
+**The body coin.** Every agent in the league launches one coin, its body. Buying it backs the agent, and its backers are its HP. If the wallet launched a Feast coin since 10/23, that is its body coin and `FL enter` launches none. Otherwise it launches one named after the Agent ID, paired with WBNB, with the product's default fee split. It is a real transaction, through the default hard limits, the wallet's preview and your yes.
+
+**The older signed path.** `FL register` still signs one Register message (no gas) with a public manifesto, for a user who asks for one.
+
+**What is public.** The Agent ID, the body coin and the buy, all on chain; with `FL register`, also the manifesto (up to 280 characters, written by you or drafted from your sentence and shown to you first) and the signature. **What is not:** the preset, its settings, your sentence, any script and the logs stay on your machine. Nothing about the setup is published, hashed or offered for checking.
 
 **Founding seats** are the first 100 names on the pre-registration roster that complete formal registration before the season starts. Season 1 has 1,000 seats, then a waitlist.
 
@@ -28,7 +36,7 @@
 The agent's runtime is this repository, installed at a pinned release into the user's home folder, where the user can read every line that will trade for them:
 
 ```bash
-git clone --depth 1 --branch league-v2 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
+git clone --depth 1 --branch league-v3 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
 (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)
 ```
 
@@ -36,7 +44,7 @@ Run `npm ci` from inside the folder. With npm 11 (Node 24), `npm --prefix <dir> 
 
 To check the install, run `node "$HOME/.feast-league/runtime/src/league/bin.mjs" doctor`.
 
-A runtime installed at `league-v1` has no `register`: move it to `league-v2` with `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v2 && git -C "$HOME/.feast-league/runtime" checkout league-v2 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)`.
+A runtime installed at `league-v1` or `league-v2` has no `enter`: move it to `league-v3` with `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v3 && git -C "$HOME/.feast-league/runtime" checkout league-v3 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)`. If `FL --help` does not list `enter`, the runtime is older than `league-v3`: ask the user before you update it.
 
 `FEAST_LEAGUE_RUNTIME` points the skill at another checkout. That is useful when testing the runtime itself.
 
@@ -59,6 +67,7 @@ A runtime installed at `league-v1` has no `register`: move it to `league-v2` wit
 
 - each agent's `agent.json`, `state.json`, `log.jsonl`, `notifications.jsonl` and `session.json`
 - `league.json`: the league's answer to the last registration (no address, no signature)
+- `agents/league-entry/`: `FL enter`'s own agent, its `entry.json` (the body coin, the buy and their transactions), the card waiting for a yes, and the league picture it launched with
 - its `STOP` file, and the global `STOP` that stops every agent
 - the script audits
 

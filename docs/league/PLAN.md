@@ -764,3 +764,50 @@ The questions as they were put:
 | Q4 | The wallet's `market-order swap` route (MEV-protected, no Developer Mode needed) for DCA on established coins in v1 | no: `contract-call` only in v1, one gate |
 | Q5 | Demonstration B sells (a round trip), proving the exit path live; and the preview-only checks of §8.2 | yes to both: under 0.001 BNB of fees, and previews send nothing |
 | Q6 | Ask the indexer side for a short cache TTL at the head of `/v1/events`, or a push endpoint | yes, as a separate indexer task; v1 polls |
+
+---
+
+## 13. The league entry: `FL enter` (task 961, `league-v3`)
+
+Entering the league is one command, run once before the season: `FL enter --name <id>.ai [--yes] [--lang en|zh] [--json]`. It launches the body coin and buys today's coin, then exits. Trading starts on season day with the ordinary track (`FL plan`, then `FL start <name> --yes --detach`). The code is `src/league/enter/` (`flow.ts`, `copy.ts`, `constants.ts`); `cli.ts` only wires it.
+
+### 13.1 The state machine
+
+Each run goes through the stages in order and stops at the first that is not done. Exit 0 is done, already done, or "come back at <time>"; 1 is a read that failed; 2 needs the user's yes, or was refused.
+
+| Stage | Reads | Stops with |
+| --- | --- | --- |
+| name | `--name`: `<id>` or `<id>.ai`, `^[a-z0-9]{1,64}$` | 2: missing or malformed |
+| busy | the wallet lock | 2: another agent is running on this wallet. Its inbox is never written. |
+| entered | `agents/league-entry/entry.json` | 0: a buy of at least 5 USDT at or after the step-1 open is recorded. Nothing else is asked. |
+| wallet, agent-id | `baw` status, settings and address; `handleOf` on the registry | 2: signed out, Developer Mode off, no Agent ID, or the chain's id is not `--name`. 1: the Agent ID unreadable. |
+| eligibility | `GET /api/league/agent-id?wallet=` | 1: a 503 or no answer. 2: the page has no id, another id, or another wallet. |
+| unresolved | league-entry's book | 1: a launch or a buy whose outcome is still unknown after a resolve-only one-shot |
+| body coin | the book's launch; else `/v1/creators`, coins since `BODY_SINCE` (2026-10-23T00:00Z), each confirmed with `creatorOf` | 1: the indexer or the chain could not answer, or a coin of this wallet has no launch time. Never a launch on an unreadable read. |
+| launch card | `GET /api/league/avatar/<id>.png` | 2: the card, pending |
+| wait | the clock | 0: before `STEP1_OPEN` (2026-10-24T12:00Z), with the time it opens |
+| assignment | `GET /api/league/assignment?wallet=` | 0: `not-registered` (+10 min), `before-cutoff` (+5), `no-table` (+60), a 404 (+60). 1: another wallet's row, a coin that is not an address, not a Feast coin, or this wallet's own. |
+| buy card | `bnbUsd()`, `refuseEarly` | 2: a limit refuses 5.10 USDT worth (`refused by L1: …`); else the card, pending |
+| bought | the one-shot | 0: the hash, the hold line, the season-day line |
+
+**One card at a time.** A run without `--yes` prints the next card and writes `pending.json`: `{ stage, digest, at }`, with the coin and amount for a buy. `digest` is the sha256 of the card's facts: the names, the split, the picture's sha256, the coin, the amount and the slippage. A run with `--yes` acts only if `pending.json` is at most 10 minutes old and its digest is the card it would print now. Otherwise it prints the fresh card and exits 2. The buy card keeps the amount it showed while that amount still buys 5 USDT, so a small move of the BNB price is not a new card. One `--yes` never covers a card the user has not seen: after a launch, the buy card is printed and left pending.
+
+**The picture.** It is used only on a 200 with `content-type: image/png`, the PNG signature, and at most 262,144 bytes (read no further than that). It is saved as `agents/league-entry/avatar.png` and travels as `image: { path, sha256 }` on the launch request. `normalizeIntent` keeps it only for `source: "manual"`, and `Executor.prepareLaunch` refuses bytes whose sha256 differs. Otherwise the ticker's identicon is used, with one line saying why.
+
+### 13.2 The `league-entry` agent
+
+- `FL enter` writes it on its first card: `track: "entry"`, no preset, no script, the default limits. The user's yes on the first card it acts on confirms it.
+- The runtime's loop refuses `track: "entry"`. `plan`, `start`, `resume`, `run` and `set` refuse the name. `stop --all` leaves its folder alone: the global stop file halts it, and nothing could clear its own.
+- The one-shot (`runAgent({ only })`) now runs before any strategy is loaded or its poller started. With no requests it only asks about earlier unknown outcomes; with requests it asks about those first. A buy is followed by the usual arm (up to two approvals).
+
+### 13.3 The limits, unchanged
+
+`limits.ts` and `guard()`'s logic are as they were at `0ae9af5`; `limits.pinned.test.ts` holds every default and range. `Intent.launch` gained one optional field, a type. The entry runs through `refuseEarly` (now `early.ts`) and the one-shot, like `FL buy` and `FL launch`. The wallet ledger stays wallet-wide, so the entry's spend counts against L3's 0.25 BNB.
+
+### 13.4 What a real entry sends
+
+- The launch: one transaction (`create` on the factory), after two pins (the picture, then the metadata), each with a 30 s timeout.
+- The buy: one transaction through the Universal Router.
+- The arm: up to two (`approve` Permit2, then Permit2's allowance for the router).
+
+Each is previewed by the wallet. No message is signed. No file in the home holds the wallet's address.

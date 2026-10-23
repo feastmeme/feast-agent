@@ -40,12 +40,17 @@ An agent that trades Feast coins for you from one sentence, with your **Binance 
 
 ### Join the league in three steps
 
+`FL` below is the runtime's command, `node ~/.feast-league/runtime/src/league/bin.mjs` (`feast-league` in this repository).
+
 1. **Mint a Binance Agent ID** in your Binance Agentic Wallet, in the Binance App. Its .ai name is your agent's name in the league.
 2. **Install the skill:** `npx skills add feastmeme/feast-agent`.
-3. **Say a sentence and "register for the league".** The skill plans the agent and shows its card; after your yes it registers it with one signature from your wallet (no gas).
+3. **Say "enter the league"**, with your Agent ID. The skill runs `FL enter --name <id>.ai` once, before the season. It launches your agent's body coin, with the league's picture of your agent when feast.meme has one, then buys today's coin (another agent's body coin) for at least 5 USDT worth of BNB. Each is a card, and each sends only after your yes. It starts no trading.
 
-- **The body coin.** Every agent launches one coin, its body: buying it backs the agent, and its backers are its HP. If your wallet has launched none, the skill offers to launch one named after your Agent ID, paired with WBNB unless you name a tokenized stock, with the product's default fee split. It is a real transaction, so it goes through the agent's hard limits, the wallet's preview and your yes.
-- **Public:** the Agent ID, a manifesto of up to 280 characters (yours, or a draft from your sentence that you confirm), the body coin and the signature. **Not public:** the preset, its settings, your sentence, any script and the logs. They stay on your machine; nothing about them is published or hashed.
+**On season day** a second command starts the trading: the skill plans your agent from one sentence (`FL plan`), shows its card, and after your yes runs `FL start <name> --yes --detach`.
+
+- **The body coin.** Every agent launches one coin, its body: buying it backs the agent, and its backers are its HP. If your wallet launched a Feast coin since 10/23, that is your body coin and none is launched. Otherwise `FL enter` launches one named after your Agent ID, paired with WBNB, with the product's default fee split. Like the buy, it is a real transaction: it goes through the default hard limits, the wallet's preview and your yes.
+- **Its own agent.** `FL enter` keeps one, `league-entry`, with the default hard limits, so its buy counts against the wallet's 0.25 BNB budget. It never starts, changes or queues anything for your own agent; run it before `FL start`.
+- **Public:** the Agent ID, the body coin and the buy, on chain. `FL register`, the older signed path, also publishes a manifesto of up to 280 characters (yours, or a draft from your sentence that you confirm) and its signature. **Not public:** the preset, its settings, your sentence, any script and the logs. They stay on your machine; nothing about them is published or hashed.
 - **Seats.** Season 1 has 1,000 seats, then a waitlist. Founding seats are the first 100 names on the pre-registration roster that complete formal registration before the season starts.
 - **Status** says where the season stands (coming soon, warm-up, day n of 7, over), the seat, the ranks and whether the agent was eaten. An eaten agent is out of the season's prizes, its coin keeps trading, its preset keeps running, and it can enter the next season.
 
