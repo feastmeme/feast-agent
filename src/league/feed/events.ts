@@ -11,10 +11,13 @@ import type { FeastSnapshot } from "./snapshot.ts";
  * passes on the events strictly after it, in `(block, logIndex)` order, and the position moves to the snapshot's
  * end; it never moves back, so a snapshot served twice, or an older copy after a newer one, passes nothing twice.
  *
- * A gap is any span between the position and the start of the snapshot's tail (`fromCursor`, ruling C1). One
+ * A gap is any span between the position and the start of the snapshot's tail. The site (task 966) gives that
+ * start exactly as `afterCursor`, exclusive: there is a gap only when the position is before it. A snapshot with
+ * only `fromCursor` (the FIRST event the tail includes) may have a gap when the position is before that event. One
  * under 120 s is filled with one legacy page, at most every 30 s; one that starts further back is not, since the
- * runtime's freshness filter would drop those events anyway. Without `fromCursor` a gap cannot be told from a
- * quiet spell: it is never filled, and said once a run.
+ * runtime's freshness filter would drop those events anyway. A snapshot whose inline tail was cut (`truncated`,
+ * with `events_url`) is not filled from the legacy route: the feed reads the whole tail there instead (`feed.ts`).
+ * With neither cursor a gap cannot be told from a quiet spell: it is never filled, and said once a run.
  */
 
 export type Position = { b: number; i: number };
@@ -94,7 +97,27 @@ export class EventStream {
     this.posCursor = null;
   }
 
-  async take(snapshot: FeastSnapshot): Promise<LeagueEvent[]> {
+  /** Where a snapshot's tail starts: `afterCursor` exclusive, else `fromCursor` inclusive; null when it says neither. */
+  private startOf(snapshot: FeastSnapshot): { at: Position; inclusive: boolean } | null {
+    const after = decodeCursor(snapshot.afterCursor);
+    if (after) return { at: after, inclusive: false };
+    const from = decodeCursor(snapshot.fromCursor);
+    return from ? { at: from, inclusive: true } : null;
+  }
+
+  /** Whether events between the position and this snapshot's tail may be missing. */
+  private gapBefore(snapshot: FeastSnapshot): boolean {
+    const start = this.startOf(snapshot);
+    return this.pos !== null && start !== null && comparePosition(this.pos, start.at) < 0;
+  }
+
+  /** A cut tail (`truncated`, `events_url`) that does not reach back to the position: the whole tail is wanted. */
+  needsTail(snapshot: FeastSnapshot): boolean {
+    return snapshot.truncated && snapshot.eventsUrl !== null && this.gapBefore(snapshot);
+  }
+
+  /** `fill: false`: a gap is said, never filled from the legacy route (a cut tail, or the whole tail already read). */
+  async take(snapshot: FeastSnapshot, options: { fill?: boolean } = {}): Promise<LeagueEvent[]> {
     const now = this.o.now();
     const rows = snapshot.events.flatMap((raw) => {
       const at = positionOf(raw);
@@ -114,15 +137,18 @@ export class EventStream {
     if (end && comparePosition(end, pos) < 0) return [];
 
     let filled: { raw: Raw; at: Position }[] = [];
-    const from = decodeCursor(snapshot.fromCursor);
-    if (snapshot.fromCursor === null) {
+    const start = this.startOf(snapshot);
+    if (start === null) {
       if (!this.unknownSaid) {
         this.unknownSaid = true;
-        this.o.log("events.gap.unknown", { why: "the snapshot carries no fromCursor: a gap cannot be told from a quiet spell, and events between two snapshots may be missed" });
+        this.o.log("events.gap.unknown", { why: "the snapshot carries neither afterCursor nor fromCursor: a gap cannot be told from a quiet spell, and events between two snapshots may be missed" });
       }
-    } else if (from && comparePosition(pos, from) < 0) {
+    } else if (comparePosition(pos, start.at) < 0) {
       const ageMs = now - this.posAt;
-      if (ageMs > FRESH_MS) this.o.log("events.gap", { filled: 0, ageMs, why: "the gap starts more than 120 s back" });
+      // Inside the gap: after the position, and up to the tail's start (itself, when it is the exclusive afterCursor).
+      const inGap = (at: Position) => comparePosition(at, pos) > 0 && (start.inclusive ? comparePosition(at, start.at) < 0 : comparePosition(at, start.at) <= 0);
+      if (options.fill === false) this.o.log("events.gap", { filled: 0, ageMs, why: snapshot.eventsUrl !== null ? "the whole tail could not be read" : "older than the whole tail" });
+      else if (ageMs > FRESH_MS) this.o.log("events.gap", { filled: 0, ageMs, why: "the gap starts more than 120 s back" });
       else if (!this.o.fill || now - this.lastFill < FILL_EVERY_MS || this.posCursor === null) this.o.log("events.gap", { filled: 0, ageMs, why: "at most one fill every 30 s" });
       else {
         this.lastFill = now;
@@ -131,7 +157,7 @@ export class EventStream {
         else {
           filled = page.flatMap((raw) => {
             const at = positionOf(raw);
-            return at && comparePosition(at, pos) > 0 && comparePosition(at, from) <= 0 ? [{ raw, at }] : [];
+            return at && inGap(at) ? [{ raw, at }] : [];
           });
           this.o.log("events.gap", { filled: filled.length, ageMs });
         }
