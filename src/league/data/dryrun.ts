@@ -11,9 +11,12 @@
  * The steps: `FL start demo --prompt docs/prompts/momentum.md` (the card),
  * then with `--yes`; `FL data demo --since 24h --json`; a decision written by
  * hand, as the host would make it; `FL buy demo <stub coin> 0.002`; `FL note …
- * --tx <the stub hash>`, kept and then sent; and `FL script check` on a passing
- * and a failing stub script. It prints a markdown transcript, every address
- * abbreviated 6+4 and every local path replaced.
+ * --tx <the stub hash> --model claude`, kept with no session; `FL note --login`
+ * (a throwaway key, generated here and never funded, signs the NoteSession);
+ * the note sent with its bearer token, after a 404 and then a 201; and
+ * `FL script check` on a passing and a failing stub script. It prints a
+ * markdown transcript, every address abbreviated 6+4 and every local path
+ * replaced.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -21,18 +24,22 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Address } from "viem";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import { confirmAgent, loadAgent, planAgent, saveAgent } from "../agent.ts";
 import { auditFile, auditRefusal, recordModelVerdict } from "../audit/verdict.ts";
 import { renderCard } from "../card.ts";
+import { BawSigner } from "../baw.ts";
 import { flushNotes, noteCommand, readNotes } from "../notes/queue.ts";
-import { tradeWorld, WALLET } from "../prompt/fakes.ts";
+import { notesLogin, readSession } from "../notes/session.ts";
+import { tradeWorld } from "../prompt/fakes.ts";
 import { recordHostAction } from "../prompt/host.ts";
 import { outcomeLine, sendRequest, waitForOutcome } from "../prompt/inbox.ts";
-import { leagueWire } from "../register/fakes.ts";
+import { fakeBaw, leagueWire } from "../register/fakes.ts";
+import { LeagueSite } from "../register/site.ts";
 import { runAgent } from "../runtime.ts";
 import { checkLines, checkScript, writeCheckReport } from "../script/check.ts";
-import { agentPaths, writeStop } from "../store.ts";
+import { agentPaths, writeJsonAtomic, writeStop } from "../store.ts";
 import { dataFace, type FaceChain } from "./face.ts";
 import { C1, C2, C3, OWN, pool, SQRT_LOW, WBNB } from "./fakes.ts";
 
@@ -41,6 +48,9 @@ const PROMPT = join(REPO, "docs/prompts/momentum.md");
 const NOW = Date.now();
 const HOUR = 3_600_000;
 const home = mkdtempSync(join(tmpdir(), "feast-league-963-dryrun-"));
+// A throwaway key, generated for this run and never funded: the wallet that trades (against the fakes) and signs the NoteSession.
+const ACCOUNT = privateKeyToAccount(generatePrivateKey());
+const WALLET = ACCOUNT.address;
 const out: string[] = [];
 const say = (...lines: string[]) => out.push(...lines);
 /** Addresses and hashes 6+4, local paths named. */
@@ -57,6 +67,8 @@ const block = (text: string, lang = "") => say(`\`\`\`${lang}`, shown(text), "``
 // --- feast.meme's routes, stubbed on 127.0.0.1 ---------------------------------------------------
 const asked: string[] = [];
 let notesAnswer = 404;
+const sessionsAsked: unknown[] = [];
+const authorizations: (string | null)[] = [];
 const hour = (t: number) => Math.floor(t / HOUR) * HOUR;
 // MOMO's hourly sqrt prices: a slow climb for a day, then a jump in the last hour.
 const sqrts = Array.from({ length: 30 }, (_, i) => (SQRT_LOW * BigInt(1_000 + 5 * Math.min(i, 28))) / 1_000n * (i === 29 ? 106n : 100n) / 100n);
@@ -101,8 +113,17 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   if (req.method === "GET" && url.pathname === "/api/v1/ohlcv") return json(200, { asOf: null, poolId: null, coin: url.searchParams.get("coin"), timeframe: "hour", aggregate: 1, rows: url.searchParams.get("coin") === C1.toLowerCase() ? rising : [] });
   if (req.method === "GET" && url.pathname === "/api/league") return json(200, league);
   if (req.method === "POST" && url.pathname === "/api/league/notes") {
+    authorizations.push(typeof req.headers.authorization === "string" ? req.headers.authorization : null);
     req.resume();
     return req.on("end", () => json(notesAnswer, notesAnswer === 201 ? { ok: true } : { error: "not-found" }));
+  }
+  if (req.method === "POST" && url.pathname === "/api/league/notes/session") {
+    let body = "";
+    req.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")));
+    return req.on("end", () => {
+      sessionsAsked.push(JSON.parse(body));
+      json(201, { token: "stub-session-token-0001", expiresAt: new Date(NOW + 7 * 24 * HOUR).toISOString(), season: 1 });
+    });
   }
   json(404, { error: "not-found" });
 });
@@ -110,7 +131,7 @@ await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 const SITE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 // --- the fake wallet and chain ---------------------------------------------------------------------------
-const world = tradeWorld({ coin: C1, symbol: "MOMO" });
+const world = tradeWorld({ coin: C1, symbol: "MOMO", wallet: WALLET });
 const ids: Record<string, string | null> = { "0x000000000000000000000000000000000000b0b0": "bobagent", "0x000000000000000000000000000000000000ca01": null, [WALLET.toLowerCase()]: "demo" };
 const chain = {
   ...(world.chain as unknown as Record<string, unknown>),
@@ -125,7 +146,7 @@ const face = () => dataFace({ home, site: SITE, indexer: SITE, fetch, chain, wal
 let running: Promise<unknown> | null = null;
 try {
   say("# Prompt mode: the dry run (task 963)", "");
-  say(`Run ${new Date(NOW).toISOString()} with \`npx tsx src/league/data/dryrun.ts\`: the real code of each command, a made-up wallet (${shown(WALLET)}) and Agent ID (\`demo\`), the fake signer and chain of \`src/league/prompt/fakes.ts\`, feast.meme's routes stubbed on 127.0.0.1, and a throwaway home. Nothing reached a network, a wallet or a chain; nothing was signed, launched or bought. Addresses and hashes are abbreviated 6+4.`, "");
+  say(`Run ${new Date(NOW).toISOString()} with \`npx tsx src/league/data/dryrun.ts\`: the real code of each command, a made-up wallet (${shown(WALLET)}) and Agent ID (\`demo\`), the fake signer and chain of \`src/league/prompt/fakes.ts\`, feast.meme's routes stubbed on 127.0.0.1, and a throwaway home. Nothing reached a network, a wallet or a chain; nothing was launched or bought. The one signature (the NoteSession, step 6) is made by a throwaway key generated for this run, never funded, through the fake wallet of \`src/league/register/fakes.ts\`. Addresses and hashes are abbreviated 6+4.`, "");
 
   // 1. The card.
   say("## 1. `FL start demo --prompt docs/prompts/momentum.md`", "");
@@ -176,13 +197,24 @@ try {
   // 6. The note.
   const tx = world.hashes[0]!;
   const text = `MOMO: last hour +${lastHour}%, ${row.holders} holders, ${row.volume24hBnb} BNB of 24 h volume; out at -20% or when the hour fades`;
-  say(`## 6. \`FL note demo "${text}" --tx ${shown(tx)}\``, "");
-  const kept = await noteCommand({ home, name: "demo", site: SITE, fetch, wallet: async () => WALLET }, { text, tx });
+  say(`## 6. \`FL note demo "${text}" --tx ${shown(tx)} --model claude\``, "");
+  const kept = await noteCommand({ home, name: "demo", site: SITE, fetch, wallet: async () => WALLET, dev: false }, { text, tx, model: "claude" });
   block(kept.text, "text");
-  say(`Exit ${kept.code}: the stub's notes route answered 404, as feast.meme's does until task 964 ships it. Then the route answers 201, and the next flush (the one \`FL data\`, \`FL note\` or the runtime's safety pass makes) sends it:`, "");
+  say(`Exit ${kept.code}: no notes session is open on this machine yet, so nothing was posted. (In a real round, \`FL enter\` opens it under the launch's yes.)`, "");
+  // As FL enter leaves the home: the Agent ID and the body coin on record.
+  writeJsonAtomic(join(agentPaths(home, "league-entry").dir, "entry.json"), { agentId: "demo", bodyCoin: OWN, launchTx: null, notes: null });
+  say("### `FL note --login`", "");
+  const login = await notesLogin({ home, signer: new BawSigner(fakeBaw({ account: ACCOUNT }).runner), site: new LeagueSite(SITE, fetch), env: {} });
+  block(login.text, "text");
+  const session = readSession(home)!;
+  block(JSON.stringify({ asked: sessionsAsked.map((b) => ({ ...(b as Record<string, unknown>), signature: "<65 bytes>" })), kept: { ...session, token: `${session.token.slice(0, 6)}…` } }, null, 2), "json");
+  say(`Exit ${login.code}. One EIP-712 NoteSession, signed through the wallet's own preview (the throwaway key), sent to the stub's \`/api/league/notes/session\`, which answered a token; the token is kept in \`notes-session.json\`, with no address in it.`, "");
+  say("### The next flush, with the session", "");
+  const first = await flushNotes(home, "demo", WALLET, { site: SITE, fetch, dev: false });
   notesAnswer = 201;
-  const flushed = await flushNotes(home, "demo", WALLET, { site: SITE, fetch });
-  block(JSON.stringify({ flushed, notes: readNotes(home, "demo") }, null, 2), "json");
+  const second = await flushNotes(home, "demo", WALLET, { site: SITE, fetch, dev: false });
+  block(JSON.stringify({ first, second, authorization: authorizations.map((a) => (a ? `${a.slice(0, 13)}…` : null)), notes: readNotes(home, "demo") }, null, 2), "json");
+  say("The stub's notes route answered 404 first, as feast.meme's does until task 964 ships it: the note stayed queued. Then it answered 201, and the flush (the one `FL data`, `FL note` or the runtime's safety pass makes) sent it, with `Authorization: Bearer <token>`.", "");
 
   // 7. The book, after.
   say("## 7. `FL data demo --since 24h` after the trade (human output)", "");
@@ -216,7 +248,7 @@ try {
 
   say("## Where it stopped", "");
   say("- Step 1 stopped at the card, exit 2, for the user's yes. Step 2 confirmed it and started the runtime in this process, on the fake wallet.");
-  say("- The buy filled against the fake signer and chain: no transaction exists. The note was kept (404), then sent to the stub (201).");
+  say("- The buy filled against the fake signer and chain: no transaction exists. The note waited for a session, `FL note --login` opened one against the stub, and the note was kept (404), then sent (201) with its bearer token.");
   say("- The runtime stopped on its stop file after step 7. The throwaway home was deleted after the run.", "");
   say(`Every request the stub served: ${asked.length}.`, "");
   for (const a of asked) say(`- \`${shown(a)}\``);

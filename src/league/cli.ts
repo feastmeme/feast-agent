@@ -22,6 +22,7 @@ import { refuseEarly } from "./early.ts";
 import { Executor } from "./executor.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
 import { noteCommand } from "./notes/queue.ts";
+import { notesLogin, recordedAgentId } from "./notes/session.ts";
 import { PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { promptChanged, recordHostAction, within } from "./prompt/host.ts";
 import { outcomeLine, sendRequest, waitForOutcome } from "./prompt/inbox.ts";
@@ -59,7 +60,7 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
-import { enter, entryOneShot } from "./enter/flow.ts";
+import { enter, entryOneShot, readEntry } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
@@ -95,13 +96,17 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   data [<name>] [--since 24h|90m|7d|<iso>] [--coin 0x…] [--json]
                                   every Feast coin in BNB, the agent's book and PnL in BNB, the league's clock and boards;
                                   with --since, hourly history. Reads only
-  note <name> "<text>" [--tx 0x…] one reason, at most 280 characters: kept here, sent to feast.meme when it takes notes
+  note <name> "<text>" [--tx 0x…] [--model grok|codex|claude|other]
+                                  one reason, at most 280 characters, and the AI that wrote it (default: the host's hint,
+                                  else other): kept here, sent to feast.meme with the season's notes session
+  note --login                    open the season's notes session: one signed message (no gas), its token kept here
   buy <name> <coin|FEAST> <bnb> [--no-wait]
                                   one guarded buy, through the agent's limits; into a running agent it waits up to 90 s
                                   for the outcome (filled: exit 0; refused: exit 2)
   sell <name> <coin|FEAST> <fraction|all> [--no-wait]
   enter --name <id>.ai [--yes] [--lang en|zh] [--json]
-                                  the league entry, once: launch the body coin and buy today's coin; never starts trading
+                                  the league entry, once: launch the body coin, and open the notes session (one signed
+                                  message, under the same yes); nothing is bought, and it never starts trading
                                   (--name is the wallet's Agent ID here; each card needs its own --yes)
   register <name> --check [--body-coin 0x…] [--lang en|zh]
                                   the league registration check: Agent ID, body coin, seat (reads only)
@@ -200,6 +205,8 @@ async function main(argv: string[]): Promise<number> {
       since: { type: "string" },
       tx: { type: "string" },
       "no-wait": { type: "boolean", default: false },
+      model: { type: "string" },
+      login: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -530,11 +537,20 @@ async function main(argv: string[]): Promise<number> {
       return result.code;
     }
     case "note": {
+      const signer = signerFor(home, null);
+      const site = new LeagueSite(siteFromEnv());
+      const login = () => notesLogin({ home, signer, site, chain: new LeagueChain(MAINNET, rpc()), signOptions: { onPending: () => process.stderr.write("Confirm the notes signature in the Binance App; waiting up to 10 minutes.\n") } }, langOf(values.lang));
+      if (values.login) {
+        const out = await login();
+        print(json, out.data, () => out.text);
+        return out.code;
+      }
       const name = notEntry(checkAgentName(need(args[0], "an agent name")));
       if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
       if (args[1] === undefined) throw new Error('missing the note\'s text: feast-league note <name> "<text>"');
-      const signer = signerFor(home, null);
-      const out = await noteCommand({ home, name, site: siteFromEnv(), fetch, wallet: () => signer.address() }, { text: args[1], tx: values.tx });
+      // A 401 opens the session again, once, here only: a background flush never signs.
+      const relogin = async () => (await login()).code === 0;
+      const out = await noteCommand({ home, name, site: siteFromEnv(), fetch, wallet: () => signer.address(), relogin }, { text: args[1], tx: values.tx, model: values.model });
       print(json, out.data, () => out.text);
       return out.code;
     }
@@ -604,7 +620,9 @@ async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string
   const site = new LeagueSite(siteFromEnv(), fetch, 8_000);
   const me = await Promise.race([signerFor(home, null).address(), new Promise<null>((r) => setTimeout(() => r(null), 5_000))]).catch(() => null);
   const record = readLeagueRecord(home);
-  let agentId = record?.agentId ?? null;
+  // An entry by FL enter alone (no registration) is in the league too.
+  const entered = Boolean(readEntry(home)?.bodyCoin);
+  let agentId = record?.agentId ?? recordedAgentId(home);
   let seating = record?.seating ?? null;
   const kept = me ? await site.kept(me) : null;
   if (kept?.state === "read" && kept.agent) {
@@ -613,7 +631,7 @@ async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string
   }
   const today = await site.league("today", me);
   const season = today && (today.state === "season" || today.state === "over") ? await site.league("season", me) : null;
-  const lines = standingLines({ agentId, seating, today, season, now: Date.now() }, lang);
+  const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered }, lang);
   // The page's own rows, without the wallet's address: printed output keeps the home's rule.
   const own = today?.me ? { earners: today.me.earners ? { ...today.me.earners, wallet: undefined } : null, backed: today.me.backed ? { ...today.me.backed, wallet: undefined } : null, eaten: today.me.eaten } : (today?.me ?? null);
   return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own } };
@@ -623,7 +641,14 @@ async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string
 async function enterCommand(home: string, values: Values, json: boolean): Promise<number> {
   const signer = signerFor(home, ENTRY_AGENT);
   const result = await enter(
-    { home, signer, chain: new LeagueChain(MAINNET, rpc()), site: new LeagueSite(siteFromEnv()), oneShot: entryOneShot({ home, signer, rpcUrl: rpc() }) },
+    {
+      home,
+      signer,
+      chain: new LeagueChain(MAINNET, rpc()),
+      site: new LeagueSite(siteFromEnv()),
+      oneShot: entryOneShot({ home, signer, rpcUrl: rpc() }),
+      signOptions: { onPending: () => process.stderr.write("Confirm the notes signature in the Binance App; waiting up to 10 minutes.\n") },
+    },
     { name: str(values.name), yes: values.yes === true, lang: langOf(values.lang) },
   );
   print(json, { ok: result.ok, stage: result.stage, ...result.data, card: result.text }, () => result.text);

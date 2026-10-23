@@ -16,8 +16,8 @@ import { untrusted, type Untrusted } from "./untrusted.ts";
  * show of it. Its open positions, marked at spot on the chain; realized and
  * unrealized PnL and gas; the wallet-wide spend against the league's cap; the
  * last trade and the host's last action. The wallet's own coin is not this
- * agent's PnL, nor are other agents' positions on this machine (FL enter's buy,
- * say): both are listed apart. A USDT figure is never kept here: a display may
+ * agent's PnL, nor are other agents' positions on this machine: both are
+ * listed apart. A USDT figure is never kept here: a display may
  * add one from `usdRef`.
  */
 

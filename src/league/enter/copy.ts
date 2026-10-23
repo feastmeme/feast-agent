@@ -1,4 +1,4 @@
-import { short, utc8, type Lang } from "../register/copy.ts";
+import { short, type Lang } from "../register/copy.ts";
 import { shownName } from "../register/message.ts";
 
 /**
@@ -31,7 +31,6 @@ export const SAFE_SYMBOL = /^[A-Z0-9]{1,10}$/;
 export const coinShown = (symbol: string | null, coin: string) => (symbol && SAFE_SYMBOL.test(symbol) ? `${symbol} (${short(coin)})` : short(coin));
 
 const table = (rows: [string, string][]) => ["| | |", "| --- | --- |", ...rows.map(([k, v]) => `| ${k} | ${v.replace(/\|/g, "/")} |`)].join("\n");
-const at8 = (ms: number, lang: Lang) => (lang === "zh" ? `${utc8(ms)}（UTC+8）` : `${utc8(ms)} UTC+8`);
 
 // --- the name and the wallet --------------------------------------------------------------
 
@@ -100,23 +99,28 @@ export function launchCheckUnreadable(lang: Lang): string {
 }
 
 export function alreadyLaunched(symbol: string | null, coin: string, lang: Lang): string {
-  return lang === "zh" ? `10/23 以来已经发过币：${coinShown(symbol, coin)}；接下来买今天的币。` : `Already launched since 10/23: ${coinShown(symbol, coin)}; going on to today's coin.`;
+  return lang === "zh" ? `10/23 以来已经发过币：${coinShown(symbol, coin)}，它就是你的身体币。` : `Already launched since 10/23: ${coinShown(symbol, coin)}: it is your body coin.`;
+}
+
+/** After the launch: the coin, and its transaction in full. */
+export function launchedTx(symbol: string, coin: string, txHash: string | null, lang: Lang): string {
+  return lang === "zh" ? `已发出 ${symbol}（${short(coin)}）。交易：${txHash ?? "（无哈希）"}` : `Launched ${symbol} (${short(coin)}). Transaction: ${txHash ?? "(no hash)"}`;
 }
 
 export function avatarFallback(reason: string, lang: Lang): string {
   return lang === "zh" ? `联赛图片暂时还拿不到（${plain(reason)}）；改用按代码生成的图片。` : `The league picture is not available yet (${plain(reason)}); using the ticker's picture.`;
 }
 
-export function pendingOutcome(kind: string, lang: Lang): string {
+export function pendingOutcome(_kind: string, lang: Lang): string {
   const zh = lang === "zh";
-  const what = kind === "launch" ? (zh ? "发币" : "launch") : zh ? "买入" : "buy";
+  const what = zh ? "发币" : "launch";
   return zh
     ? `之前发出的一笔${what}还不知道结果；没有再发送任何东西。过几分钟再运行一次 FL enter。`
     : `A ${what} sent earlier has no known outcome yet; nothing more was sent. Run FL enter again in a few minutes.`;
 }
 
 export function launchFailed(reason: string, lang: Lang): string {
-  return lang === "zh" ? `发币没有成功：${plain(reason, 300)}。没有买入。` : `The launch did not go through: ${plain(reason, 300)}. Nothing was bought.`;
+  return lang === "zh" ? `发币没有成功：${plain(reason, 300)}。没有发送别的。` : `The launch did not go through: ${plain(reason, 300)}. Nothing else was sent.`;
 }
 
 // --- the yes ----------------------------------------------------------------------------------
@@ -131,89 +135,47 @@ export function cardChanged(lang: Lang): string {
     : "This --yes did not match a card the user was just shown (none shown, over 10 minutes ago, or it changed), so nothing was sent. This is the card now.";
 }
 
-// --- today's coin --------------------------------------------------------------------------
-
-export type Wait = "not-registered" | "before-cutoff" | "no-table" | "missing";
-
-export function comeBack(what: Wait, reason: string | null, atMs: number, lang: Lang): string {
-  const zh = lang === "zh";
-  const said = reason ? (zh ? `（feast.meme：「${clean(reason)}」）` : ` (feast.meme: "${clean(reason)}")`) : "";
-  const head = {
-    "not-registered": zh ? "feast.meme 还没看到这只 agent 的身体币，刚发的币要等索引跟上" : "feast.meme has not seen this agent's body coin yet: a coin just launched waits for the index",
-    "before-cutoff": zh ? "今天的币还没抽出来（要等新加坡时间 08:00 的区块）" : "Today's coins are not drawn yet (they wait for the 08:00 SGT block)",
-    "no-table": zh ? "今天的分配表还没准备好" : "Today's table is not up yet",
-    missing: zh ? "feast.meme 还没开始分配今天的币" : "feast.meme does not hand out today's coin yet",
-  }[what];
-  return zh ? `${head}${said}。这次没有买。请在 ${at8(atMs, lang)} 再运行一次 FL enter。` : `${head}${said}. Nothing was bought. Run FL enter again at ${at8(atMs, lang)}.`;
-}
-
-export function assignmentUnreadable(reason: string, lang: Lang): string {
-  return lang === "zh" ? `暂时读不到今天的币（${plain(reason)}）。这次没有买；过几分钟再运行一次 FL enter。` : `Today's coin could not be read (${plain(reason)}). Nothing was bought; run FL enter again in a few minutes.`;
-}
-
-export type BadRow = "wallet" | "address" | "not-feast" | "own-coin" | "unchecked";
-
-export function badRow(why: BadRow, lang: Lang): string {
-  const zh = lang === "zh";
-  const what = {
-    wallet: zh ? "它是给另一个钱包的" : "it is another wallet's",
-    address: zh ? "它给的币不是一个地址" : "its coin is not an address",
-    "not-feast": zh ? "它给的币不是 Feast 发的" : "its coin is not one the Feast factory made",
-    "own-coin": zh ? "它给的是这个钱包自己的身体币" : "its coin is this wallet's own body coin",
-    unchecked: zh ? "没能在链上核对它给的币" : "its coin could not be checked on the chain",
-  }[why];
-  return zh ? `feast.meme 给的今天的币不能用：${what}。这次没有买；过几分钟再运行一次 FL enter。` : `Today's coin from feast.meme can't be used: ${what}. Nothing was bought; run FL enter again in a few minutes.`;
-}
-
 export function refusedLine(limit: string, message: string, lang: Lang): string {
   return lang === "zh" ? `被 ${limit} 拒绝：${message}（没有向钱包请求任何东西）` : `refused by ${limit}: ${message} (nothing was asked of the wallet)`;
 }
 
-/** `usdt`: the amount's worth at the BNB price just read, for reference only; null when the price could not be read. */
-export type BuyView = { agentId: string; coin: string; symbol: string | null; bnb: number; usdt: number | null; slippagePct: number; maxTradeBnb: number; budgetBnb: number; maxDailySpendBnb: number };
+// --- the notes session -----------------------------------------------------------------
 
-export function buyCard(view: BuyView, lang: Lang): string {
+/** Under the launch card: the same yes signs the notes session's one message. */
+export function notesOnLaunch(view: { agentId: string; season: number }, lang: Lang): string {
+  return lang === "zh"
+    ? `同一个「好」之后还会签一条消息（不是交易，不花 gas，不动资金），为 ${shownName(view.agentId)} 在 feast.meme 开通第 ${view.season} 季的笔记会话。`
+    : `The same yes then signs one message (no transaction, no gas, no funds) that opens ${shownName(view.agentId)}'s notes session on feast.meme for season ${view.season}.`;
+}
+
+/** The notes card, when the body coin already exists: entering is this one signature. */
+export function notesCard(view: { agentId: string; season: number }, lang: Lang): string {
   const zh = lang === "zh";
-  const shown = coinShown(view.symbol, view.coin);
+  const who = shownName(view.agentId);
   return [
-    zh ? `为 ${shownName(view.agentId)} 买今天的币` : `Buy today's coin for ${shownName(view.agentId)}`,
+    zh ? `开通 ${who} 的笔记会话` : `Open ${who}'s notes session`,
     "",
     table([
-      [zh ? "币" : "Coin", zh ? `${shown}：今天分到的币，按新加坡时间 08:00 的区块抽取` : `${shown}: today's coin, assigned from the 08:00 SGT block`],
-      [zh ? "金额" : "Amount", `${view.bnb} BNB${zh ? "（报名金额）" : " (the entry's amount)"}${view.usdt === null ? "" : ` ≈ ${view.usdt.toFixed(2)} USDT`}`],
-      [zh ? "滑点" : "Slippage", zh ? `最多 ${view.slippagePct}%` : `at most ${view.slippagePct}%`],
-      [zh ? "买入之后" : "After the buy", zh ? "最多两笔授权，这样以后卖出只要一笔交易" : "up to two approvals, so that a later sale is one transaction"],
-      [zh ? "费用" : "Cost", zh ? "上面的金额，加最多三笔交易的 gas；发送前钱包会先预览每一笔" : "the amount above, and gas for up to three transactions; your wallet previews each before it is sent"],
-      [
-        zh ? "限额" : "Limits",
-        zh
-          ? `默认硬限额照常生效（L1 单笔 ${view.maxTradeBnb} BNB；L2 每 24 小时 ${view.maxDailySpendBnb} BNB；L3 这个钱包总共 ${view.budgetBnb} BNB；L16 钱包、Developer Mode 与停止文件）`
-          : `the default hard limits apply (L1 one trade ${view.maxTradeBnb} BNB; L2 ${view.maxDailySpendBnb} BNB in any 24 h; L3 ${view.budgetBnb} BNB from this wallet in all; L16 the wallet, Developer Mode and the stop file)`,
-      ],
+      [zh ? "内容" : "What", zh ? "签一条消息（EIP-712 NoteSession）：不是交易，不花 gas，不动资金" : "one signed message (EIP-712 NoteSession): no transaction, no gas, no funds moved"],
+      [zh ? "签名" : "Signs", zh ? `你的钱包，为 ${who}，第 ${view.season} 季` : `your wallet, for ${who}, season ${view.season}`],
+      [zh ? "用途" : "Why", zh ? "feast.meme 只收为本季签过名的钱包发来的笔记（FL note）" : "feast.meme takes your agent's notes (FL note) from a wallet that signed for the season"],
+      [zh ? "保存" : "Kept", zh ? "会话的令牌，存在这台电脑上（notes-session.json）；从不保存私钥" : "the session's token, in this home (notes-session.json); never a key"],
     ]),
     "",
-    zh ? "这是联赛的第 1 步：买一次别的 agent 的身体币。买完之后不会自动交易：自动交易在开赛当天用另一个命令启动。" : "This is the league's step 1: one buy of another agent's body coin. Nothing trades after it: trading starts on season day, with its own command.",
-    "",
-    zh ? "你说「好」之后，会立刻从你的钱包发出一笔真实交易。" : "This sends a real transaction from your wallet as soon as you say yes.",
+    zh ? "你说「好」之后，钱包会请你签这一条消息。" : "Your wallet asks for this one signature as soon as you say yes.",
   ].join("\n");
 }
 
-export function boughtLine(symbol: string | null, coin: string, txHash: string | null, lang: Lang): string {
-  const shown = coinShown(symbol, coin);
-  return lang === "zh" ? `已买入 ${shown}，交易 ${txHash ? short(txHash) : "（无哈希）"}。` : `Bought ${shown}, transaction ${txHash ? short(txHash) : "(no hash)"}.`;
-}
+// --- done ------------------------------------------------------------------------------------
 
-/** After the buy: the only line besides the transaction (the coordinator's ruling, 2026-10-23). */
+/** After the entry: the next step is the prompt (the owner's ruling, 2026-10-24). */
 export function doneLine(lang: Lang): string {
-  return lang === "zh" ? "你已报名。开赛当天运行 `FL start`。" : "You're in. On season day run `FL start`.";
+  return lang === "zh" ? "你已报名。写好你的 strategy.md，然后运行 `FL start <name> --prompt strategy.md`" : "You're in. Write your strategy.md and run `FL start <name> --prompt strategy.md`";
 }
 
-export function buyFailed(reason: string, lang: Lang): string {
-  return lang === "zh" ? `买入没有成功：${plain(reason, 300)}。` : `The buy did not go through: ${plain(reason, 300)}.`;
-}
-
-export function alreadyEntered(view: { agentId: string; coin: string; txHash: string | null; atMs: number }, lang: Lang): string {
-  return lang === "zh"
-    ? [`已经报名：${shownName(view.agentId)} 在 ${at8(view.atMs, lang)} 买了今天的币 ${short(view.coin)}，交易 ${view.txHash ? short(view.txHash) : "（无哈希）"}。现在不用再做什么。`, doneLine(lang)].join("\n")
-    : [`Already entered: ${shownName(view.agentId)} bought today's coin ${short(view.coin)} at ${at8(view.atMs, lang)}, transaction ${view.txHash ? short(view.txHash) : "(no hash)"}. Nothing more to do now.`, doneLine(lang)].join("\n");
+export function alreadyEntered(view: { agentId: string; coin: string; notes: string | null }, lang: Lang): string {
+  const zh = lang === "zh";
+  const head = zh ? `已经报名：${shownName(view.agentId)} 的身体币是 ${short(view.coin)}。现在不用再做什么。` : `Already entered: ${shownName(view.agentId)}'s body coin is ${short(view.coin)}. Nothing more to do now.`;
+  const notes = view.notes === "open" || view.notes === "dev" ? [] : [zh ? "还没有笔记会话：用 FL note --login 开通（签一条消息，不花 gas）。" : "No notes session yet: FL note --login opens one (one signed message, no gas)."];
+  return [head, ...notes, doneLine(lang)].join("\n");
 }

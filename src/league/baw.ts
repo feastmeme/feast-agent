@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { getAddress, isAddress, type Address, type Hex } from "viem";
 
+import { noteSessionPreviewDescribes, noteSessionSignRequest, type NoteSessionFields } from "./notes/message.ts";
 import { previewDescribes, signRequestMessage, type RegisterFields } from "./register/message.ts";
 
 /**
@@ -11,9 +12,10 @@ import { previewDescribes, signRequestMessage, type RegisterFields } from "./reg
  * transaction lock, and Developer Mode's `contract-call preview → execute`. It
  * never sends, revokes, swaps or changes a setting — settings are App-only
  * anyway. `sign-message preview` serves the read-only checks. Its `execute` and
- * `result` serve one message only, the league's Register (task 941): `call()`
- * refuses them for any request id or order id this signer did not get from its
- * own `signRegistration` preview, and no method takes a raw message to sign.
+ * `result` serve the league's two messages only: Register (task 941) and
+ * NoteSession (task 963). `call()` refuses them for any request id or order id
+ * this signer did not get from its own `signRegistration` or `signNoteSession`
+ * preview, and no method takes a raw message to sign.
  *
  * Arguments go to `execFile` as an array: no shell, nothing interpolated.
  */
@@ -127,9 +129,9 @@ const ID = /^[\w.:=+/-]{1,256}$/;
 export class BawSigner implements Signer, RegistrationSigner {
   /** Every command the signer ran, by name only (no arguments, so no addresses). */
   readonly invocations: string[] = [];
-  /** Request ids of this signer's own Register previews, and until when they may be executed. */
+  /** Request ids of this signer's own league message previews (Register, NoteSession), and until when they may be executed. */
   private readonly registerRequests = new Map<string, number>();
-  /** Order ids of this signer's own Register signatures awaiting the App. */
+  /** Order ids of this signer's own league message signatures awaiting the App. */
   private readonly registerOrders = new Set<string>();
 
   constructor(
@@ -145,10 +147,10 @@ export class BawSigner implements Signer, RegistrationSigner {
     if (command === "sign-message execute") {
       const id = after(args, "--requestId");
       const until = this.registerRequests.get(id);
-      if (until === undefined || this.clock() > until) throw new BawError("only this signer's own league Register preview may be signed", null, "NOT_ALLOWED");
+      if (until === undefined || this.clock() > until) throw new BawError("only this signer's own league message preview (Register or NoteSession) may be signed", null, "NOT_ALLOWED");
       this.registerRequests.delete(id);
     }
-    if (command === "sign-message result" && !this.registerOrders.has(after(args, "--order-id"))) throw new BawError("only this signer's own league Register signature may be fetched", null, "NOT_ALLOWED");
+    if (command === "sign-message result" && !this.registerOrders.has(after(args, "--order-id"))) throw new BawError("only this signer's own league message signature may be fetched", null, "NOT_ALLOWED");
     this.invocations.push(command);
     this.onInvoke(command);
     const out = await this.run([...command.split(" "), ...args, "--json"]);
@@ -248,19 +250,32 @@ export class BawSigner implements Signer, RegistrationSigner {
    * from the fields, never taken raw.
    */
   async signRegistration(fields: RegisterFields, options: SignOptions = {}): Promise<SignOutcome> {
+    return this.signLeagueMessage(signRequestMessage(fields), (parsed) => previewDescribes(parsed, fields), options);
+  }
+
+  /**
+   * Sign the notes session's message (task 963) by the same road as Register: signed in, Developer Mode on,
+   * the preview reads back exactly these four fields and flags no risk, then execute (and the App's
+   * confirmation if it asks). Built here from the fields, never taken raw.
+   */
+  async signNoteSession(fields: NoteSessionFields, options: SignOptions = {}): Promise<SignOutcome> {
+    return this.signLeagueMessage(noteSessionSignRequest(fields), (parsed) => noteSessionPreviewDescribes(parsed, fields), options);
+  }
+
+  private async signLeagueMessage(message: string, describes: (parsed: unknown) => { ok: true } | { ok: false; reason: string }, options: SignOptions): Promise<SignOutcome> {
     const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const status = await this.status();
     if (!status.connected) return { kind: "not-ready", reason: "signed-out" };
     if (!(await this.settings()).devModeEnabled) return { kind: "not-ready", reason: "devmode" };
 
-    const { envelope } = await this.call("sign-message preview", ["--binanceChainId", this.chainId, "--signType", "EIP712", "--message", signRequestMessage(fields)]);
+    const { envelope } = await this.call("sign-message preview", ["--binanceChainId", this.chainId, "--signType", "EIP712", "--message", message]);
     if (envelope.success === false || envelope.error) {
       const e = envelope.error ?? {};
       return { kind: "refused", reason: redactAddresses(`${e.name ?? "error"} ${e.code ?? ""} ${e.message ?? ""}`.trim()) };
     }
     const d = (envelope.data ?? {}) as { requestId?: unknown; parsedMessage?: unknown; risks?: { riskDetails?: unknown[]; riskBehaviors?: unknown[] }; expiresAt?: unknown };
     if (typeof d.requestId !== "string" || !ID.test(d.requestId)) return { kind: "refused", reason: "the preview gave no request id" };
-    const described = previewDescribes(d.parsedMessage, fields);
+    const described = describes(d.parsedMessage);
     if (!described.ok) return { kind: "mismatch", reason: described.reason };
     const flagged = [...(d.risks?.riskDetails ?? []), ...(d.risks?.riskBehaviors ?? [])];
     if (flagged.length > 0) return { kind: "mismatch", reason: `the wallet flagged a risk: ${redactAddresses(JSON.stringify(flagged)).slice(0, 200)}` };

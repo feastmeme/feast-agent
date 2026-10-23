@@ -17,9 +17,10 @@ import type { LeagueChain } from "../chain.ts";
 
 // Synthetic: never a real wallet.
 export const WALLET: Address = "0x000000000000000000000000000000000000a11c";
+const DEFAULT_WALLET = WALLET;
 export const FEAST: Address = MAINNET.platformCoin!.address;
 const WBNB = MAINNET.contracts.wrappedNative;
-const ROUTER = MAINNET.trade.kind === "infinity" ? MAINNET.trade.router : WALLET;
+const ROUTER = MAINNET.trade.kind === "infinity" ? MAINNET.trade.router : DEFAULT_WALLET;
 
 export type TradeWorld = {
   signer: Signer;
@@ -37,7 +38,8 @@ const settings = (): WalletSettings =>
   ({ devModeEnabled: true, devModeExpiresAt: null, devModeDailyLimitUsd: 1_000, devModeQuotaUsedUsd: 0, balanceExceeded: false, sessionExpireTime: null, inactiveSignOutTime: null, abnormalTxnHandling: null }) as WalletSettings;
 
 /** One coin's trades: a buy fills `coins` for whatever BNB was sent; a sale of anything pays `sellBnbWei`. */
-export function tradeWorld(options: { coin?: Address; symbol?: string; coins?: bigint; sellBnbWei?: bigint; balanceWei?: bigint; now?: () => number } = {}): TradeWorld {
+export function tradeWorld(options: { coin?: Address; symbol?: string; coins?: bigint; sellBnbWei?: bigint; balanceWei?: bigint; now?: () => number; wallet?: Address } = {}): TradeWorld {
+  const WALLET = options.wallet ?? DEFAULT_WALLET;
   const coin = options.coin ?? FEAST;
   const coins = options.coins ?? 10_000n * 10n ** 18n;
   const calls: string[] = [];

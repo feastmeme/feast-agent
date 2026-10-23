@@ -92,8 +92,10 @@ describe("prompt mode, no autopilot: the runtime only enforces", () => {
     const c = fakeClock(T0);
     const w = tradeWorld({ now: c.now });
     const { noteCommand, readNotes } = await import("../notes/queue.ts");
+    const { saveSession } = await import("../notes/session.ts");
     const { FakeFeast, SITE } = await import("../data/fakes.ts");
     const feast = new FakeFeast();
+    saveSession(h, { version: 1, agentId: "maplegrin", season: 1, token: "tok-1", expiresAt: null, at: new Date(T0).toISOString() });
     await noteCommand({ home: h, name: "demo", site: SITE, fetch: feast.fetch, wallet: w.signer.address, now: c.now }, { text: "watching C01: volume up threefold" });
     expect(readNotes(h, "demo")).toMatchObject([{ state: "queued" }]);
     feast.options.notes = { status: 201, body: {} };

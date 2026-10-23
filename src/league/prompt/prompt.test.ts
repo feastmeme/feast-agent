@@ -115,7 +115,7 @@ describe("the card of a prompt agent", () => {
     expect(card).toContain("  > Line one red\n  > Line two\n  > Line three");
     expect(card).not.toContain("Line four");
     expect(card).not.toMatch(/[\u001b‮]/);
-    expect(card).toContain("Capital cap: 0.15 BNB, wallet-wide; FL enter's buy counts.");
+    expect(card).toContain("Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts.");
     expect(card).toContain("Autopilot: none.");
     expect(card).toContain("the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call");
     expect(card).not.toMatch(/Cadence: a tick every/);
@@ -126,7 +126,7 @@ describe("the card of a prompt agent", () => {
   });
 
   it("every card of the user's own agents names the cap", () => {
-    expect(renderCard(planned({ name: "dca1", preset: "dca" }))).toContain("Capital cap: 0.15 BNB, wallet-wide; FL enter's buy counts.");
+    expect(renderCard(planned({ name: "dca1", preset: "dca" }))).toContain("Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts.");
   });
 });
 

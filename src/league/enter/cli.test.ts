@@ -62,7 +62,8 @@ describe("feast-league enter, through the binary", () => {
     const { env } = setup();
     const out = await run(["--help"], env);
     expect(out.stdout).toContain("enter --name <id>.ai [--yes] [--lang en|zh] [--json]");
-    expect(out.stdout).toContain("the league entry, once: launch the body coin and buy today's coin; never starts trading");
+    expect(out.stdout).toContain("the league entry, once: launch the body coin, and open the notes session (one signed");
+    expect(out.stdout).toContain("nothing is bought, and it never starts trading");
     const enterHelp = await run(["enter", "--help"], env);
     expect(enterHelp.code).toBe(0);
     expect(enterHelp.stdout).toContain("enter --name <id>.ai");

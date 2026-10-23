@@ -79,10 +79,17 @@ describe("the skill, the setup, the release notes", () => {
     expect(read("docs/league/PLAN.md")).toMatch(/^## 14\. Prompt mode and the data face \(task 963, `league-v4`\)$/m);
   });
 
-  it("the entry's buy is 0.01 BNB wherever the skill, the setup and the README say it", () => {
+  it("the entry is the launch only: no entry buy wherever the skill, the setup and the README say it", () => {
     for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md"]) {
-      expect(read(file), file).not.toMatch(/at least 5 USDT/);
-      expect(read(file), file).toMatch(/0\.01 BNB/);
+      const text = read(file);
+      expect(text, file).not.toMatch(/at least 5 USDT|today's coin|entry's buy|FL enter's buy/);
+      expect(text, file).toContain("FL start <name> --prompt strategy.md");
     }
+  });
+
+  it("the skill names the notes session, the declared model and the battle card", () => {
+    const skill = read("skills/feast-league/SKILL.md");
+    for (const word of ["FL note --login", "--model", "battle card", "Post it on X today"]) expect(skill, word).toContain(word);
+    expect(read("docs/CHANGELOG.md")).toMatch(/NoteSession/);
   });
 });

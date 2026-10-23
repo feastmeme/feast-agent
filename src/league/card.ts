@@ -46,7 +46,7 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
     if (options.warmupPassed) lines.push(`Warm-up: passed by FL script check (sha ${short(agent.script!.sha256)}). It trades at its own sizes, within the limits; any edit is a new file, a new audit, a new check.`);
     else lines.push(`Warm-up: its first ${WARMUP_TRADES} trades run at ${Math.min(WARMUP_SIZE_BNB, l.maxTradeBnb)} BNB; two failures in a row, or any limit hit, stop it and tell you.`);
   }
-  if (agent.track !== "entry" && l.budgetBnb <= LEAGUE_CAP_BNB) lines.push(`Capital cap: ${LEAGUE_CAP_BNB} BNB, wallet-wide; FL enter's buy counts.`);
+  if (agent.track !== "entry" && l.budgetBnb <= LEAGUE_CAP_BNB) lines.push(`Capital cap: ${LEAGUE_CAP_BNB} BNB, wallet-wide: every agent on this wallet counts.`);
   if (agent.sentence) lines.push(`From your sentence: "${agent.sentence}"`);
   lines.push("");
   if (agent.preset) {

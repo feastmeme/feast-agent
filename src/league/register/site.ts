@@ -198,6 +198,13 @@ export function parseLeague(body: unknown): LeagueRead | null {
 }
 
 // --- the league entry's reads (task 960's routes, for `FL enter`) ---------------------------
+// The assignment route (`/api/league/assignment`) may still exist on the site: since the owner's ruling
+// of 2026-10-24 the entry is the launch only, and the runtime never reads it.
+
+/** The notes session's request (task 964): the four signed fields, and the signature in the Register body's form. */
+export type NoteSessionBody = { wallet: string; agentId: string; season: number; nonce: string; scheme: "eip712"; signature: string; signatureRecovery?: string };
+
+export type NoteSessionAnswer = { kind: "open"; token: string; expiresAt: string | null; season: number | null } | { kind: "unavailable"; reason: string } | { kind: "refused"; status: number; code: string | null };
 
 /** `GET /api/league/agent-id?wallet=`: the page's own read of the wallet's Agent ID and its coins. */
 export type PageAgentId =
@@ -207,31 +214,8 @@ export type PageAgentId =
   /** Any other answer: not one this agent can read. */
   | { state: "unreadable"; reason: string };
 
-/** `GET /api/league/assignment?wallet=`: today's coin (a row), why there is none yet (a status), no route yet, or no answer. */
-export type Assignment =
-  | { kind: "row"; day: string; wallet: string; coin: string; symbol: string; seed: string; assignedAt: string; source: string }
-  | { kind: "status"; day: string; status: "not-registered" | "no-table" | "before-cutoff"; reason: string }
-  | { kind: "missing"; status: number }
-  | { kind: "unreadable"; reason: string };
-
 /** `GET /api/league/avatar/<id>.png`, as it came: the agent decides whether to use it. */
 export type AvatarAnswer = { state: "answered"; status: number; contentType: string; bytes: Uint8Array; truncated: boolean } | { state: "unavailable"; reason: string };
-
-const ASSIGNMENT_STATUSES = ["not-registered", "no-table", "before-cutoff"] as const;
-const text = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
-
-export function parseAssignment(status: number, body: unknown): Assignment {
-  const b = (typeof body === "object" && body !== null ? body : null) as Record<string, unknown> | null;
-  if (b && typeof b.status === "string") {
-    if ((ASSIGNMENT_STATUSES as readonly string[]).includes(b.status)) return { kind: "status", day: text(b.day), status: b.status as (typeof ASSIGNMENT_STATUSES)[number], reason: text(b.reason) };
-    return { kind: "unreadable", reason: `an unknown status (HTTP ${status})` };
-  }
-  if (b && typeof b.assigned_coin === "string") {
-    return { kind: "row", day: text(b.day), wallet: text(b.wallet), coin: b.assigned_coin, symbol: text(b.symbol), seed: text(b.seed), assignedAt: text(b.assigned_at), source: text(b.source) };
-  }
-  if (status === 404) return { kind: "missing", status };
-  return { kind: "unreadable", reason: `HTTP ${status}, not an answer this agent knows` };
-}
 
 /** A body read up to `max` bytes and no further: a picture that is too big is known to be, without holding it. */
 async function readCapped(response: Response, max: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
@@ -358,23 +342,6 @@ export class LeagueSite {
     return { state: "read", wallet: typeof body.wallet === "string" ? body.wallet.toLowerCase() : null, agentId: typeof body.agentId === "string" ? body.agentId : null, coins };
   }
 
-  /** Today's coin for this wallet (task 960). The body is read whatever the status: a 503 carries `no-table`. */
-  async assignment(wallet: Address): Promise<Assignment> {
-    let got: { status: number; text: string };
-    try {
-      got = await this.getOnce(() => this.getRaw(`/api/league/assignment?wallet=${wallet.toLowerCase()}`));
-    } catch (error) {
-      return { kind: "unreadable", reason: (error as Error).message };
-    }
-    let body: unknown = null;
-    try {
-      body = JSON.parse(got.text);
-    } catch {
-      body = null;
-    }
-    return parseAssignment(got.status, body);
-  }
-
   /** The league's picture of an agent (task 960), read up to `maxBytes` (and one byte more, to know it is too big). */
   async avatar(agentId: string, maxBytes: number): Promise<AvatarAnswer> {
     try {
@@ -392,6 +359,44 @@ export class LeagueSite {
     } catch (error) {
       return { state: "unavailable", reason: (error as Error).message };
     }
+  }
+
+  /**
+   * `POST /api/league/notes/session` (task 964): one signed NoteSession for a bearer token, season-scoped.
+   * 404, 405, 429, a 5xx or no answer: the route is not there (yet). Any other 4xx: refused, with the page's code.
+   * The token goes into a header later, so only a plain one (printable, no spaces, at most 4 KB) is taken.
+   */
+  async noteSession(body: NoteSessionBody): Promise<NoteSessionAnswer> {
+    let status: number;
+    let parsed: Record<string, unknown> = {};
+    try {
+      const response = await this.fetchImpl(`${this.base}/api/league/notes/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      status = response.status;
+      const text = await response.text();
+      try {
+        const json = JSON.parse(text) as unknown;
+        if (typeof json === "object" && json !== null) parsed = json as Record<string, unknown>;
+      } catch {
+        parsed = {};
+      }
+    } catch (error) {
+      return { kind: "unavailable", reason: (error as Error).message };
+    }
+    if (status >= 200 && status < 300) {
+      const token = parsed.token;
+      if (typeof token !== "string" || !/^[\x21-\x7e]{1,4096}$/.test(token)) return { kind: "unavailable", reason: `HTTP ${status} without a token this agent can use` };
+      const expiresAt = typeof parsed.expiresAt === "string" && Number.isFinite(Date.parse(parsed.expiresAt)) ? new Date(Date.parse(parsed.expiresAt)).toISOString() : null;
+      return { kind: "open", token, expiresAt, season: num(parsed.season) };
+    }
+    if (status === 404 || status === 405 || status === 429 || status >= 500) return { kind: "unavailable", reason: `HTTP ${status}` };
+    const error = (parsed.error ?? {}) as Record<string, unknown>;
+    const code = typeof parsed.code === "string" ? parsed.code : typeof error.code === "string" ? error.code : null;
+    return { kind: "refused", status, code };
   }
 
   /** The league for one view; `me` adds the wallet's own rows (uncached on the page's side). */

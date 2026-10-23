@@ -3,22 +3,24 @@ import { getAddress, type Address, type Hex } from "viem";
 
 import { MAINNET } from "../../sdk/networks.ts";
 import { coinPicture } from "../../sdk/metadata.ts";
-import { emptyBook, parseBook, recordBuy, serializeBook } from "../book.ts";
+import { emptyBook, parseBook, serializeBook } from "../book.ts";
 import type { AgentIdRead, CoinInfo, LeagueChain } from "../chain.ts";
 import { Executor } from "../executor.ts";
-import { addToLedger, agentPaths, writeFileAtomic } from "../store.ts";
+import { agentPaths, writeFileAtomic } from "../store.ts";
 import { normalizeIntent, type IntentRequest } from "../strategy.ts";
+import { leagueWire } from "../register/fakes.ts";
 import { ENTRY_AGENT } from "./constants.ts";
 import type { EnterChain, OneShot, OneShotResult } from "./flow.ts";
 
 /**
  * TEST FAKES, NOT USED AT RUNTIME (task 961).
  *
- * `FakeEnterSite`: feast.meme's three league reads as task 960 shapes them
- * (`/api/league/agent-id`, `/api/league/avatar/<id>.png`, `/api/league/assignment`),
+ * `FakeEnterSite`: feast.meme's league reads as task 960 shapes them
+ * (`/api/league/agent-id`, `/api/league/avatar/<id>.png`, `/api/league` for the
+ * season), the notes session route task 964 builds (`/api/league/notes/session`),
  * its `/api/pin`, and the indexer's `/v1/creators`, as one in-process `fetch`:
- * nothing reaches a network. It writes down every path it is asked and every
- * pin it receives.
+ * nothing reaches a network. It writes down every path it is asked, every pin
+ * it receives and every session asked for.
  *
  * `fakeEnterChain`: the chain reads `FL enter` makes. `fakeOneShot`: the
  * runtime's one-shot, booking what a landed launch or buy would book; with
@@ -43,8 +45,8 @@ export type FakeSiteOptions = {
   agentId?: { agentId: string | null; wallet?: string; coins?: { coin: string; launchedAt: string }[] | null } | Answer;
   /** `/api/league/avatar/<id>.png`. */
   avatar?: { status?: number; contentType?: string; bytes?: Uint8Array } | "timeout";
-  /** `/api/league/assignment`. */
-  assignment?: Answer;
+  /** `POST /api/league/notes/session`. */
+  session?: Answer;
   /** `/v1/creators`: rows (any creator), or down. */
   creators?: { coin: string; creator: string; launchedAt?: string }[] | "down";
   /** `/api/pin` refuses the metadata document (after taking the picture), so a launch stops before any chain read. */
@@ -54,6 +56,7 @@ export type FakeSiteOptions = {
 export class FakeEnterSite {
   readonly calls: string[] = [];
   readonly pins: { kind: "image" | "metadata"; bytes: Uint8Array | null; json: unknown }[] = [];
+  readonly sessions: unknown[] = [];
 
   constructor(readonly options: FakeSiteOptions) {}
 
@@ -96,7 +99,11 @@ export class FakeEnterSite {
       const status = a.status ?? 200;
       return new Response(status === 200 ? Buffer.from(a.bytes ?? AVATAR_PNG) : "<html>not found</html>", { status, headers: { "content-type": a.contentType ?? (status === 200 ? "image/png" : "text/html") } });
     }
-    if (url.pathname === "/api/league/assignment") return this.answer(o.assignment ?? { status: 404, body: "<html>not found</html>", contentType: "text/html" }, signal);
+    if (url.pathname === "/api/league") return Response.json(leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-26T12:00:00.000Z" } }));
+    if (url.pathname === "/api/league/notes/session" && init?.method === "POST") {
+      this.sessions.push(JSON.parse(String(init.body)));
+      return this.answer(o.session ?? { status: 404, body: "<html>not found</html>", contentType: "text/html" }, signal);
+    }
     return new Response("<html>not found</html>", { status: 404, headers: { "content-type": "text/html" } });
   }) as typeof fetch;
 }
@@ -117,7 +124,6 @@ export type FakeChainOptions = {
   /** The coins the factory made besides those in `creators` (lower case), FEAST included. */
   feastCoins?: string[];
   feastUnreadable?: boolean;
-  bnbUsd?: number | "unreadable";
   symbols?: Record<string, string>;
 };
 
@@ -147,11 +153,6 @@ export function fakeEnterChain(o: FakeChainOptions): EnterChain & { reads: strin
       if (o.feastUnreadable) throw new Error("HTTP request failed. URL: https://rpc.invalid/secret-key");
       return feast.has(coin.toLowerCase()) || o.creators?.[coin.toLowerCase()] !== undefined;
     },
-    async bnbUsd() {
-      reads.push("bnbUsd");
-      if (o.bnbUsd === "unreadable") throw new Error("HTTP request failed. URL: https://rpc.invalid/secret-key");
-      return o.bnbUsd ?? 600;
-    },
   };
 }
 
@@ -161,19 +162,19 @@ export type FakeShotOptions = {
   launchCoin?: Address;
   /** Run a launch's picture through the real request path to `/api/pin`. */
   pinWith?: { fetch: typeof fetch; wallet: Address };
-  /** The launch or the buy does not land, or its outcome is not known. */
-  fail?: "launch" | "buy" | "unknown-buy";
+  /** The launch does not land. */
+  fail?: "launch";
 };
 
 let hashes = 0;
 export const fakeHash = (): Hex => `0x${(hashes += 1).toString(16).padStart(64, "0")}` as Hex;
 
-/** The runtime's one-shot, as far as the book goes: what a landed launch or buy books. */
+/** The runtime's one-shot, as far as the book goes: what a landed launch books. */
 export function fakeOneShot(o: FakeShotOptions): { run: OneShot; requests: IntentRequest[][] } {
   const requests: IntentRequest[][] = [];
   const paths = agentPaths(o.home, ENTRY_AGENT);
   const book = () => (existsSync(paths.state) ? parseBook(readFileSync(paths.state, "utf8")) : emptyBook());
-  const nothing = (reason: string): OneShotResult => ({ exit: "finished", reason, launched: null, bought: null, failure: null });
+  const nothing = (reason: string): OneShotResult => ({ exit: "finished", reason, launched: null, failure: null });
   const run: OneShot = async (list) => {
     requests.push(list);
     const [request] = list;
@@ -185,21 +186,11 @@ export function fakeOneShot(o: FakeShotOptions): { run: OneShot; requests: Inten
         const executor = new Executor({ signer: null as never, chain: null as never, wallet: o.pinWith.wallet, network: MAINNET, rpcUrl: "http://127.0.0.1:9", stopReason: () => null, log: () => {}, fetch: o.pinWith.fetch });
         await executor.prepareLaunch(normal.intent.launch!);
       }
-      if (o.fail === "launch") return { exit: "finished", reason: "the manual request ran", launched: null, bought: null, failure: "launch failed at gate: the preview flagged a risk" };
+      if (o.fail === "launch") return { exit: "finished", reason: "the manual request ran", launched: null, failure: "launch failed at gate: the preview flagged a risk" };
       const coin = o.launchCoin ?? getAddress("0x00000000000000000000000000000000000b0d1e");
       const txHash = fakeHash();
       writeFileAtomic(paths.state, serializeBook({ ...book(), launched: { coin, poolId: "0x01", at: Date.now(), txHash } }));
-      return { exit: "finished", reason: "the manual request ran", launched: { coin, txHash }, bought: null, failure: null };
-    }
-    if (request.kind === "buy") {
-      if (o.fail === "buy") return { exit: "finished", reason: "the manual request ran", launched: null, bought: null, failure: "buy failed at receipt: reverted" };
-      if (o.fail === "unknown-buy") return { exit: "finished", reason: "the manual request ran", launched: null, bought: null, failure: null, unresolved: true };
-      const coin = getAddress(String(request.coin));
-      const wei = BigInt(Math.round(Number(request.bnb) * 1e6)) * 10n ** 12n;
-      const txHash = fakeHash();
-      writeFileAtomic(paths.state, serializeBook(recordBuy(book(), { coin, symbol: "TODAY", quote: MAINNET.contracts.wrappedNative, coinsOut: 10n ** 21n, bnbInWei: wei, gasWei: 0n, at: Date.now(), fundedBy: "wallet", ownLaunch: false, source: "manual" })));
-      addToLedger(o.home, { at: Date.now(), agent: ENTRY_AGENT, wei, tx: txHash });
-      return { exit: "finished", reason: "the manual request ran", launched: null, bought: { coin, txHash, bnbWei: wei }, failure: null };
+      return { exit: "finished", reason: "the manual request ran", launched: { coin, txHash }, failure: null };
     }
     return nothing("not a request the entry makes");
   };
