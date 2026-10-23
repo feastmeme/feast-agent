@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { auditSource, sha256Of, type StaticAudit } from "./audit/static.ts";
 import { DEFAULT_LIMITS, loosenedBeyond, resolveLimits, type Limits } from "./limits.ts";
 import { PRESETS, resolveParams, type PresetId } from "./presets/specs.ts";
+import { CAP_REFUSAL, DEFAULT_IDLE_MINUTES, IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, LEAGUE_CAP_BNB, SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
+import { readPrompt } from "./prompt/host.ts";
 import { agentPaths, checkAgentName, readJson, writeJsonAtomic } from "./store.ts";
 
 /**
@@ -18,14 +20,27 @@ export type Confirmed = { at: string; limits: Limits; params: Record<string, unk
 export type AgentConfig = {
   version: 1;
   name: string;
-  /** `entry`: the league entry's own agent (task 961), no strategy at all; it runs only `FL enter`'s one-shot requests. */
-  track: "preset" | "script" | "entry";
+  /**
+   * `entry`: the league entry's own agent (task 961), no strategy at all; it runs only `FL enter`'s one-shot requests.
+   * `prompt`: the user's own agent decides by the user's prompt (task 963); the runtime keeps the boundary, and with
+   * an autopilot trades its preset only after the host has been silent.
+   */
+  track: "preset" | "script" | "entry" | "prompt";
+  /** The preset; on the prompt track, the autopilot's preset, or null. */
   preset: PresetId | null;
   script: { path: string; sha256: string } | null;
+  /** The prompt file the user confirmed (prompt track only). The runtime hashes it; it never reads it as instructions. */
+  prompt?: { path: string; sha256: string } | null;
+  /** The autopilot: the preset trades only after the host has been silent this long (prompt track only). */
+  autopilot?: { idleMinutes: number } | null;
   params: Record<string, unknown>;
   /** Which parameters came from the user's sentence (the rest are defaults). */
   given: string[];
   limits: Limits;
+  /**
+   * A preset's or a script's tick. On the prompt track: the autopilot preset's own interval while it trades, or
+   * without one the runtime's safety pass (SAFETY_PASS_SECONDS). Never the host's cadence: the host looks when it chooses.
+   */
   tickSeconds: number;
   sentence: string | null;
   createdAt: string;
@@ -36,6 +51,10 @@ export type PlanInput = {
   name: string;
   preset?: string;
   scriptPath?: string;
+  /** Prompt mode: the user's strategy file; `preset` is then the autopilot. */
+  promptPath?: string;
+  /** Prompt mode with an autopilot: the host's silence, in minutes, before the preset trades. */
+  idleMinutes?: number;
   params?: Record<string, unknown>;
   limits?: Record<string, unknown>;
   tickSeconds?: number;
@@ -45,6 +64,19 @@ export type PlanInput = {
 const TICK_MIN = 15;
 const TICK_MAX = 3_600;
 
+/**
+ * The league's capital cap on a plan's limits (task 963): a budget the user gives above it is refused, and
+ * none given is the cap. It only ever tightens L3, which `resolveLimits` allows.
+ */
+function capped(given: Record<string, unknown>): { ok: true; limits: Record<string, unknown> } | { ok: false } {
+  if (!("budgetBnb" in given)) return { ok: true, limits: { ...given, budgetBnb: Math.min(DEFAULT_LIMITS.budgetBnb, LEAGUE_CAP_BNB) } };
+  return aboveCap(given.budgetBnb) ? { ok: false } : { ok: true, limits: given };
+}
+const aboveCap = (raw: unknown) => {
+  const value = typeof raw === "string" && /^\d+(\.\d+)?$/.test(raw.trim()) ? Number(raw.trim()) : raw;
+  return typeof value === "number" && Number.isFinite(value) && value > LEAGUE_CAP_BNB;
+};
+
 export function planAgent(input: PlanInput, now = new Date()): { ok: true; agent: AgentConfig; audit: StaticAudit | null } | { ok: false; errors: string[] } {
   const errors: string[] = [];
   try {
@@ -52,9 +84,13 @@ export function planAgent(input: PlanInput, now = new Date()): { ok: true; agent
   } catch (error) {
     errors.push((error as Error).message);
   }
-  const limits = resolveLimits(input.limits ?? {});
+  const cap = capped(input.limits ?? {});
+  if (!cap.ok) return { ok: false, errors: [...errors, CAP_REFUSAL] };
+  const limits = resolveLimits(cap.limits);
   if (!limits.ok) return { ok: false, errors: [...errors, ...limits.errors] };
+  if (input.promptPath !== undefined) return planPrompt(input, limits.limits, errors, now);
   if (Boolean(input.preset) === Boolean(input.scriptPath)) return { ok: false, errors: [...errors, "an agent runs one preset or one script"] };
+  if (input.idleMinutes !== undefined) return { ok: false, errors: [...errors, "--idle-minutes is for a prompt agent's autopilot"] };
 
   let preset: PresetId | null = null;
   let params: Record<string, unknown> = {};
@@ -88,9 +124,59 @@ export function planAgent(input: PlanInput, now = new Date()): { ok: true; agent
       track: preset ? "preset" : "script",
       preset,
       script,
+      prompt: null,
+      autopilot: null,
       params,
       given: Object.keys(input.params ?? {}),
       limits: limits.limits,
+      tickSeconds: tick,
+      sentence: input.sentence?.trim() || null,
+      createdAt: now.toISOString(),
+      confirmed: null,
+    },
+  };
+}
+
+/** A prompt agent: the prompt's path and sha256, and at most one preset as its autopilot, never a script. */
+function planPrompt(input: PlanInput, limits: Limits, errors: string[], now: Date): { ok: true; agent: AgentConfig; audit: null } | { ok: false; errors: string[] } {
+  if (input.scriptPath) return { ok: false, errors: [...errors, "a prompt agent takes at most one preset, as its autopilot, and never a script"] };
+  const prompt = readPrompt(input.promptPath!);
+  if (!prompt.ok) return { ok: false, errors: [...errors, prompt.error] };
+  let preset: PresetId | null = null;
+  let params: Record<string, unknown> = {};
+  let tick = SAFETY_PASS_SECONDS;
+  let autopilot: AgentConfig["autopilot"] = null;
+  if (input.preset) {
+    if (!(input.preset in PRESETS)) return { ok: false, errors: [...errors, `unknown preset "${input.preset}"; the presets are ${Object.keys(PRESETS).join(", ")}`] };
+    preset = input.preset as PresetId;
+    const resolved = resolveParams(preset, input.params ?? {}, limits);
+    if (!resolved.ok) return { ok: false, errors: [...errors, ...resolved.errors] };
+    params = resolved.params;
+    tick = input.tickSeconds ?? PRESETS[preset].tickSeconds;
+    const idle = input.idleMinutes ?? DEFAULT_IDLE_MINUTES;
+    if (!Number.isInteger(idle) || idle < IDLE_MINUTES_MIN || idle > IDLE_MINUTES_MAX) errors.push(`the idle threshold is ${IDLE_MINUTES_MIN}–${IDLE_MINUTES_MAX} whole minutes (got ${idle})`);
+    autopilot = { idleMinutes: idle };
+  } else {
+    if (input.idleMinutes !== undefined) errors.push("--idle-minutes needs --autopilot <preset>: without one, nothing trades on its own");
+    if (input.tickSeconds !== undefined) errors.push("a prompt agent without an autopilot has no tick: your agent decides when to look");
+    if (Object.keys(input.params ?? {}).length > 0) errors.push("a prompt agent without an autopilot has no parameters: the prompt is the strategy");
+  }
+  if (!Number.isInteger(tick) || tick < TICK_MIN || tick > TICK_MAX) errors.push(`the tick is ${TICK_MIN}–${TICK_MAX} s (got ${tick})`);
+  if (errors.length > 0) return { ok: false, errors };
+  return {
+    ok: true,
+    audit: null,
+    agent: {
+      version: 1,
+      name: input.name,
+      track: "prompt",
+      preset,
+      script: null,
+      prompt: { path: prompt.path, sha256: prompt.sha256 },
+      autopilot,
+      params,
+      given: Object.keys(input.params ?? {}),
+      limits,
       tickSeconds: tick,
       sentence: input.sentence?.trim() || null,
       createdAt: now.toISOString(),
@@ -116,6 +202,11 @@ export function applyChange(
   options: { byReview: boolean },
 ): { ok: true; agent: AgentConfig } | { ok: false; errors: string[] } {
   if (!agent.confirmed) return { ok: false, errors: ["the agent was never confirmed"] };
+  if (change.limits && "budgetBnb" in change.limits && aboveCap(change.limits.budgetBnb)) return { ok: false, errors: [CAP_REFUSAL] };
+  if (agent.track === "prompt" && !agent.preset) {
+    if (Object.keys(change.params ?? {}).length > 0) return { ok: false, errors: ["a prompt agent without an autopilot has no parameters: the prompt is the strategy"] };
+    if (change.tickSeconds !== undefined) return { ok: false, errors: ["a prompt agent without an autopilot has no tick: your agent decides when to look"] };
+  }
   const limits = resolveLimits({ ...agent.limits, ...(change.limits ?? {}) });
   if (!limits.ok) return { ok: false, errors: limits.errors };
   let params = { ...agent.params, ...(change.params ?? {}) };

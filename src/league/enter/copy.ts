@@ -165,15 +165,12 @@ export function badRow(why: BadRow, lang: Lang): string {
   return zh ? `feast.meme 给的今天的币不能用：${what}。这次没有买；过几分钟再运行一次 FL enter。` : `Today's coin from feast.meme can't be used: ${what}. Nothing was bought; run FL enter again in a few minutes.`;
 }
 
-export function priceUnreadable(lang: Lang): string {
-  return lang === "zh" ? "暂时没能从 BNB Smart Chain 读到 BNB 的价格。这次没有买；过一分钟再运行一次 FL enter。" : "The BNB price couldn't be read from BNB Smart Chain just now. Nothing was bought; run FL enter again in a minute.";
-}
-
 export function refusedLine(limit: string, message: string, lang: Lang): string {
   return lang === "zh" ? `被 ${limit} 拒绝：${message}（没有向钱包请求任何东西）` : `refused by ${limit}: ${message} (nothing was asked of the wallet)`;
 }
 
-export type BuyView = { agentId: string; coin: string; symbol: string | null; bnb: number; usdt: number; slippagePct: number; maxTradeBnb: number; budgetBnb: number; maxDailySpendBnb: number };
+/** `usdt`: the amount's worth at the BNB price just read, for reference only; null when the price could not be read. */
+export type BuyView = { agentId: string; coin: string; symbol: string | null; bnb: number; usdt: number | null; slippagePct: number; maxTradeBnb: number; budgetBnb: number; maxDailySpendBnb: number };
 
 export function buyCard(view: BuyView, lang: Lang): string {
   const zh = lang === "zh";
@@ -183,7 +180,7 @@ export function buyCard(view: BuyView, lang: Lang): string {
     "",
     table([
       [zh ? "币" : "Coin", zh ? `${shown}：今天分到的币，按新加坡时间 08:00 的区块抽取` : `${shown}: today's coin, assigned from the 08:00 SGT block`],
-      [zh ? "金额" : "Amount", zh ? `${view.bnb} BNB，约 ${view.usdt.toFixed(2)} USDT（报名要求的 5 USDT，加 2% 应对价格波动）` : `${view.bnb} BNB, about ${view.usdt.toFixed(2)} USDT (the entry's 5 USDT, and 2% for the price moving)`],
+      [zh ? "金额" : "Amount", `${view.bnb} BNB${zh ? "（报名金额）" : " (the entry's amount)"}${view.usdt === null ? "" : ` ≈ ${view.usdt.toFixed(2)} USDT`}`],
       [zh ? "滑点" : "Slippage", zh ? `最多 ${view.slippagePct}%` : `at most ${view.slippagePct}%`],
       [zh ? "买入之后" : "After the buy", zh ? "最多两笔授权，这样以后卖出只要一笔交易" : "up to two approvals, so that a later sale is one transaction"],
       [zh ? "费用" : "Cost", zh ? "上面的金额，加最多三笔交易的 gas；发送前钱包会先预览每一笔" : "the amount above, and gas for up to three transactions; your wallet previews each before it is sent"],

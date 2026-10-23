@@ -1,24 +1,30 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { getAddress, isAddress, type Address } from "viem";
 
 import { approveCall, MAX_UINT160, permit2ApproveCall } from "../sdk/infinity.ts";
 import { MAINNET } from "../sdk/networks.ts";
-import { applyChange, confirmAgent, loadAgent, planAgent, saveAgent, type AgentConfig } from "./agent.ts";
+import { applyChange, confirmAgent, loadAgent, planAgent, saveAgent, type AgentConfig, type PlanInput } from "./agent.ts";
 import { AUDIT_RULES } from "./audit/static.ts";
 import { auditFile, auditRefusal, recordModelVerdict } from "./audit/verdict.ts";
 import { BawError, BawSigner, execRunner } from "./baw.ts";
 import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
+import { dataFace } from "./data/face.ts";
+import { selfView } from "./data/self.ts";
 import { INDEXER_URL } from "./events.ts";
 import { refuseEarly } from "./early.ts";
 import { Executor } from "./executor.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
+import { noteCommand } from "./notes/queue.ts";
+import { PAGE_IDLE_RULE } from "./prompt/constants.ts";
+import { promptChanged, recordHostAction, within } from "./prompt/host.ts";
+import { outcomeLine, sendRequest, waitForOutcome } from "./prompt/inbox.ts";
 import { PRESETS, PRESET_IDS } from "./presets/specs.ts";
 import { BODY_COIN_QUOTE, BODY_COIN_SPLIT, bodyCoinNames } from "./register/claims.ts";
 import {
@@ -53,10 +59,12 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
+import { clean } from "./enter/copy.ts";
 import { enter, entryOneShot } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
+import { checkScript, scriptCheckPassed, writeCheckReport, type CheckReport } from "./script/check.ts";
 import { standingLines } from "./season-card.ts";
 import { sessionView } from "./session.ts";
 import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
@@ -64,6 +72,11 @@ import type { IntentRequest } from "./strategy.ts";
 
 const HELP = `feast-league — run a Feast agent with your Binance Agentic Wallet
 
+  plan <name> --prompt <strategy.md> [--autopilot <${PRESET_IDS.join("|")}>] [--idle-minutes N] [--set key=value]… [--limit key=value]…
+  start <name> --prompt <strategy.md> [--autopilot <preset>] [--idle-minutes N] [--yes] [--detach]
+                                  prompt mode: your own agent decides by your prompt, with data, buy, sell and note; the
+                                  runtime keeps the limits, and an --autopilot preset trades only after N minutes (default 60)
+                                  with no buy, sell or note from your agent. Without --yes: the card, and nothing starts
   plan <name> --preset <${PRESET_IDS.join("|")}> [--set key=value]… [--limit key=value]… [--tick s] [--sentence "…"]
   plan <name> --script <file.mjs> [--limit key=value]… [--tick s] [--sentence "…"]
                                   validate and save an agent, and print its confirmation card
@@ -78,8 +91,16 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   review <name>                   the last hour, as JSON, for the optional hourly review
   audit <file.mjs> [--model-verdict pass|refuse --notes "…"]
                                   the script audit: static rules, then the model read's verdict
-  buy <name> <coin|FEAST> <bnb>   one guarded buy, through the agent's limits
-  sell <name> <coin|FEAST> <fraction|all>
+  script check <file.mjs> [--json] the script against a stub world, through the real guard; a pass on record with a
+                                  passed audit counts as the warm-up done for that exact file
+  data [<name>] [--since 24h|90m|7d|<iso>] [--coin 0x…] [--json]
+                                  every Feast coin in BNB, the agent's book and PnL in BNB, the league's clock and boards;
+                                  with --since, hourly history. Reads only
+  note <name> "<text>" [--tx 0x…] one reason, at most 280 characters: kept here, sent to feast.meme when it takes notes
+  buy <name> <coin|FEAST> <bnb> [--no-wait]
+                                  one guarded buy, through the agent's limits; into a running agent it waits up to 90 s
+                                  for the outcome (filled: exit 0; refused: exit 2)
+  sell <name> <coin|FEAST> <fraction|all> [--no-wait]
   enter --name <id>.ai [--yes] [--lang en|zh] [--json]
                                   the league entry, once: launch the body coin and buy today's coin; never starts trading
                                   (--name is the wallet's Agent ID here; each card needs its own --yes)
@@ -94,7 +115,8 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   agents                          the agents on this machine
   doctor                          is everything in place?
 
-Home: $FEAST_LEAGUE_HOME (default ~/.feast-league). RPC: $FEAST_MAINNET_RPC_URL (default the Binance dataseed).`;
+Home: $FEAST_LEAGUE_HOME (default ~/.feast-league). RPC: $FEAST_MAINNET_RPC_URL (default the Binance dataseed).
+Site: $FEAST_LEAGUE_SITE (default https://feast.meme). Indexer: $FEAST_LEAGUE_INDEXER (default https://indexer.feast.meme).`;
 
 const BIN = fileURLToPath(new URL("./bin.mjs", import.meta.url));
 
@@ -117,6 +139,7 @@ function signerFor(home: string, name: string | null): BawSigner {
 }
 
 const rpc = () => process.env.FEAST_MAINNET_RPC_URL?.trim() || DEFAULT_MAINNET_RPC;
+const indexer = () => (process.env.FEAST_LEAGUE_INDEXER?.trim() || INDEXER_URL).replace(/\/+$/, "");
 const print = (json: boolean, data: unknown, human: () => string) => console.log(json ? JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2) : human());
 
 function detach(home: string, name: string, extra: string[] = []): number {
@@ -172,13 +195,19 @@ async function main(argv: string[]): Promise<number> {
       quote: { type: "string" },
       description: { type: "string" },
       "no-league": { type: "boolean", default: false },
+      prompt: { type: "string" },
+      autopilot: { type: "string" },
+      "idle-minutes": { type: "string" },
+      since: { type: "string" },
+      tx: { type: "string" },
+      "no-wait": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
   const [command, ...args] = positionals;
   if (!command || values.help) {
     console.log(HELP);
-    return command ? 0 : 1;
+    return values.help || command ? 0 : 1;
   }
   const home = values.home ?? leagueHome();
   const json = values.json;
@@ -191,19 +220,28 @@ async function main(argv: string[]): Promise<number> {
     if (name === ENTRY_AGENT) throw new Error(`${ENTRY_AGENT} is FL enter's; plan your season agent under another name`);
     return name;
   };
+  /** What plan and start --prompt plan from: a prompt with at most one preset as its autopilot, or a preset, or a script. */
+  const planInput = (name: string): PlanInput => {
+    if (values.autopilot !== undefined && values.prompt === undefined) throw new Error("--autopilot is a prompt agent's fallback: give the prompt with --prompt <strategy.md>");
+    if (values["idle-minutes"] !== undefined && values.prompt === undefined) throw new Error("--idle-minutes goes with --prompt and --autopilot");
+    if (values.prompt !== undefined && values.preset !== undefined) throw new Error("with --prompt, name the fallback preset with --autopilot, not --preset");
+    return {
+      name,
+      preset: values.prompt !== undefined ? values.autopilot : values.preset,
+      scriptPath: values.script,
+      promptPath: values.prompt,
+      idleMinutes: values["idle-minutes"] !== undefined ? Number(values["idle-minutes"]) : undefined,
+      params: kv(values.set),
+      limits: kv(values.limit),
+      tickSeconds: values.tick ? Number(values.tick) : undefined,
+      sentence: values.sentence,
+    };
+  };
 
   switch (command) {
     case "plan": {
       const name = notEntry(need(args[0], "an agent name"));
-      const planned = planAgent({
-        name,
-        preset: values.preset,
-        scriptPath: values.script,
-        params: kv(values.set),
-        limits: kv(values.limit),
-        tickSeconds: values.tick ? Number(values.tick) : undefined,
-        sentence: values.sentence,
-      });
+      const planned = planAgent(planInput(name));
       if (!planned.ok) {
         print(json, { ok: false, errors: planned.errors }, () => `not planned:\n- ${planned.errors.join("\n- ")}`);
         return 2;
@@ -218,7 +256,7 @@ async function main(argv: string[]): Promise<number> {
     case "card": {
       const agent = loadAgent(home, need(args[0], "an agent name"));
       if (!agent) throw new Error("no such agent");
-      console.log(renderCard(agent));
+      console.log(renderCard(agent, null, { warmupPassed: agent.track === "script" && scriptCheckPassed(home, agent.script!.sha256) }));
       return 0;
     }
     case "start":
@@ -226,6 +264,23 @@ async function main(argv: string[]): Promise<number> {
     case "run": {
       const name = notEntry(need(args[0], "an agent name"));
       let agent = loadAgent(home, name);
+      let replanned = false;
+      // start --prompt: plan first when there is no agent yet, or its prompt, autopilot, parameters or limits changed.
+      if (values.prompt !== undefined) {
+        if (command !== "start") throw new Error("--prompt goes with plan or start");
+        const planned = planAgent(planInput(name));
+        if (!planned.ok) {
+          print(json, { ok: false, errors: planned.errors }, () => `not planned:\n- ${planned.errors.join("\n- ")}`);
+          return 2;
+        }
+        const shape = (a: AgentConfig) => JSON.stringify([a.track, a.prompt ?? null, a.preset, a.autopilot ?? null, a.params, a.limits, a.tickSeconds]);
+        if (!agent || shape(agent) !== shape(planned.agent)) {
+          if (agent && statusOf(home, name).running) throw new Error(`agent "${name}" is running; stop it first (feast-league stop ${name}), then start it with the new prompt`);
+          saveAgent(home, planned.agent);
+          agent = planned.agent;
+          replanned = true;
+        }
+      }
       if (!agent) throw new Error(`no agent "${name}": plan it first`);
       if (command === "resume") {
         removeStop(agentPaths(home, name).stop);
@@ -236,11 +291,17 @@ async function main(argv: string[]): Promise<number> {
       }
       if (command !== "run" && !agent.confirmed) {
         if (!values.yes) {
-          console.log(`${renderCard(agent)}\n\nNot started: this needs the user's explicit yes (--yes).`);
+          console.log(`${renderCard(agent, null, { warmupPassed: agent.track === "script" && scriptCheckPassed(home, agent.script!.sha256) })}\n\nNot started: this needs the user's explicit yes (--yes).`);
           return 2;
         }
+        if (replanned) console.log(`${renderCard(agent)}\n`);
         agent = confirmAgent(agent);
         saveAgent(home, agent);
+      }
+      if (agent.track === "prompt" && promptChanged(agent)) {
+        const why = `the prompt changed since you confirmed it (or is gone): feast-league start ${name} --prompt ${agent.prompt?.path ?? "<file>"} shows the new card`;
+        print(json, { ok: false, refused: why }, () => `not started: ${why}`);
+        return 2;
       }
       if (agent.track === "script") {
         const why = auditRefusal(home, agent.script!.path);
@@ -296,6 +357,12 @@ async function main(argv: string[]): Promise<number> {
       const lang = langOf(values.lang);
       const unread = unreadNotifications(home, name, true);
       const league = values["no-league"] ? null : await leagueStanding(home, lang).catch(() => null);
+      // The agent's figures in BNB (task 963), marked on the chain only when it holds something; a USDT figure is a reference.
+      const holds = Object.keys(s.book?.positions ?? {}).length > 0;
+      const chain = new LeagueChain(MAINNET, rpc());
+      const mine = await selfView(home, name, { chain: holds ? chain : null, now: Date.now() }).catch(() => null);
+      const bnbUsd = mine && (holds || mine.pnl.realizedBnb !== 0) ? await within(chain.bnbUsd(), 8_000) : null;
+      const usdRef = typeof bnbUsd === "number" && bnbUsd > 0 ? { bnbUsd: Number(bnbUsd.toFixed(4)), at: new Date().toISOString() } : null;
       const data = {
         name,
         running: s.running,
@@ -312,17 +379,40 @@ async function main(argv: string[]): Promise<number> {
         counters: s.book?.counters ?? null,
         paused: s.book?.paused ?? null,
         warmup: s.book?.warmup ?? null,
+        pnl: mine?.pnl ?? null,
+        capital: mine?.capital ?? null,
+        usdRef,
+        prompt: mine?.prompt ?? null,
+        autopilot: mine?.autopilot ?? null,
+        lastTradeAt: mine?.lastTradeAt ?? null,
+        lastActionAt: mine?.lastActionAt ?? null,
         notifications: s.notifications,
         unread,
         league: league?.data ?? null,
       };
+      const ago = (at: string | null) => (at ? `${duration(Date.now() - Date.parse(at), "en")} ago` : "never");
+      const signed = (n: number) => `${n >= 0 ? "+" : ""}${Number(n.toPrecision(6))} BNB`;
+      const selfLines = mine
+        ? [
+            `PnL: realized ${signed(mine.pnl.realizedBnb)}, unrealized ${holds ? signed(mine.pnl.unrealizedBnb) : "none"}${usdRef ? ` (≈ ${((mine.pnl.realizedBnb + mine.pnl.unrealizedBnb) * usdRef.bnbUsd).toFixed(2)} USDT)` : ""}; capital: ${mine.capital.spentBnb} of ${mine.capital.capBnb} BNB, wallet-wide`,
+            ...(mine.prompt
+              ? [
+                  `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: feast-league start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
+                  mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no action from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss",
+                  `last trade ${ago(mine.lastTradeAt)}; last action by your agent ${ago(mine.lastActionAt)}`,
+                  `the league page's rule: ${PAGE_IDLE_RULE}`,
+                ]
+              : []),
+          ]
+        : [];
       print(json, data, () =>
         [
-          `${name}: ${s.running ? "running" : "not running"}${s.stop ? ` (stop file: ${s.stop})` : ""}; ${s.agent!.track === "preset" ? `preset ${s.agent!.preset}` : s.agent!.track === "entry" ? "the league entry (FL enter)" : "script"}`,
+          `${name}: ${s.running ? "running" : "not running"}${s.stop ? ` (stop file: ${s.stop})` : ""}; ${s.agent!.track === "preset" ? `preset ${s.agent!.preset}` : s.agent!.track === "entry" ? "the league entry (FL enter)" : s.agent!.track === "prompt" ? "prompt mode" : "script"}`,
           `positions: ${data.positions.length ? data.positions.map((p) => `${p.symbol} ${p.costBnb} BNB${p.armed ? "" : " (exit not armed)"}`).join(", ") : "none"}`,
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...(data.paused ? [`paused: ${data.paused}`] : []),
-          ...(data.warmup ? [`warm-up: ${data.warmup.trades} of 5 trades`] : []),
+          ...(data.warmup ? [`warm-up: ${data.warmup.trades >= 5 ? "done" : `${data.warmup.trades} of 5 trades`}`] : []),
+          ...selfLines,
           ...(unread.length > 0 ? ["new since the last status:", ...unreadShown(unread).map((n) => (typeof n === "string" ? n : noticeLine(n, lang)))] : ["latest:", ...s.notifications.slice(-8).map((n) => noticeLine(n, lang))]),
           ...(league ? ["", ...league.lines] : []),
         ].join("\n"),
@@ -407,6 +497,8 @@ async function main(argv: string[]): Promise<number> {
         command === "buy"
           ? { kind: "buy" as const, coin, bnb: Number(amount), reason: "manual buy" }
           : { kind: "sell" as const, coin, fraction: amount === "all" ? 1 : Number(amount), reason: "manual sale" };
+      // An action by the user's own agent: in prompt mode it holds back the autopilot (task 963).
+      recordHostAction(home, name, command);
       // The limits that need no wallet are checked before anything is asked of the wallet.
       const early = refuseEarly(home, agent, request);
       if (early) {
@@ -415,15 +507,47 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       if (statusOf(home, name).running) {
-        const paths = agentPaths(home, name);
-        mkdirSync(paths.inbox, { recursive: true });
-        writeJsonAtomic(join(paths.inbox, `${Date.now()}-${command}.json`), { type: "intent", request });
-        console.log(`queued for the running agent "${name}"; feast-league status ${name}`);
-        return 0;
+        const sent = sendRequest(home, name, request);
+        if (values["no-wait"]) {
+          print(json, { ok: true, queued: true, requestId: sent.requestId }, () => `queued for the running agent "${name}"; feast-league status ${name}`);
+          return 0;
+        }
+        const outcome = await waitForOutcome(home, name, sent);
+        const line = outcomeLine(outcome, name);
+        print(json, { ok: line.code === 0, requestId: sent.requestId, outcome }, () => line.text);
+        return line.code;
       }
       const outcome = await runAgent({ home, name, signer: signerFor(home, name), rpcUrl: rpc(), only: [request] });
       console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
       return outcome.exit === "finished" ? 0 : 2;
+    }
+    case "data": {
+      const signer = signerFor(home, null);
+      const result = await dataFace(
+        { home, site: siteFromEnv(), indexer: indexer(), fetch, chain: new LeagueChain(MAINNET, rpc()), wallet: () => signer.address() },
+        { name: args[0], since: values.since, coin: values.coin },
+      );
+      print(json, result.data, () => result.text);
+      return result.code;
+    }
+    case "note": {
+      const name = notEntry(checkAgentName(need(args[0], "an agent name")));
+      if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
+      if (args[1] === undefined) throw new Error('missing the note\'s text: feast-league note <name> "<text>"');
+      const signer = signerFor(home, null);
+      const out = await noteCommand({ home, name, site: siteFromEnv(), fetch, wallet: () => signer.address() }, { text: args[1], tx: values.tx });
+      print(json, out.data, () => out.text);
+      return out.code;
+    }
+    case "script": {
+      if (args[0] !== "check") throw new Error("feast-league script check <file.mjs>");
+      const file = resolve(need(args[1], "a script file"));
+      if (!existsSync(file)) throw new Error(`no script at ${file}`);
+      const source = readFileSync(file, "utf8");
+      const report = await checkScript(source, { file });
+      const path = writeCheckReport(home, report);
+      print(json, { ...report, report: path }, () => checkLines(report, path, auditRefusal(home, file, source)));
+      return report.verdict === "pass" ? 0 : 2;
     }
     case "enter":
       return enterCommand(home, values, json);
@@ -438,7 +562,7 @@ async function main(argv: string[]): Promise<number> {
       const names = existsSync(dir) ? readdirSync(dir) : [];
       for (const name of names) {
         const s = statusOf(home, name);
-        console.log(`${name}\t${s.agent?.track ?? "?"}\t${s.agent?.preset ?? s.agent?.script?.path ?? ""}\t${s.running ? "running" : "stopped"}${s.stop ? " (stop file)" : ""}`);
+        console.log(`${name}\t${s.agent?.track ?? "?"}\t${s.agent?.prompt?.path ?? s.agent?.preset ?? s.agent?.script?.path ?? ""}${s.agent?.track === "prompt" && s.agent.preset ? ` (autopilot ${s.agent.preset})` : ""}\t${s.running ? "running" : "stopped"}${s.stop ? " (stop file)" : ""}`);
       }
       return 0;
     }
@@ -448,6 +572,24 @@ async function main(argv: string[]): Promise<number> {
       console.error(`unknown command "${command}"\n\n${HELP}`);
       return 1;
   }
+}
+
+/** `feast-league script check`, as a person reads it: each check, the failure's snapshot and request, and what a pass means. */
+function checkLines(report: CheckReport, path: string, audit: string | null): string {
+  const sha = `${report.sha256.slice(0, 6)}…${report.sha256.slice(-4)}`;
+  const s = report.stats;
+  return [
+    `FL script check: ${report.file ?? "the script"} (sha256 ${sha})`,
+    `The stub world: ${report.world.snapshots} snapshots, ${report.world.coins} coins, ${report.world.balanceBnb} BNB, the default limits with the 0.15 BNB cap.`,
+    ...report.checks.map((c) => `  ${c.pass ? "ok" : "NO"} ${c.id}: ${c.label}${c.pass ? "" : ` — ${c.detail ?? ""}${c.snapshot !== undefined ? ` (snapshot ${c.snapshot})` : ""}${c.request ? `: ${clean(c.request, 200)}` : ""}`}`),
+    `${report.verdict.toUpperCase()}: ${s.ticks} ticks, ${s.events} events, ${s.requests} requests (${s.buys} buys, ${s.sells} sales, ${s.launches} launches), ${s.refusals} refused by the guard`,
+    `Report: ${path}`,
+    report.verdict === "pass"
+      ? audit === null
+        ? "With its audit passed, this counts as the warm-up done for this exact file: it starts at its own sizes, within the hard limits. Any edit is a new file."
+        : `The audit has not passed yet (${audit}): once it does, this check counts as the warm-up done for this exact file.`
+      : "Fix the script and run the check again; until a check passes, its first 5 trades run at 0.001 BNB.",
+  ].join("\n");
 }
 
 /** 280 characters, zh and en mixed, for the preview of the Register message. */
