@@ -92,15 +92,7 @@ export function notEligible(why: "no-agent-id" | "differs" | "wallet" | "unreada
   }
 }
 
-// --- the body coin -------------------------------------------------------------------------
-
-export function launchCheckUnreadable(lang: Lang): string {
-  return lang === "zh" ? "没能确认这个钱包是否已经发过币；请再运行一次 FL enter。" : "Could not check whether this wallet already launched; run FL enter again.";
-}
-
-export function alreadyLaunched(symbol: string | null, coin: string, lang: Lang): string {
-  return lang === "zh" ? `10/23 以来已经发过币：${coinShown(symbol, coin)}，它就是你的身体币。` : `Already launched since 10/23: ${coinShown(symbol, coin)}: it is your body coin.`;
-}
+// --- the launch ---------------------------------------------------------------------------------
 
 /** After the launch: the coin, and its transaction in full. */
 export function launchedTx(symbol: string, coin: string, txHash: string | null, lang: Lang): string {
@@ -141,14 +133,7 @@ export function refusedLine(limit: string, message: string, lang: Lang): string 
 
 // --- the notes session -----------------------------------------------------------------
 
-/** Under the launch card: the same yes signs the notes session's one message. */
-export function notesOnLaunch(view: { agentId: string; season: number }, lang: Lang): string {
-  return lang === "zh"
-    ? `同一个「好」之后还会签一条消息（不是交易，不花 gas，不动资金），为 ${shownName(view.agentId)} 在 feast.meme 开通第 ${view.season} 季的笔记会话。`
-    : `The same yes then signs one message (no transaction, no gas, no funds) that opens ${shownName(view.agentId)}'s notes session on feast.meme for season ${view.season}.`;
-}
-
-/** The notes card, when the body coin already exists: entering is this one signature. */
+/** The notes card, when feast.meme already keeps this wallet's Register: entering is this one signature. */
 export function notesCard(view: { agentId: string; season: number }, lang: Lang): string {
   const zh = lang === "zh";
   const who = shownName(view.agentId);

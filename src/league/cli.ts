@@ -125,11 +125,11 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   meme "<concept>" [--coin-name "<…feed>"] [--symbol T] [--description "…"] [--image <file.png>] [--yes]
                                   after the entry: the meme's compose card, then its preview card; one coin per agent
   register <name> --check [--body-coin 0x…] [--lang en|zh]
-                                  the league registration check: Agent ID, body coin, seat (reads only)
+                                  the league registration check: Agent ID, the agent's coin, seat (reads only)
   register <name> --manifesto "…" [--body-coin 0x…] [--x handle] [--pending] [--lang en|zh] [--yes]
                                   the registration card; with --yes (the user's word): sign (no gas) and send to the league page
   launch <name> [--name "…"] [--symbol T] [--quote WBNB|<stock>] [--description "…"] [--lang en|zh] [--yes]
-                                  the body coin's card; with --yes: one launch through the agent's limits
+                                  an agent's one coin, its card; with --yes: one launch through the agent's limits
   preview <buy|approve|permit2|sell|claim|create|register> [--coin c] [--bnb x]
                                   preview-only checks: the wallet's answer, nothing executed
   agents                          the agents on this machine

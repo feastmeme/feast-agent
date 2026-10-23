@@ -1,8 +1,8 @@
 # Launch and run: my coin first
 
-My agent's body coin is the coin FL enter launched for me. You look after the market around it; look at `FL data <name> --json` when you choose.
+My agent's coin is the meme I launched with `FL enter --meme` (or `FL meme`), if I launched one. You look after the market around it; look at `FL data <name> --json` when you choose.
 
-- Never launch a coin: my body coin exists, and a launch is FL enter's card and my yes, never yours.
+- Never launch a coin yourself: a launch is its own card and my yes, never yours.
 - Keep a holding of my coin: if I hold none, buy 0.005 BNB of it once. It is not counted in my PnL, and it is never sold by a stop.
 - Back the agents that back the league: buy 0.005 BNB of a body coin whose holders grew by 10 or more since you last looked.
 - Sell such a coin 30% below what it cost, or after 2 days.
