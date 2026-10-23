@@ -255,3 +255,48 @@ describe("outcomes that are not known, and the user's resume", () => {
     expect(parseBook(readFileSync(agentPaths(home, "u").state, "utf8")).paused === null || /unresolved|not known/.test(String(parseBook(readFileSync(agentPaths(home, "u").state, "utf8")).paused))).toBe(true);
   });
 });
+
+describe("the one-shot and the entry track (task 961)", () => {
+  it("the loop refuses the entry track, before touching the wallet", async () => {
+    const { entryAgent } = await import("./enter/flow.ts");
+    const { home, signer, calls, chain } = setup();
+    saveAgent(home, confirmAgent(entryAgent()));
+    const outcome = await runAgent({ home, name: "league-entry", signer, chain, maxRuntimeMs: 200 });
+    expect(outcome.exit).toBe("refused");
+    expect(outcome.reason).toMatch(/FL enter/);
+    expect(calls).toEqual([]);
+  });
+
+  it("an entry agent's one-shot runs: there is no strategy to load", async () => {
+    const { entryAgent } = await import("./enter/flow.ts");
+    const { home, signer, chain, board } = setup();
+    saveAgent(home, confirmAgent(entryAgent()));
+    const outcome = await runAgent({ home, name: "league-entry", signer, chain, fetch: board, only: [] });
+    expect(outcome).toEqual({ exit: "finished", reason: "the manual request ran" });
+  });
+
+  it("a one-shot never starts a listening strategy's event poller", async () => {
+    const { home, signer, chain } = setup();
+    const planned = planAgent({ name: "snipe", preset: "sniper" });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const asked: string[] = [];
+    const indexer = (async (url: string) => (asked.push(String(url)), new Response(JSON.stringify({ data: [], cursor: null })))) as unknown as typeof fetch;
+    const outcome = await runAgent({ home, name: "snipe", signer, chain, fetch: indexer, only: [] });
+    expect(outcome.exit).toBe("finished");
+    expect(asked).toEqual([]);
+  });
+
+  it("a one-shot first asks about a transaction whose outcome was not known", async () => {
+    const { parseBook, serializeBook, emptyBook } = await import("./book.ts");
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const { home, signer, chain } = setup();
+    const HASH = `0x${"ee".repeat(32)}` as const;
+    const unresolved = { txHash: HASH, kind: "buy" as const, at: Date.now(), intentId: "b", source: "manual", fundedBy: "wallet" as const, coin: WALLET, symbol: "X", quote: WALLET, payIn: "native" as const, sizeWei: 1n, balanceBefore: 0n, minCoins: 1n };
+    writeFileSync(agentPaths(home, "idle").state, serializeBook({ ...emptyBook(), unresolved: [unresolved] }));
+    (chain as unknown as { client: unknown }).client = { getTransactionReceipt: async () => ({ status: "reverted", logs: [], gasUsed: 1n, effectiveGasPrice: 1n, blockNumber: 3n }) };
+    const outcome = await runAgent({ home, name: "idle", signer, chain, only: [] });
+    expect(outcome.exit).toBe("finished");
+    expect(parseBook(readFileSync(agentPaths(home, "idle").state, "utf8")).unresolved).toEqual([]);
+  });
+});

@@ -228,7 +228,22 @@ export function manifestoProblem(reason: "not-text" | "too-long" | "joiner" | "c
 
 // --- C. the body coin launch ---------------------------------------------------------------
 
-export type LaunchView = { agentId: string | null; name: string; symbol: string; quote: string; description: string | null };
+export type LaunchView = {
+  agentId: string | null;
+  name: string;
+  symbol: string;
+  quote: string;
+  description: string | null;
+  /** Where the coin's picture comes from: the ticker's identicon (the default), the league's creature, or the identicon because the league's was not available. */
+  picture?: "ticker" | "league" | "ticker-fallback";
+};
+
+function pictureRow(picture: LaunchView["picture"], lang: Lang): string {
+  const zh = lang === "zh";
+  if (picture === "league") return zh ? "来自 feast.meme 的联赛形象" : "the league creature from feast.meme";
+  if (picture === "ticker-fallback") return zh ? "按代码自动生成（联赛图片暂时拿不到）" : "drawn from the ticker (the league picture was not available)";
+  return zh ? "按代码自动生成" : "drawn from the ticker";
+}
 
 /** Card C. */
 export function launchCard(view: LaunchView, lang: Lang): string {
@@ -243,7 +258,7 @@ export function launchCard(view: LaunchView, lang: Lang): string {
       [zh ? "代码" : "Ticker", view.symbol],
       [zh ? "配对" : "Paired with", view.quote],
       [zh ? "简介" : "About", view.description ? (zh ? `${quoted(view.description, lang)}（你的宣言）` : `${quoted(view.description, lang)} (your manifesto)`) : zh ? "无" : "none"],
-      [zh ? "图片" : "Picture", zh ? "按代码自动生成" : "drawn from the ticker"],
+      [zh ? "图片" : "Picture", pictureRow(view.picture, lang)],
       [
         zh ? "手续费分配" : "Fee split",
         zh

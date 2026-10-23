@@ -85,15 +85,33 @@ function agentFacts(home: string, name: string): { bookLaunch: Address | null; p
   }
 }
 
-/** A. What is there: the wallet, its Agent ID, its body coin, what the page keeps, the season. Reads only. */
-export async function check(deps: FlowDeps, options: { named?: string | null } = {}): Promise<CheckResult> {
-  const status = await deps.signer.status();
+export type WalletRead =
+  | { kind: "not-ready"; reason: "signed-out" | "devmode" }
+  | { kind: "no-agent-id" }
+  | { kind: "agent-id-unreadable"; reason: string }
+  | { kind: "ok"; wallet: Address; agentId: string };
+
+/**
+ * The wallet and its Agent ID, read and nothing started (shared by `register` and `enter`): signed in,
+ * Developer Mode on, the address, and the Agent ID from the chain. A wallet that does not answer throws.
+ */
+export async function readWallet(signer: Pick<RegistrationSigner, "status" | "settings" | "address">, chain: Pick<FlowChain, "agentIdOf">): Promise<WalletRead> {
+  const status = await signer.status();
   if (!status.connected) return { kind: "not-ready", reason: "signed-out" };
-  if (!(await deps.signer.settings()).devModeEnabled) return { kind: "not-ready", reason: "devmode" };
-  const wallet = await deps.signer.address();
-  const id = await deps.chain.agentIdOf(wallet);
+  if (!(await signer.settings()).devModeEnabled) return { kind: "not-ready", reason: "devmode" };
+  const wallet = await signer.address();
+  const id = await chain.agentIdOf(wallet);
   if (id.state === "unreadable") return { kind: "agent-id-unreadable", reason: id.reason };
   if (id.id === null) return { kind: "no-agent-id" };
+  return { kind: "ok", wallet, agentId: id.id };
+}
+
+/** A. What is there: the wallet, its Agent ID, its body coin, what the page keeps, the season. Reads only. */
+export async function check(deps: FlowDeps, options: { named?: string | null } = {}): Promise<CheckResult> {
+  const read = await readWallet(deps.signer, deps.chain);
+  if (read.kind !== "ok") return read;
+  const { wallet } = read;
+  const id = { id: read.agentId };
 
   const [kept, league, indexed] = await Promise.all([
     deps.site.kept(wallet),

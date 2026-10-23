@@ -88,6 +88,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
   let agent = loadAgent(deps.home, deps.name);
   if (!agent) return { exit: "refused", reason: `no agent "${deps.name}": plan it first` };
   if (!agent.confirmed) return { exit: "refused", reason: `agent "${deps.name}" was never confirmed: nothing runs before the user's yes` };
+  // The league entry's own agent (task 961) runs one request at a time, as a one-shot, never a loop.
+  if (agent.track === "entry" && !deps.only) return { exit: "refused", reason: `"${deps.name}" is FL enter's: it runs one request at a time, never a trading loop` };
   const checked = resolveLimits(agent.limits);
   if (!checked.ok) return { exit: "refused", reason: `the agent's limits do not validate: ${checked.errors.join("; ")}` };
   const atStart = stopReason(deps.home, deps.name);
@@ -139,7 +141,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     };
 
     const chain = deps.chain ?? new LeagueChain(network, rpcUrl);
-    const executor = new Executor({ signer: deps.signer, chain, wallet, network, rpcUrl, stopReason: () => stopReason(deps.home, deps.name), log, now: clock });
+    const executor = new Executor({ signer: deps.signer, chain, wallet, network, rpcUrl, stopReason: () => stopReason(deps.home, deps.name), log, now: clock, fetch: deps.fetch });
     const market = new Market(chain, { indexer: deps.indexer, fetch: deps.fetch, log });
 
     // --- the wallet's state (L16) ------------------------------------------------------------
@@ -204,7 +206,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     }
     const statePath = join(paths.dir, "strategy-state.json");
     const stored = readJson<{ key: string; state: Record<string, unknown> }>(statePath);
-    const stateKey = agent.track === "script" ? agent.script!.sha256 : `preset:${agent.preset}`;
+    const stateKey = agent.track === "script" ? agent.script!.sha256 : agent.track === "entry" ? "entry" : `preset:${agent.preset}`;
     let strategyState: Record<string, unknown> = stored?.key === stateKey ? stored.state : {};
     const save = () => {
       writeFileAtomic(paths.state, serializeBook(book));
@@ -228,50 +230,6 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         return intent.id;
       },
     };
-
-    if (agent.track === "preset") {
-      const strategy = presetStrategy(agent.preset!);
-      const presetAgent = agent;
-      loaded = {
-        meta: { ...strategy.meta, tickSeconds: presetAgent.tickSeconds },
-        params: presetAgent.params,
-        wants: (state) => strategy.wants?.(state) ?? [],
-        async call(fn, snapshot, state, event) {
-          const ttl = fn === "onEvent" ? 30_000 : agent!.tickSeconds * 1_000;
-          const logs: string[] = [];
-          // The agent's current parameters: a `feast-league set` reloads them into a running runtime.
-          const { api, intents, problems } = makeApi(snapshot, { params: agent!.params, state, source: "preset", ttlMs: ttl, log: (t) => logs.push(t) });
-          if (fn === "onEvent" && event) strategy.onEvent?.(api, event, extras);
-          else strategy.onTick(api, extras);
-          return { intents, problems, logs, state };
-        },
-        stop() {},
-      };
-    } else {
-      const sandbox = await ScriptSandbox.start(scriptSource!);
-      const params = { ...sandbox.params, ...agent.params };
-      const slippagePct = typeof params.slippagePct === "number" ? params.slippagePct : Math.min(3, agent.limits.maxSlippagePct);
-      const scriptAgent = agent;
-      loaded = {
-        meta: { ...sandbox.meta, tickSeconds: scriptAgent.tickSeconds },
-        params,
-        wants: () => [],
-        async call(fn, snapshot, state, event) {
-          const result = await sandbox.call(fn, { snapshot, state, params, event }, fn === "onEvent" ? 250 : 1_000);
-          if (!result.ok) return { intents: [], problems: [`the script failed: ${result.error}`], logs: [], state };
-          const ttl = fn === "onEvent" ? 30_000 : scriptAgent.tickSeconds * 1_000;
-          const intents: Intent[] = [];
-          const problems: string[] = [];
-          for (const request of result.requests) {
-            const normal = normalizeIntent(request as IntentRequest, { snapshot, source: "script", slippagePct, ttlMs: ttl });
-            if ("error" in normal) problems.push(normal.error);
-            else intents.push(normal.intent);
-          }
-          return { intents, problems, logs: result.logs, state: result.state };
-        },
-        stop: () => sandbox.stop(),
-      };
-    }
 
     const warmup = () =>
       agent!.track === "script" && book.warmup && warmupActive(book.warmup)
@@ -671,9 +629,6 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     // --- the loop -------------------------------------------------------------------------
     const startedAt = clock();
     const tickMs = () => agent!.tickSeconds * 1_000;
-    const listens = (loaded.meta.events ?? []).length > 0;
-    const poller = listens ? new IndexerPoller({ base: deps.indexer, fetch: deps.fetch }) : null;
-    if (poller) await poller.start().catch((error: unknown) => log("events.start.failed", { reason: String((error as Error).message) }));
     let nextPoll = 0;
     let nextTick = 0;
     let nextPreflight = clock() + (deps.preflightMs ?? 300_000);
@@ -681,7 +636,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     // The coins marked fresh from the chain in a snapshot: deduplicated and capped, whatever a strategy asks for.
     const watchList = () => [...new Set([...loaded!.meta.watch, ...loaded!.wants(strategyState)].map((w) => w.toLowerCase()))].slice(0, 20);
     const watched = () => new Set([...Object.keys(book.positions), ...loaded!.meta.watch.map((w) => (w.toUpperCase() === "FEAST" ? feast.toLowerCase() : w.toLowerCase()))]);
+    // The one-shot comes before any strategy is loaded or listened for: it runs the manual requests and nothing else.
     if (deps.only) {
+      // An outcome an earlier run could not learn is asked about first, so the guard reads a book that is up to date.
+      if (book.unresolved.length > 0) await resolvePending().catch((error: unknown) => log("unresolved.check.failed", { reason: String((error as Error).message) }));
       for (const request of deps.only) {
         const normal = normalizeIntent(request, { snapshot: { feast, now: clock(), limits: agent.limits }, source: "manual", slippagePct: Math.min(3, agent.limits.maxSlippagePct), ttlMs: 120_000 });
         if ("error" in normal) return { exit: "refused", reason: normal.error };
@@ -699,6 +657,55 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       save();
       return { exit: "finished", reason: "the manual request ran" };
     }
+
+    // --- the strategy, for the loop only -------------------------------------------------
+    if (agent.track === "preset") {
+      const strategy = presetStrategy(agent.preset!);
+      const presetAgent = agent;
+      loaded = {
+        meta: { ...strategy.meta, tickSeconds: presetAgent.tickSeconds },
+        params: presetAgent.params,
+        wants: (state) => strategy.wants?.(state) ?? [],
+        async call(fn, snapshot, state, event) {
+          const ttl = fn === "onEvent" ? 30_000 : agent!.tickSeconds * 1_000;
+          const logs: string[] = [];
+          // The agent's current parameters: a `feast-league set` reloads them into a running runtime.
+          const { api, intents, problems } = makeApi(snapshot, { params: agent!.params, state, source: "preset", ttlMs: ttl, log: (t) => logs.push(t) });
+          if (fn === "onEvent" && event) strategy.onEvent?.(api, event, extras);
+          else strategy.onTick(api, extras);
+          return { intents, problems, logs, state };
+        },
+        stop() {},
+      };
+    } else {
+      const sandbox = await ScriptSandbox.start(scriptSource!);
+      const params = { ...sandbox.params, ...agent.params };
+      const slippagePct = typeof params.slippagePct === "number" ? params.slippagePct : Math.min(3, agent.limits.maxSlippagePct);
+      const scriptAgent = agent;
+      loaded = {
+        meta: { ...sandbox.meta, tickSeconds: scriptAgent.tickSeconds },
+        params,
+        wants: () => [],
+        async call(fn, snapshot, state, event) {
+          const result = await sandbox.call(fn, { snapshot, state, params, event }, fn === "onEvent" ? 250 : 1_000);
+          if (!result.ok) return { intents: [], problems: [`the script failed: ${result.error}`], logs: [], state };
+          const ttl = fn === "onEvent" ? 30_000 : scriptAgent.tickSeconds * 1_000;
+          const intents: Intent[] = [];
+          const problems: string[] = [];
+          for (const request of result.requests) {
+            const normal = normalizeIntent(request as IntentRequest, { snapshot, source: "script", slippagePct, ttlMs: ttl });
+            if ("error" in normal) problems.push(normal.error);
+            else intents.push(normal.intent);
+          }
+          return { intents, problems, logs: result.logs, state: result.state };
+        },
+        stop: () => sandbox.stop(),
+      };
+    }
+
+    const listens = (loaded.meta.events ?? []).length > 0;
+    const poller = listens ? new IndexerPoller({ base: deps.indexer, fetch: deps.fetch }) : null;
+    if (poller) await poller.start().catch((error: unknown) => log("events.start.failed", { reason: String((error as Error).message) }));
     log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup() });
     notify("started", `${agent.track === "preset" ? `preset ${agent.preset}` : "script"} running; tick ${agent.tickSeconds} s${warmup() ? `; warm-up: ${warmup()!.remaining} trades at ${warmup()!.sizeBnb} BNB` : ""}`);
     save();

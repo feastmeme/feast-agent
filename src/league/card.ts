@@ -23,6 +23,8 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null)
   if (agent.preset) {
     const spec = PRESETS[agent.preset];
     lines.push(`Preset: ${spec.title}. It ${spec.does}.`);
+  } else if (agent.track === "entry") {
+    lines.push("The league entry (FL enter): one launch and one buy, each after its own card and yes. It never trades on its own.");
   } else {
     lines.push(`Your script: ${agent.script!.path}`);
     lines.push(`Audit: static rules ${audit?.verdict ?? "see feast-league audit"}; the model read must pass too before it starts.`);

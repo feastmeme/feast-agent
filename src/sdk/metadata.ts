@@ -48,21 +48,40 @@ async function pinResponse(response: Response, what: string): Promise<Pinned> {
   return { cid: payload.cid, digest: payload.digest as Hex };
 }
 
+/** How long a pin may take before it is given up: a pin that never answers never holds a launch open. */
+export const PIN_TIMEOUT_MS = 30_000;
+
+/** POST to the pin route, with a timeout; a pin that did not answer in time says so plainly. */
+async function post(url: string, init: RequestInit, what: string, fetchImpl: FetchLike, timeoutMs: number): Promise<Response> {
+  try {
+    return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    if ((error as Error)?.name === "TimeoutError" || (error as Error)?.name === "AbortError") throw new FeastError(`pinning the ${what} did not answer within ${timeoutMs / 1_000} s`, "pin_timeout");
+    throw error;
+  }
+}
+
 /** Pin a PNG/JPEG/WebP picture. */
-export async function pinImage(siteUrl: string, bytes: Uint8Array, fetchImpl: FetchLike = fetch): Promise<Pinned> {
+export async function pinImage(siteUrl: string, bytes: Uint8Array, fetchImpl: FetchLike = fetch, timeoutMs = PIN_TIMEOUT_MS): Promise<Pinned> {
   const form = new FormData();
   form.append("file", new Blob([Buffer.from(bytes)], { type: "image/png" }), "face.png");
-  const response = await fetchImpl(`${siteUrl}/api/pin`, { method: "POST", body: form });
+  const response = await post(`${siteUrl}/api/pin`, { method: "POST", body: form }, "picture", fetchImpl, timeoutMs);
   return pinResponse(response, "picture");
 }
 
 /** Pin the metadata document; its digest is what `create` carries as `metadataHash`. */
-export async function pinMetadata(siteUrl: string, metadata: CoinMetadata, fetchImpl: FetchLike = fetch): Promise<Pinned> {
-  const response = await fetchImpl(`${siteUrl}/api/pin`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(metadata),
-  });
+export async function pinMetadata(siteUrl: string, metadata: CoinMetadata, fetchImpl: FetchLike = fetch, timeoutMs = PIN_TIMEOUT_MS): Promise<Pinned> {
+  const response = await post(
+    `${siteUrl}/api/pin`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(metadata),
+    },
+    "metadata",
+    fetchImpl,
+    timeoutMs,
+  );
   return pinResponse(response, "metadata");
 }
 

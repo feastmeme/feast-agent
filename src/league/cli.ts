@@ -16,8 +16,8 @@ import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { INDEXER_URL } from "./events.ts";
+import { refuseEarly } from "./early.ts";
 import { Executor } from "./executor.ts";
-import { guard } from "./guard.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
 import { PRESETS, PRESET_IDS } from "./presets/specs.ts";
 import { BODY_COIN_QUOTE, BODY_COIN_SPLIT, bodyCoinNames } from "./register/claims.ts";
@@ -52,13 +52,15 @@ import {
   type SessionCode,
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
+import { ENTRY_AGENT } from "./enter/constants.ts";
+import { enter, entryOneShot } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
 import { standingLines } from "./season-card.ts";
 import { sessionView } from "./session.ts";
 import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
-import { normalizeIntent, type IntentRequest } from "./strategy.ts";
+import type { IntentRequest } from "./strategy.ts";
 
 const HELP = `feast-league — run a Feast agent with your Binance Agentic Wallet
 
@@ -78,6 +80,9 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   the script audit: static rules, then the model read's verdict
   buy <name> <coin|FEAST> <bnb>   one guarded buy, through the agent's limits
   sell <name> <coin|FEAST> <fraction|all>
+  enter --name <id>.ai [--yes] [--lang en|zh] [--json]
+                                  the league entry, once: launch the body coin and buy today's coin; never starts trading
+                                  (--name is the wallet's Agent ID here; each card needs its own --yes)
   register <name> --check [--body-coin 0x…] [--lang en|zh]
                                   the league registration check: Agent ID, body coin, seat (reads only)
   register <name> --manifesto "…" [--body-coin 0x…] [--x handle] [--pending] [--lang en|zh] [--yes]
@@ -181,10 +186,15 @@ async function main(argv: string[]): Promise<number> {
     if (!value) throw new Error(`missing ${what}; see feast-league --help`);
     return value;
   };
+  /** league-entry is FL enter's own agent: the season's commands never plan, start or change it. */
+  const notEntry = (name: string) => {
+    if (name === ENTRY_AGENT) throw new Error(`${ENTRY_AGENT} is FL enter's; plan your season agent under another name`);
+    return name;
+  };
 
   switch (command) {
     case "plan": {
-      const name = need(args[0], "an agent name");
+      const name = notEntry(need(args[0], "an agent name"));
       const planned = planAgent({
         name,
         preset: values.preset,
@@ -214,7 +224,7 @@ async function main(argv: string[]): Promise<number> {
     case "start":
     case "resume":
     case "run": {
-      const name = need(args[0], "an agent name");
+      const name = notEntry(need(args[0], "an agent name"));
       let agent = loadAgent(home, name);
       if (!agent) throw new Error(`no agent "${name}": plan it first`);
       if (command === "resume") {
@@ -270,6 +280,8 @@ async function main(argv: string[]): Promise<number> {
       const names = values.all ? (existsSync(join(home, "agents")) ? readdirSync(join(home, "agents")) : []) : [need(args[0], "an agent name (or --all)")];
       if (values.all) writeStop(join(home, "STOP"), "stop requested by the user");
       for (const name of names) {
+        // league-entry's own stop file could not be cleared (resume refuses the name); the global one already halts it.
+        if (values.all && name === ENTRY_AGENT) continue;
         writeStop(agentPaths(home, name).stop, "stop requested by the user");
         const exited = await waitForExit(home, name, values.wait ? Number(values.wait) : 150);
         console.log(`${name}: ${exited ? "halted" : "the stop file is written; the runtime has not exited yet (it finishes recording a sent transaction first)"}`);
@@ -306,7 +318,7 @@ async function main(argv: string[]): Promise<number> {
       };
       print(json, data, () =>
         [
-          `${name}: ${s.running ? "running" : "not running"}${s.stop ? ` (stop file: ${s.stop})` : ""}; ${s.agent!.track === "preset" ? `preset ${s.agent!.preset}` : "script"}`,
+          `${name}: ${s.running ? "running" : "not running"}${s.stop ? ` (stop file: ${s.stop})` : ""}; ${s.agent!.track === "preset" ? `preset ${s.agent!.preset}` : s.agent!.track === "entry" ? "the league entry (FL enter)" : "script"}`,
           `positions: ${data.positions.length ? data.positions.map((p) => `${p.symbol} ${p.costBnb} BNB${p.armed ? "" : " (exit not armed)"}`).join(", ") : "none"}`,
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...(data.paused ? [`paused: ${data.paused}`] : []),
@@ -318,7 +330,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "set": {
-      const name = need(args[0], "an agent name");
+      const name = notEntry(need(args[0], "an agent name"));
       const agent = loadAgent(home, name);
       if (!agent) throw new Error("no such agent");
       if (!values.yes && !values.review) throw new Error("a change needs --yes (the user's word) or --review (the hourly review, which may only tighten)");
@@ -413,6 +425,8 @@ async function main(argv: string[]): Promise<number> {
       console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
       return outcome.exit === "finished" ? 0 : 2;
     }
+    case "enter":
+      return enterCommand(home, values, json);
     case "register":
       return registerCommand(home, checkAgentName(need(args[0], "an agent name")), values, json);
     case "launch":
@@ -434,29 +448,6 @@ async function main(argv: string[]): Promise<number> {
       console.error(`unknown command "${command}"\n\n${HELP}`);
       return 1;
   }
-}
-
-/** A guard pass with an optimistic wallet: what it refuses, it refuses without asking the wallet anything. */
-function refuseEarly(home: string, agent: AgentConfig, request: IntentRequest) {
-  const feast = MAINNET.platformCoin!.address;
-  const normal = normalizeIntent(request, { snapshot: { feast, now: Date.now(), limits: agent.limits }, source: "manual", slippagePct: Math.min(3, agent.limits.maxSlippagePct), ttlMs: 120_000 });
-  if ("error" in normal) return { limit: "L15", message: normal.error };
-  const book = statusOf(home, agent.name).book;
-  const view = book ? bookView(book, normal.intent.coin, Date.now()) : { openPositions: 0, hasPosition: false, exposureWei: 0n, spent24hWei: 0n, realizedLoss24hWei: 0n, trades1h: 0, lastEntryAt: null, paused: null, drawdownWei: 0n };
-  const verdict = guard({
-    intent: normal.intent,
-    limits: agent.limits,
-    now: Date.now(),
-    wallet: { connected: true, devMode: true, quotaLeftUsd: Number.POSITIVE_INFINITY, balanceWei: 10n ** 30n },
-    bnbUsd: 0,
-    stopped: stopReason(home, agent.name) !== null,
-    coinIsFeast: true,
-    book: view,
-    walletSpentWei: readLedger(home).spentWei,
-    claimFundsWei: book?.claimFundsWei ?? 0n,
-    warmup: agent.track === "script" ? book?.warmup ?? null : null,
-  });
-  return verdict.ok ? null : { limit: verdict.limit, message: verdict.message };
 }
 
 /** 280 characters, zh and en mixed, for the preview of the Register message. */
@@ -503,6 +494,17 @@ async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string
   // The page's own rows, without the wallet's address: printed output keeps the home's rule.
   const own = today?.me ? { earners: today.me.earners ? { ...today.me.earners, wallet: undefined } : null, backed: today.me.backed ? { ...today.me.backed, wallet: undefined } : null, eaten: today.me.eaten } : (today?.me ?? null);
   return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own } };
+}
+
+/** `feast-league enter` (task 961): the league entry, one card at a time; `src/league/enter/flow.ts` is the whole of it. */
+async function enterCommand(home: string, values: Values, json: boolean): Promise<number> {
+  const signer = signerFor(home, ENTRY_AGENT);
+  const result = await enter(
+    { home, signer, chain: new LeagueChain(MAINNET, rpc()), site: new LeagueSite(siteFromEnv()), oneShot: entryOneShot({ home, signer, rpcUrl: rpc() }) },
+    { name: str(values.name), yes: values.yes === true, lang: langOf(values.lang) },
+  );
+  print(json, { ok: result.ok, stage: result.stage, ...result.data, card: result.text }, () => result.text);
+  return result.code;
 }
 
 /** `feast-league register` (PLAN-941 §1): the check, the card, and after the user's yes the signature and the answer. */

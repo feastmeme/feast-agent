@@ -32,7 +32,7 @@ export type Intent = {
   createdAt: number;
   /** A buy signal goes stale: past this it is dropped, never traded late. */
   expiresAt?: number;
-  launch?: { name: string; symbol: string; quote: string; description?: string; burn?: number; referrer?: number };
+  launch?: { name: string; symbol: string; quote: string; description?: string; burn?: number; referrer?: number; image?: { path: string; sha256: string } };
   /** A buy paid in the pool's quote token (a buyback from claimed fees): how much of it, raw units. */
   payIn?: "native" | "quote";
   quoteAmount?: bigint;
