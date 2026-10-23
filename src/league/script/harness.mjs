@@ -81,6 +81,7 @@ const RUNNER = String.raw`(() => {
         holders: (c, since) => (s.holders[lc(resolve(c))] || []).filter((r) => since === undefined || r.at >= since),
         launchesBy: (creator, since) => (s.launchesByCreator[lc(creator)] || []).filter((t) => since === undefined || t >= since).length,
         launched: () => (s.launched ? { ...s.launched } : null),
+        stale: () => (s.stale ? { sinceMs: s.stale.sinceMs, reason: s.stale.reason } : null),
       });
       const push = (request) => { if (out.requests.length < 50) out.requests.push(request); return "requested-" + out.requests.length; };
       const api = Object.freeze({

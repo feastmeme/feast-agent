@@ -59,6 +59,11 @@ export type Snapshot = {
   launchesByCreator: Record<string, number[]>;
   feast: Address;
   launched: { coin: Address; at: number } | null;
+  /**
+   * Set while the market feed backs off (task 967): the coins, holders and trades above are the last good read's,
+   * not refreshed since `sinceMs` (epoch ms), for `reason`. Null or absent: fresh. Positions and balance are the chain's.
+   */
+  stale?: { sinceMs: number; reason: string } | null;
 };
 
 export type StrategyEvent =
@@ -88,6 +93,8 @@ export type StrategyApi = {
     holders(coin: string, sinceMs?: number): { at: number; holders: number }[];
     launchesBy(creator: string, sinceMs?: number): number;
     launched(): { coin: Address; at: number } | null;
+    /** Null when the market data is fresh; while the feed backs off, since when it is not, and why. */
+    stale(): { sinceMs: number; reason: string } | null;
   };
   buy(request: { coin: string; bnb: number; reason?: string }): string | null;
   sell(request: { coin: string; fraction?: number; reason?: string }): string | null;
@@ -233,6 +240,7 @@ export function makeApi(
         return rows.filter((t) => sinceMs === undefined || t >= sinceMs).length;
       },
       launched: () => (snapshot.launched ? { ...snapshot.launched } : null),
+      stale: () => (snapshot.stale ? { ...snapshot.stale } : null),
     },
     buy: (request) => enqueue({ kind: "buy", coin: request?.coin, bnb: request?.bnb, reason: request?.reason }),
     sell: (request) => enqueue({ kind: "sell", coin: request?.coin, fraction: request?.fraction, reason: request?.reason }),

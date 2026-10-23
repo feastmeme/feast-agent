@@ -48,6 +48,8 @@ type WorldOptions = {
   shot?: Partial<FakeShotOptions>;
   now?: number;
   notesDev?: boolean;
+  /** Task 967: the site's and the indexer's GETs back off, on the world's own clock. */
+  retry?: boolean;
 };
 
 function world(o: WorldOptions = {}) {
@@ -59,8 +61,9 @@ function world(o: WorldOptions = {}) {
   const site = new FakeEnterSite({ wallet, agentId: { agentId: ID }, avatar: { status: 200 }, creators: [], session: { status: 201, body: { token: "tok-1", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } }, ...o.page });
   const chain = fakeEnterChain({ agentId: ID, creators: { [BODY.toLowerCase()]: wallet }, symbols: { [BODY.toLowerCase()]: "MAPLEGRIN" }, ...o.chain });
   const shots = fakeOneShot({ home, launchCoin: BODY, ...o.shot });
-  const clock = { now: o.now ?? DAY_ONE };
-  const deps: EnterDeps = { home, signer: new BawSigner(runner), chain, site: new LeagueSite(SITE, site.fetch, 50), indexer: INDEXER, fetch: site.fetch, now: () => clock.now, oneShot: shots.run, notesDev: o.notesDev ?? false };
+  const clock = { now: o.now ?? DAY_ONE, slept: [] as number[] };
+  const retry = o.retry ? { now: () => clock.now, sleep: async (ms: number) => void (clock.slept.push(ms), (clock.now += ms)), random: () => 0.5 } : undefined;
+  const deps: EnterDeps = { home, signer: new BawSigner(runner), chain, site: new LeagueSite(SITE, site.fetch, 50, retry), indexer: INDEXER, fetch: site.fetch, now: () => clock.now, oneShot: shots.run, notesDev: o.notesDev ?? false, retry };
   const run = (input: Partial<EnterInput> = {}) => enter(deps, { name: `${ID}.ai`, yes: false, lang: "en", ...input });
   const sent = () => calls.filter((c) => c[0] === "contract-call" || c[0] === "sign-message");
   const pending = () => JSON.parse(readFileSync(join(agentPaths(home, ENTRY_AGENT).dir, "pending.json"), "utf8")) as { stage: string; digest: string; at: string };
@@ -474,5 +477,47 @@ describe("FL enter: what it never touches", () => {
     walk(w.home);
     expect(files.length).toBeGreaterThan(4);
     for (const file of files) expect(readFileSync(file, "latin1").toLowerCase().includes(hex), file).toBe(false);
+  });
+});
+
+describe("FL enter's GETs back off (task 967); its POSTs are never sent twice", () => {
+  it("a 503 then a 200 on the Agent ID read: one wait, then the card", async () => {
+    const w = world({ retry: true, page: { agentIdFirst: [{ status: 503, body: { error: "upstream-unavailable" } }] } });
+    const before = w.clock.now;
+    const out = await w.run();
+    expect(out.stage).toBe("launch-card");
+    expect(w.site.calls.filter((c) => c.includes("/api/league/agent-id"))).toHaveLength(2);
+    expect(w.clock.slept).toHaveLength(1);
+    expect(w.clock.slept[0]).toBeGreaterThanOrEqual(2_000);
+    expect(w.clock.now - before).toBeLessThan(10_000);
+  });
+
+  it("three 503s: today's unavailable line, inside 2 minutes of the clock", async () => {
+    const busy = { status: 503, body: { error: "upstream-unavailable" } };
+    const w = world({ retry: true, page: { agentIdFirst: [busy, busy, busy, busy] } });
+    const before = w.clock.now;
+    const out = await w.run();
+    expect(out).toMatchObject({ code: 1, stage: "eligibility", text: copy.siteUnreadable("HTTP 503", "en") });
+    expect(w.site.calls.filter((c) => c.includes("/api/league/agent-id"))).toHaveLength(3);
+    expect(w.clock.now - before).toBeLessThanOrEqual(120_000);
+  });
+
+  it("the indexer's launches: at most 3 asks under the backoff, then the same stop", async () => {
+    const w = world({ retry: true, page: { creators: "down" } });
+    const out = await w.run({ yes: true });
+    expect(out).toMatchObject({ code: 1, stage: "body-coin", text: copy.launchCheckUnreadable("en") });
+    expect(w.site.calls.filter((c) => c.includes("/v1/creators"))).toHaveLength(3);
+    expect(w.shots.requests).toEqual([]);
+  });
+
+  it("the notes session's POST still goes once, whatever the GETs did", async () => {
+    const w = world({ retry: true, page: { agentIdFirst: [{ status: 503, body: {} }] } });
+    await w.run();
+    w.site.options.agentIdFirst = [{ status: 429, body: {} }];
+    const out = await w.run({ yes: true });
+    expect(out).toMatchObject({ code: 0, stage: "done" });
+    expect(w.site.calls.filter((c) => c.startsWith("POST") && c.includes("/api/league/notes/session"))).toHaveLength(1);
+    expect(w.site.sessions).toHaveLength(1);
+    expect(w.signs()).toHaveLength(1);
   });
 });

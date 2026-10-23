@@ -93,3 +93,32 @@ describe("the skill, the setup, the release notes", () => {
     expect(read("docs/CHANGELOG.md")).toMatch(/NoteSession/);
   });
 });
+
+describe("ten thousand agents: the snapshot feed (task 967)", () => {
+  it("SKILL.md says the runtime and FL data read feast.meme's snapshot, and promises no wallet header (ruling C4)", () => {
+    const skill = read("skills/feast-league/SKILL.md");
+    expect(skill).toMatch(/snapshot/);
+    expect(skill).toContain("--no-jitter");
+    expect(skill).toContain("FL data --live");
+    const setup = read("skills/feast-league/references/setup.md");
+    expect(setup).toContain("/api/v1/snapshot");
+    for (const [file, text] of [["SKILL.md", skill], ["setup.md", setup], ["README.md", read("README.md")]]) expect(text, file).not.toMatch(/X-Feast-Wallet/);
+  });
+
+  it("the PLAN has §15, and the CHANGELOG's league-v4 names the feed", () => {
+    expect(read("docs/league/PLAN.md")).toMatch(/^## 15\. Ten thousand agents: the snapshot feed \(task 967\)$/m);
+    const log = read("docs/CHANGELOG.md");
+    const v4 = log.slice(log.indexOf("## league-v4"), log.indexOf("## league-v3"));
+    for (const word of ["/api/v1/snapshot", "--poll", "--no-jitter", "FL data --live", "backs off"]) expect(v4, word).toContain(word);
+  });
+
+  it("no 2-second poll is promised anywhere a host or a reader of the runtime looks", () => {
+    const files = [...walk("skills"), "README.md"].filter((f) => f.endsWith(".md"));
+    for (const file of files) expect(read(file), file).not.toMatch(/every 2 s|within seconds \(from the Feast indexer\)/);
+    const runtime = read("src/league/runtime.ts");
+    expect(runtime.slice(0, runtime.indexOf("export type RunOutcome")), "runtime.ts's header").not.toMatch(/every 2 s/);
+    const events = read("src/league/events.ts");
+    expect(events.slice(0, events.indexOf("export const INDEXER_URL")), "events.ts's header").not.toMatch(/every 2 s/);
+    expect(read("README.md")).toContain("within about 10 seconds (from feast.meme's market snapshot)");
+  });
+});

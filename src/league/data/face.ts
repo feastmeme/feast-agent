@@ -8,6 +8,7 @@ import { BODY_SINCE, ENTRY_AGENT } from "../enter/constants.ts";
 import { clean } from "../enter/copy.ts";
 import { readEntry } from "../enter/flow.ts";
 import { INDEXER_URL } from "../events.ts";
+import { CACHE_FRESH_MS, readSnapshotCache, RECHECK_MS, snapshotCoins, SnapshotClient, snapshotUnavailableAt, type FeastSnapshot } from "../feed/snapshot.ts";
 import { flushNotes } from "../notes/queue.ts";
 import { PAGE_IDLE_MS, PAGE_IDLE_RULE } from "../prompt/constants.ts";
 import { within } from "../prompt/host.ts";
@@ -19,13 +20,18 @@ import { selfView, type PositionOut, type SelfView } from "./self.ts";
 import { untrusted, UNTRUSTED_NOTE, UNTRUSTED_PATHS, type Untrusted } from "./untrusted.ts";
 
 /**
- * `FL data [<name>] [--since <iso|duration>] [--coin <addr>] [--json]` (task 963):
+ * `FL data [<name>] [--since <iso|duration>] [--coin <addr>] [--json] [--live]` (task 963):
  * everything the user's own agent needs to decide by its prompt, in one read.
  *
- * - **coins**: every pool on feast.meme's public `/api/v1/pools` (following
+ * - **coins**: every coin of feast.meme's cached market snapshot (task 967,
+ *   `/api/v1/snapshot`, priced in BNB by the server; a field it does not carry is
+ *   null and listed under `missing`), shared with the running agent through
+ *   `<home>/cache/snapshot.json`: no request when that copy is fresher than 5 s,
+ *   a 304 when it is older. While the route answers 404 (asked again after 10
+ *   minutes), and with `--live`: every pool on `/api/v1/pools` (following
  *   `nextCursor`; the indexer's board stands in when the route does not answer),
- *   priced in BNB per coin from its sqrt price and its quote's BNB value on the
- *   chain, with its 24 h volume, trades, holders, launch time and creator, and
+ *   priced from its sqrt price and its quote's BNB value on the chain. Either
+ *   way with its 24 h volume, trades, holders, launch time and creator, and
  *   whether it is a league body coin;
  * - **self**: the agent's own book in BNB (`self.ts`);
  * - **league**: the page's clock, the newest dinner and the top of each board;
@@ -33,11 +39,13 @@ import { untrusted, UNTRUSTED_NOTE, UNTRUSTED_PATHS, type Untrusted } from "./un
  *   positions, then the body coins, then the busiest others (at most 20).
  *
  * It reads only. No wallet call but the address (raced against 5 s, as `status`
- * does); at most 1 + pages + 1 + 20 requests to feast.meme a call (a note's
- * flush, the pools, the league, the history), pools cached 30 s and history
- * 5 min under `<home>/cache/`, with no address of the wallet there. A 429 stops
- * the reads: what was read is given, marked partial. Nothing is retried more
- * than once. Every dependency is injected.
+ * does); at most 1 + 1 + 20 requests to feast.meme a call on the snapshot (a
+ * note's flush, the snapshot, the league, the history; the pools' pages instead
+ * of the snapshot while it is not deployed), the snapshot shared, pools cached
+ * 30 s and history 5 min under `<home>/cache/`, with no address of the wallet
+ * there. A 429 stops the reads: what was read is given, marked partial (and the
+ * home's last snapshot, marked stale). Nothing is retried more than once. Every
+ * dependency is injected.
  */
 
 export type FaceChain = Pick<LeagueChain, "coinInfo" | "quoteBnbE18" | "markWei" | "bnbUsd" | "agentIdOf">;
@@ -53,13 +61,17 @@ export type FaceDeps = {
   wallet: () => Promise<Address | null>;
   now?: () => number;
   timeoutMs?: number;
+  /** The snapshot's interval jitter (unused by one read; injected like the rest). */
+  random?: () => number;
 };
 
-export type FaceInput = { name?: string; since?: string; coin?: string };
+/** `live`: the pools and the board, as before task 967, never the snapshot. */
+export type FaceInput = { name?: string; since?: string; coin?: string; live?: boolean };
 
 export type CoinOut = {
   coin: Address;
-  symbol: Untrusted;
+  /** Null when the snapshot gives none (unknown). */
+  symbol: Untrusted | null;
   name: Untrusted;
   quote: { address: Address; symbol: Untrusted };
   launchedAt: string | null;
@@ -69,9 +81,10 @@ export type CoinOut = {
   /** A league body coin: launched since BODY_SINCE by a wallet holding an Agent ID; null when that could not be read. */
   bodyCoin: boolean | null;
   priceBnb: number | null;
-  volume24hBnb: number;
-  trades24h: number;
-  holders: number;
+  /** Null (and listed under `missing`) where the snapshot does not carry it: unknown, never zero. */
+  volume24hBnb: number | null;
+  trades24h: number | null;
+  holders: number | null;
   lastTradeAt: string | null;
 };
 
@@ -93,7 +106,27 @@ type RawPool = {
   createdAt?: unknown;
   market?: { lastPriceSqrtX96?: unknown; lastTradeAt?: unknown; volume24h?: unknown; trades24h?: unknown; holders?: unknown };
 };
-type Pool = { coin: Address; name: unknown; symbol: unknown; quote: Address; quoteSymbol: unknown; coinIsCurrency0: boolean; creator: Address | "self"; launchedAt: number | null; sqrt: bigint | null; volume24h: unknown; trades24h: number; holders: number; lastTradeAt: number | null };
+type Pool = {
+  coin: Address;
+  name: unknown;
+  symbol: unknown;
+  quote: Address;
+  quoteSymbol: unknown;
+  /** Null for a snapshot row: the chain says, if the history needs it. */
+  coinIsCurrency0: boolean | null;
+  creator: Address | "self";
+  launchedAt: number | null;
+  sqrt: bigint | null;
+  volume24h: unknown;
+  trades24h: number | null;
+  holders: number | null;
+  lastTradeAt: number | null;
+  /** A snapshot row's own figures in BNB (null: unknown), so no sqrt and no quote read but for a price given only in the quote. */
+  direct?: { priceBnb: number | null; priceQuote: number | null; volumeBnb: number | null };
+};
+
+/** The fields a snapshot may leave out, in the order `missing` lists them. */
+const MISSABLE = ["symbol", "name", "launchedAt", "priceBnb", "volume24hBnb", "trades24h", "holders", "lastTradeAt"] as const;
 
 const addr = (v: unknown): Address | null => (typeof v === "string" && isAddress(v, { strict: false }) ? getAddress(v) : null);
 const ms = (v: unknown): number | null => {
@@ -179,51 +212,85 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
   // --- a note's flush: at most one, oldest first ----------------------------------------------
   if (name && wallet) await flushNotes(home, name, wallet, { site, fetch: deps.fetch, now: () => now, max: 1, timeoutMs: Math.min(timeout, 10_000) }).catch(() => undefined);
 
-  // --- the pools ------------------------------------------------------------------------------------
-  let source: "pools" | "indexer" | null = null;
+  // --- the coins: feast.meme's snapshot, shared with the running agent (task 967) ------------------------------
+  let source: "snapshot" | "pools" | "indexer" | null = null;
   let pools: Pool[] = [];
-  const cachedPools = readJson<{ at: number; pools: Pool[] }>(join(cacheDir, "pools.json"));
-  if (cachedPools && now - cachedPools.at >= 0 && now - cachedPools.at < POOLS_TTL_MS && Array.isArray(cachedPools.pools)) {
-    pools = cachedPools.pools.map((p) => ({ ...p, sqrt: p.sqrt === null ? null : BigInt(p.sqrt as unknown as string) }));
-    source = "pools";
-  } else {
-    const raws: RawPool[] = [];
-    let cursor: string | null = null;
-    let failed: string | null = null;
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const got = await get(`${site}/api/v1/pools?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
-      if ("error" in got) {
-        failed = got.error;
-        break;
+  let stale: { since: string; reason: string } | null = null;
+  const missing = new Set<string>();
+  // --live, or a route that answered 404 in the last 10 minutes: the pools, as before.
+  const unavailable = snapshotUnavailableAt(home);
+  let legacy = input.live === true || (unavailable !== null && now - unavailable >= 0 && now - unavailable < RECHECK_MS);
+  if (!legacy) {
+    const cached = readSnapshotCache(home, self);
+    let held: FeastSnapshot | null = cached && now - cached.at >= 0 && now - cached.at < CACHE_FRESH_MS ? cached.snapshot : null;
+    if (!held) {
+      // One ask, with the home's ETag: a 304 is the copy here. Written back only with the wallet known, to scrub it.
+      const client = new SnapshotClient({ site, fetch: deps.fetch, now: () => now, random: deps.random ?? Math.random, timeoutMs: timeout, cache: { home, wallet: self }, seed: cached });
+      const out = await client.read();
+      if (out.kind === "new") held = out.snapshot;
+      else if (out.kind === "same") held = client.held;
+      else if (out.kind === "unavailable") legacy = true;
+      else if (out.kind === "failed") {
+        if (out.failure.status === 429) rateLimited = true;
+        else problems.push(`feast.meme's snapshot could not be read (${plain(out.failure.reason)})${cached ? "; its last copy here is given, marked stale" : "; its pools stand in"}`);
+        if (cached) {
+          held = cached.snapshot;
+          stale = { since: new Date(cached.at).toISOString(), reason: out.failure.reason };
+          partial = true;
+        } else if (!rateLimited) legacy = true;
       }
-      if (got.status === 429) break;
-      const body = (got.body ?? {}) as { pools?: unknown; nextCursor?: unknown };
-      if (got.status !== 200 || !Array.isArray(body.pools)) {
-        failed = `HTTP ${got.status}`;
-        break;
-      }
-      raws.push(...(body.pools as RawPool[]));
-      cursor = typeof body.nextCursor === "string" && body.nextCursor ? body.nextCursor : null;
-      if (!cursor) break;
     }
-    if (rateLimited) {
-      // What was read before the 429 is still given, marked partial.
-      partial = true;
-      pools = raws.flatMap((raw) => poolOf(raw, self));
-      source = pools.length > 0 ? "pools" : null;
-    } else if (failed !== null) {
-      problems.push(`feast.meme's pools could not be read (${failed}); the indexer's board stands in`);
-      pools = await boardPools(deps, get, self);
-      source = pools.length > 0 ? "indexer" : null;
-      if (pools.length === 0) {
-        problems.push("the indexer's board could not be read either");
-        partial = true;
-      }
-    } else {
-      pools = raws.flatMap((raw) => poolOf(raw, self));
+    if (held) {
+      pools = await snapshotPools(held, deps, self, missing);
+      source = "snapshot";
+    }
+  }
+
+  // --- the pools: --live, or while the snapshot is not deployed ---------------------------------------
+  if (legacy) {
+    const cachedPools = readJson<{ at: number; pools: Pool[] }>(join(cacheDir, "pools.json"));
+    if (cachedPools && now - cachedPools.at >= 0 && now - cachedPools.at < POOLS_TTL_MS && Array.isArray(cachedPools.pools)) {
+      pools = cachedPools.pools.map((p) => ({ ...p, sqrt: p.sqrt === null ? null : BigInt(p.sqrt as unknown as string) }));
       source = "pools";
-      // Kept 30 s, with the wallet's own address written as "self": the home never holds it.
-      if (self) writeJsonAtomic(join(cacheDir, "pools.json"), { at: now, pools: pools.map((p) => ({ ...p, sqrt: p.sqrt === null ? null : p.sqrt.toString() })) });
+    } else {
+      const raws: RawPool[] = [];
+      let cursor: string | null = null;
+      let failed: string | null = null;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const got = await get(`${site}/api/v1/pools?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+        if ("error" in got) {
+          failed = got.error;
+          break;
+        }
+        if (got.status === 429) break;
+        const body = (got.body ?? {}) as { pools?: unknown; nextCursor?: unknown };
+        if (got.status !== 200 || !Array.isArray(body.pools)) {
+          failed = `HTTP ${got.status}`;
+          break;
+        }
+        raws.push(...(body.pools as RawPool[]));
+        cursor = typeof body.nextCursor === "string" && body.nextCursor ? body.nextCursor : null;
+        if (!cursor) break;
+      }
+      if (rateLimited) {
+        // What was read before the 429 is still given, marked partial.
+        partial = true;
+        pools = raws.flatMap((raw) => poolOf(raw, self));
+        source = pools.length > 0 ? "pools" : null;
+      } else if (failed !== null) {
+        problems.push(`feast.meme's pools could not be read (${failed}); the indexer's board stands in`);
+        pools = await boardPools(deps, get, self);
+        source = pools.length > 0 ? "indexer" : null;
+        if (pools.length === 0) {
+          problems.push("the indexer's board could not be read either");
+          partial = true;
+        }
+      } else {
+        pools = raws.flatMap((raw) => poolOf(raw, self));
+        source = "pools";
+        // Kept 30 s, with the wallet's own address written as "self": the home never holds it.
+        if (self) writeJsonAtomic(join(cacheDir, "pools.json"), { at: now, pools: pools.map((p) => ({ ...p, sqrt: p.sqrt === null ? null : p.sqrt.toString() })) });
+      }
     }
   }
 
@@ -236,7 +303,8 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     scope = [{ coin: info.coin, name: info.name, symbol: info.symbol, quote: info.quote, quoteSymbol: quoteSymbolOf(info.quote), coinIsCurrency0: info.coinIsCurrency0, creator: info.creator.toLowerCase() === self ? "self" : info.creator, launchedAt: null, sqrt: null, volume24h: "0", trades24h: 0, holders: 0, lastTradeAt: null }];
   }
   const quoteBnb = new Map<string, bigint | null>();
-  const quotes = [...new Set(scope.map((p) => p.quote.toLowerCase()))];
+  // A quote's BNB value only where a price or a volume is reckoned here: a snapshot row brings its own.
+  const quotes = [...new Set(scope.filter((p) => !p.direct || (p.direct.priceBnb === null && p.direct.priceQuote !== null)).map((p) => p.quote.toLowerCase()))];
   for (let i = 0; i < quotes.length; i += 8) {
     await Promise.all(quotes.slice(i, i + 8).map(async (q) => quoteBnb.set(q, await deps.chain.quoteBnbE18(getAddress(q)).catch(() => null))));
   }
@@ -250,17 +318,20 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     else if (launched === null) bodyCoin = null;
     else if (p.creator === "self") bodyCoin = ids.self;
     else bodyCoin = ids.of(p.creator);
+    const d = p.direct;
+    const priceBnb = d ? (d.priceBnb ?? (d.priceQuote !== null && q !== null ? d.priceQuote * (Number(q) / 1e18) : null)) : p.sqrt === null || q === null || p.coinIsCurrency0 === null ? null : sqrtToBnb(p.sqrt, p.coinIsCurrency0, q);
+    if (d && priceBnb === null) missing.add("priceBnb");
     return {
       coin: p.coin,
-      symbol: untrusted(p.symbol),
+      symbol: d && p.symbol === null ? null : untrusted(p.symbol),
       name: untrusted(p.name),
       quote: { address: p.quote, symbol: untrusted(p.quoteSymbol) },
       launchedAt: iso(launched),
       creator: own && p.creator === "self" ? "self" : p.creator,
       own,
       bodyCoin,
-      priceBnb: p.sqrt === null || q === null ? null : sqrtToBnb(p.sqrt, p.coinIsCurrency0, q),
-      volume24hBnb: q === null ? 0 : quoteWeiToBnb(p.volume24h, q),
+      priceBnb,
+      volume24hBnb: d ? d.volumeBnb : q === null ? 0 : quoteWeiToBnb(p.volume24h, q),
       trades24h: p.trades24h,
       holders: p.holders,
       lastTradeAt: iso(p.lastTradeAt),
@@ -292,7 +363,7 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     ohlcv = {};
     // The agent's positions first, then the body coins, then the busiest of the rest: at most 20, so a host with no
     // position still sees the history of what it may buy.
-    const byVolume = (list: CoinOut[]) => [...list].sort((a, b) => b.volume24hBnb - a.volume24hBnb).map((c) => c.coin);
+    const byVolume = (list: CoinOut[]) => [...list].sort((a, b) => (b.volume24hBnb ?? 0) - (a.volume24hBnb ?? 0)).map((c) => c.coin);
     const wanted = coinFilter ? [coinFilter] : [...(mine?.positions ?? []), ...(mine?.ownCoin ?? [])].map((p) => p.coin);
     const body = coinFilter ? [] : byVolume(coins.filter((c) => c.bodyCoin === true));
     const busiest = coinFilter ? [] : byVolume(coins.filter((c) => c.bodyCoin !== true));
@@ -300,7 +371,7 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     for (const coin of inScope) {
       if (rateLimited) break;
       const pool = pools.find((p) => p.coin.toLowerCase() === coin.toLowerCase()) ?? scope.find((p) => p.coin.toLowerCase() === coin.toLowerCase());
-      const info = pool ? { coinIsCurrency0: pool.coinIsCurrency0, quote: pool.quote } : await deps.chain.coinInfo(coin).catch(() => null);
+      const info = pool && pool.coinIsCurrency0 !== null ? { coinIsCurrency0: pool.coinIsCurrency0, quote: pool.quote } : await deps.chain.coinInfo(coin).catch(() => null);
       if (!info) continue;
       const q = quoteBnb.get(info.quote.toLowerCase()) ?? (await deps.chain.quoteBnbE18(info.quote).catch(() => null));
       if (q === null) continue;
@@ -339,6 +410,8 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     units: "every amount is BNB; usdRef is a display reference only",
     usdRef,
     source,
+    ...(stale ? { stale } : {}),
+    missing: MISSABLE.filter((f) => missing.has(f)).map((f) => `coins[].${f}`),
     coins,
     self: mine,
     ...(selfNote ? { selfNote } : {}),
@@ -381,6 +454,39 @@ function poolOf(raw: RawPool, self: string | null): Pool[] {
       lastTradeAt: ms(raw.market?.lastTradeAt),
     },
   ];
+}
+
+/**
+ * The snapshot's coins as pools: its own figures in BNB, the wallet's own creator as "self", and every field it does
+ * not carry noted in `missing`. A creator it does not give is the factory's (one cached read); a coin with none is left out.
+ */
+async function snapshotPools(snapshot: FeastSnapshot, deps: FaceDeps, self: string | null, missing: Set<string>): Promise<Pool[]> {
+  const out: Pool[] = [];
+  for (const c of snapshotCoins(snapshot)) {
+    const creator = c.creator ?? (await deps.chain.coinInfo(c.coin).catch(() => null))?.creator ?? null;
+    if (!creator) continue;
+    for (const field of ["symbol", "name", "launchedAt", "volume24hBnb", "trades24h", "holders", "lastTradeAt"] as const) {
+      const value = field === "volume24hBnb" ? c.volume24hBnb : c[field];
+      if (value === null) missing.add(field);
+    }
+    out.push({
+      coin: c.coin,
+      name: c.name,
+      symbol: c.symbol,
+      quote: c.quote,
+      quoteSymbol: c.quoteSymbol ?? quoteSymbolOf(c.quote),
+      coinIsCurrency0: null,
+      creator: creator === "self" || creator.toLowerCase() === self ? "self" : creator,
+      launchedAt: c.launchedAt,
+      sqrt: null,
+      volume24h: "0",
+      trades24h: c.trades24h,
+      holders: c.holders,
+      lastTradeAt: c.lastTradeAt,
+      direct: { priceBnb: c.priceBnb, priceQuote: c.priceQuote, volumeBnb: c.volume24hBnb },
+    });
+  }
+  return out;
 }
 
 /** The indexer's board, when feast.meme's pools do not answer: the orientation, the symbol and the name from the chain. */
@@ -504,10 +610,10 @@ function human(view: { coins: CoinOut[]; self: SelfView | null; selfNote: string
   for (const problem of view.problems) lines.push(problem);
   if (view.problems.length > 0) lines.push("");
   lines.push(`Feast coins: ${view.coins.length} (prices in BNB per coin; volume in BNB over 24 h)`);
-  for (const c of [...view.coins].sort((a, b) => b.volume24hBnb - a.volume24hBnb)) {
+  for (const c of [...view.coins].sort((a, b) => (b.volume24hBnb ?? 0) - (a.volume24hBnb ?? 0))) {
     const who = c.creator === "self" ? "you" : short(c.creator);
     const body = c.bodyCoin === true ? "; body coin" : c.bodyCoin === null ? "; body coin: unknown" : "";
-    lines.push(`  ${clean(c.symbol.text, 24) || "?"} ${short(c.coin)}: ${bnb(c.priceBnb)}; vol ${bnb(c.volume24hBnb)}; ${c.trades24h} trades; ${c.holders} holders; launched ${c.launchedAt ? `${utc8(Date.parse(c.launchedAt))} UTC+8` : "?"} by ${who}${body}${c.own ? "; your own coin" : ""}`);
+    lines.push(`  ${clean(c.symbol?.text ?? "", 24) || "?"} ${short(c.coin)}: ${bnb(c.priceBnb)}; vol ${bnb(c.volume24hBnb)}; ${c.trades24h ?? "?"} trades; ${c.holders ?? "?"} holders; launched ${c.launchedAt ? `${utc8(Date.parse(c.launchedAt))} UTC+8` : "?"} by ${who}${body}${c.own ? "; your own coin" : ""}`);
   }
   lines.push("");
   const position = (p: PositionOut) => `${clean(p.symbol.text, 24) || "?"} ${short(p.coin)}: cost ${bnb(p.costBnb)}, mark ${bnb(p.markBnb)}${p.pnlBnb === null ? "" : ` (${signed(p.pnlBnb)})`}`;
