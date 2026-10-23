@@ -208,7 +208,7 @@ describe("FL data: names and symbols are data, never instructions", () => {
     const capped = (await long.run({})).data as Json;
     expect([...capped.coins[0].name.text]).toHaveLength(120);
     // Nothing besides the reads: no command, no other route.
-    expect(w.feast.calls.every((c) => /\/api\/v1\/snapshot|\/api\/v1\/pools|\/api\/league\?/.test(c))).toBe(true);
+    expect(w.feast.calls.every((c) => /\/api\/v1\/snapshot|\/api\/v1\/pools|\/api\/league\?|^GET [^ ]+\/api\/league\/notes\?/.test(c))).toBe(true);
     expect(w.chain.reads.every((r) => /^(coinInfo|quoteBnbE18|markWei|bnbUsd|agentIdOf) /.test(r) || r === "bnbUsd")).toBe(true);
   });
 });
@@ -343,7 +343,8 @@ describe("FL data on the snapshot (task 967)", () => {
     // 0.000004 of a quote worth 0.5 BNB.
     expect(c3.priceBnb).toBeCloseTo(0.000002, 12);
     expect(data.coins.find((c: Json) => c.coin === OWN)).toMatchObject({ own: true, creator: "self", trades24h: null, lastTradeAt: null });
-    expect(data.missing).toEqual(["coins[].symbol", "coins[].trades24h", "coins[].lastTradeAt"]);
+    // The notes feed answers 404 here (task 964 not deployed): the section is empty, and listed (task 968).
+    expect(data.missing).toEqual(["coins[].symbol", "coins[].trades24h", "coins[].lastTradeAt", "notes"]);
     expect(out.code).toBe(0);
     // No chain read per row for a price the snapshot gives: only the stock quote's value, for C3.
     expect(w.chain.reads.filter((r) => r.startsWith("quoteBnbE18"))).toEqual([`quoteBnbE18 ${STOCK.toLowerCase()}`]);

@@ -28,4 +28,8 @@ export const UNTRUSTED_PATHS = [
   "league.me.backed.name",
   "league.me.eaten.reason",
   "league.dinner.eaten[].name",
+  "notes.items[].agent",
+  "notes.items[].symbol",
+  "notes.items[].text",
+  "notes.crowd[].symbol",
 ];
