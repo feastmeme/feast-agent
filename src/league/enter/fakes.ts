@@ -53,12 +53,25 @@ export type FakeSiteOptions = {
   creators?: { coin: string; creator: string; launchedAt?: string }[] | "down";
   /** `/api/pin` refuses the metadata document (after taking the picture), so a launch stops before any chain read. */
   pinMetadata?: "ok" | "refuse";
+  /** `GET /api/league`: the page's body (task 968: its clock gates the agent); default warm-up, the start Sunday 10/25 21:00 UTC+8. */
+  league?: Record<string, unknown> | Answer;
+  /** `GET /api/league/register?wallet=`: the row the page keeps (null: none), or a raw answer. A seated POST keeps its own. */
+  kept?: Record<string, unknown> | null | Answer;
+  /** `POST /api/league/register`: seat it (the site after 964), keep it pending (an old deploy), or a raw answer. */
+  register?: "seated" | "pending" | Answer | ((body: Record<string, unknown>) => Answer);
 };
+
+/** The row the page keeps after a Register (made up). */
+export function keptRow(body: { name: string; strategy: string; issuedAt: number; wallet: string }, seat: number | null, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return { wallet: body.wallet, agentId: body.name, name: body.name, manifesto: body.strategy, issuedAt: body.issuedAt, scheme: "eip712", bodyCoin: null, season: 1, seatNo: seat, founding: seat !== null, foundingNo: seat, waitlisted: false, xHandle: null, earlyBird: false, ...over };
+}
 
 export class FakeEnterSite {
   readonly calls: string[] = [];
   readonly pins: { kind: "image" | "metadata"; bytes: Uint8Array | null; json: unknown }[] = [];
   readonly sessions: unknown[] = [];
+  /** Every Register POST's body, in order. */
+  readonly registers: Record<string, unknown>[] = [];
 
   constructor(readonly options: FakeSiteOptions) {}
 
@@ -103,7 +116,30 @@ export class FakeEnterSite {
       const status = a.status ?? 200;
       return new Response(status === 200 ? Buffer.from(a.bytes ?? AVATAR_PNG) : "<html>not found</html>", { status, headers: { "content-type": a.contentType ?? (status === 200 ? "image/png" : "text/html") } });
     }
-    if (url.pathname === "/api/league") return Response.json(leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-26T12:00:00.000Z" } }));
+    if (url.pathname === "/api/league") {
+      const l = o.league ?? leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-25T13:00:00.000Z" } });
+      if (l === "timeout" || l === "refused" || ("status" in l && typeof l.status === "number" && "body" in l)) return this.answer(l as Answer, signal);
+      return Response.json(l);
+    }
+    if (url.pathname === "/api/league/register" && (init?.method ?? "GET") === "GET") {
+      const k = o.kept === undefined ? null : o.kept;
+      if (k !== null && (k === "timeout" || k === "refused" || ("status" in k && typeof k.status === "number" && "body" in k))) return this.answer(k as Answer, signal);
+      return Response.json({ agent: k });
+    }
+    if (url.pathname === "/api/league/register" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      this.registers.push(body);
+      const r = o.register ?? "seated";
+      if (typeof r === "function") return this.answer(r(body), signal);
+      if (r === "seated" || r === "pending") {
+        const seat = r === "seated" ? 7 : null;
+        const row = keptRow(body as never, seat);
+        o.kept = row;
+        const seating = seat === null ? { state: "pending", reason: "no-body-coin" } : { state: "seated", seatNo: seat, waitlisted: false, place: null, founding: true, foundingNo: seat };
+        return Response.json({ agent: row, seating, prereg: "none" }, { status: 201 });
+      }
+      return this.answer(r, signal);
+    }
     if (url.pathname === "/api/league/notes/session" && init?.method === "POST") {
       this.sessions.push(JSON.parse(String(init.body)));
       return this.answer(o.session ?? { status: 404, body: "<html>not found</html>", contentType: "text/html" }, signal);

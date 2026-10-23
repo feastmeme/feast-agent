@@ -12,22 +12,26 @@ import * as copy from "./copy.ts";
 
 const SOURCE = readFileSync(join(import.meta.dirname, "copy.ts"), "utf8");
 /**
- * The reward's phrasings, and the step-1 open time that only mattered for it.
+ * The reward's phrasings, and the step-1 open time that only mattered for it. Since task 968 the seat is what
+ * feast.meme answers to the entry's Register (the coordinator's ruling C1), not a reward, so the entry names it.
  */
-const REWARD = [/USDT worth/i, /worth of FEAST/i, /hold it/i, /held 24/i, /\b72 ?h\b/i, /\bearns?\b/i, /\breward/i, /\bseats?\b/i, /Step 1 opens/i, /does not count/i, /拿住/, /持有/, /等值/, /奖励/, /席位/, /第 1 步在/, /不算数/];
+const REWARD = [/USDT worth/i, /worth of FEAST/i, /hold it/i, /held 24/i, /\b72 ?h\b/i, /\bearns?\b/i, /\breward/i, /Step 1 opens/i, /does not count/i, /拿住/, /持有/, /等值/, /奖励/, /第 1 步在/, /不算数/];
 
 describe("the entry's copy promises no reward", () => {
   it("no reward sentence anywhere in the copy module", () => {
     for (const pattern of REWARD) expect(SOURCE, String(pattern)).not.toMatch(pattern);
   });
 
-  it("after the launch, one line: you're in, and the prompt-mode command (the owner's ruling, 2026-10-24)", () => {
+  it("after the entry, one line: you're in, and the prompt-mode command (the owner's ruling, 2026-10-24)", () => {
     expect(copy.doneLine("en")).toBe("You're in. Write your strategy.md and run `FL start <name> --prompt strategy.md`");
     expect(copy.doneLine("zh")).toBe("你已报名。写好你的 strategy.md，然后运行 `FL start <name> --prompt strategy.md`");
     for (const lang of ["en", "zh"] as const) {
       const entered = copy.alreadyEntered({ agentId: "maplegrin", coin: "0x00000000000000000000000000000000000b0d1e", notes: "open" }, lang);
-      expect(entered.split("\n").at(-1)).toBe(copy.doneLine(lang));
       for (const pattern of REWARD) expect(entered).not.toMatch(pattern);
+      // Task 968: the entry that started the agent ends with it running, and how to restart it.
+      const running = copy.doneRunning("maplegrin", { kind: "at", at: Date.parse("2026-10-26T12:00:00Z") }, lang);
+      expect(running).toContain("FL start maplegrin");
+      for (const pattern of REWARD) expect(running).not.toMatch(pattern);
     }
   });
 

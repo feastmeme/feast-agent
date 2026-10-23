@@ -236,7 +236,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
 
   // --- the trading agent: planned now, so its card is under the entry's ---------------------------------
   type Planned = { name: string; agent: AgentConfig; card: string; shape: string; needsYes: boolean; strategy: copy.StrategyShown };
-  let planned: Planned | null = null;
+  let planned = null as Planned | null;
   const plan = (): Planned | EnterResult => {
     const name = agentName!;
     let strategy: copy.StrategyShown;
@@ -259,11 +259,14 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const agent = checked.agent;
     return { name, agent, card: checked.kind === "needs-yes" ? checked.card : renderCard(agent), shape: shapeOf(agent), needsYes: checked.kind === "needs-yes", strategy };
   };
-  if (startWanted) {
+  /** Planned once, where its card is needed: after the wallet is read on a first entry, at once on a rerun. */
+  const planOnce = (): EnterResult | null => {
+    if (!startWanted || planned) return null;
     const p = plan();
     if ("code" in p) return p;
     planned = p;
-  }
+    return null;
+  };
 
   /** After a yes that covered it: confirm the agent, mark it to wait for the season, and start it once. */
   const startStep = async (): Promise<string[]> => {
@@ -283,6 +286,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
 
   // --- entered, and nothing to launch: the start alone, with no signature -------------------------------------
   if (entered && !composed) {
+    const refused = planOnce();
+    if (refused) return refused;
     const head = copy.alreadyEntered({ agentId: given, coin: record!.bodyCoin, notes: record!.notes ?? null, season: record!.registered?.season ?? null, seat: record!.registered?.seat ?? null }, lang);
     if (!planned) return end(0, true, "entered", [head, ...(input.memeOnly ? [] : [copy.doneLine(lang)])], { agentId: given, bodyCoin: record!.bodyCoin, notes: record!.notes ?? null });
     if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
@@ -331,6 +336,9 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (still) return end(1, false, "unresolved", copy.pendingOutcome(still.kind, lang), { kind: still.kind, txHash: still.txHash });
   }
 
+  const refused = planOnce();
+  if (refused) return refused;
+
   let entry = stored ?? entryAgent(new Date(now()));
   if (!stored) saveAgent(deps.home, entry);
   const confirmEntry = () => {
@@ -364,7 +372,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (planned) lines.push(...(await startStep()));
     lines.push(planned ? copy.doneRunning(planned.name, opens, lang) : copy.doneLine(lang));
     if (composed) return memeStep(composed);
-    return end(0, true, "done", [], { agentId, season, registered: record?.registered ?? null, notes: record?.notes ?? null, agent: planned?.name ?? null });
+    // Signed in, and the site has not given the seat yet: "registered", not done; a rerun picks it up.
+    return end(0, true, record?.registered && record.registered.seat === null ? "registered" : "done", [], { agentId, season, registered: record?.registered ?? null, notes: record?.notes ?? null, agent: planned?.name ?? null });
   };
 
   // --- the meme: its own card and its own yes ------------------------------------------------------------
