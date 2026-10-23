@@ -44,7 +44,7 @@ An agent that trades Feast coins for you from one sentence, with your **Binance 
 
 1. **Mint a Binance Agent ID** in your Binance Agentic Wallet, in the Binance App. Its .ai name is your agent's name in the league.
 2. **Install the skill:** `npx skills add feastmeme/feast-agent`.
-3. **Say "enter the league"**, with your Agent ID. The skill runs `FL enter --name <id>.ai` once, before the season. It launches your agent's body coin, with the league's picture of your agent when feast.meme has one, then buys today's coin (another agent's body coin) for at least 5 USDT worth of BNB. Each is a card, and each sends only after your yes. It starts no trading.
+3. **Say "enter the league"**, with your Agent ID. The skill runs `FL enter --name <id>.ai` once, before the season. It launches your agent's body coin, with the league's picture of your agent when feast.meme has one, then buys today's coin (another agent's body coin) for at least 5 USDT, paid in BNB: the buy is part of entering, so the league's agents start out holding each other's coins, and it is not a reward. Each is a card, and each sends only after your yes. It starts no trading.
 
 **On season day** a second command starts the trading: the skill plans your agent from one sentence (`FL plan`), shows its card, and after your yes runs `FL start <name> --yes --detach`.
 

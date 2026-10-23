@@ -18,7 +18,7 @@ import { fakeBaw } from "../register/fakes.ts";
 import { agentIdUnreadable, noAgentIdCard, utc8, walletNotReady } from "../register/copy.ts";
 import { LeagueSite } from "../register/site.ts";
 import { agentPaths, readLedger, walletLockPath, writeFileAtomic } from "../store.ts";
-import { ENTRY_AGENT, STEP1_OPEN } from "./constants.ts";
+import { ENTRY_AGENT } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { AVATAR_PNG, FakeEnterSite, fakeEnterChain, fakeOneShot, INDEXER, SITE, type FakeChainOptions, type FakeShotOptions, type FakeSiteOptions } from "./fakes.ts";
 import { enter, entryAgent, entryBnb, entryOneShot, type EnterDeps, type EnterInput } from "./flow.ts";
@@ -29,7 +29,8 @@ const TODAY_COIN: Address = getAddress("0x00000000000000000000000000000000000c0d
 const BODY: Address = getAddress("0x00000000000000000000000000000000000b0d1e");
 const OLD: Address = getAddress("0x000000000000000000000000000000000000001d");
 const SOMEONE: Address = getAddress("0x000000000000000000000000000000000000b0b0");
-const BEFORE_OPEN = Date.parse("2026-10-23T14:00:00Z");
+/** The day the entry was built, before any season day: no clock gates the entry, the page does. */
+const ENTRY_DAY = Date.parse("2026-10-23T14:00:00Z");
 const DAY_ONE = Date.parse("2026-10-24T13:00:00Z");
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
@@ -227,7 +228,7 @@ describe("FL enter: the body coin", () => {
   });
 
   it("already launched since 10/23, by the book: no launch, the skip line", async () => {
-    const w = world({ now: BEFORE_OPEN });
+    const w = world({ now: ENTRY_DAY });
     launched(w);
     const out = await w.run();
     expect(w.shots.requests).toEqual([]);
@@ -236,7 +237,7 @@ describe("FL enter: the body coin", () => {
   });
 
   it("already launched since 10/23, by the indexer and the chain: no launch, the skip line", async () => {
-    const w = world({ now: BEFORE_OPEN });
+    const w = world({ now: ENTRY_DAY });
     w.site.options.creators = [{ coin: BODY.toLowerCase(), creator: w.wallet.toLowerCase(), launchedAt: "2026-10-23T05:00:00.000Z" }];
     const out = await w.run();
     expect(w.shots.requests).toEqual([]);
@@ -279,14 +280,12 @@ describe("FL enter: the body coin", () => {
 });
 
 describe("FL enter: today's coin", () => {
-  it("before the step-1 open nothing is bought, and the page is not asked for a coin", async () => {
-    const w = world({ now: BEFORE_OPEN });
+  it("no clock gates the buy: when the page hands out today's coin, the buy card follows", async () => {
+    const w = world({ now: ENTRY_DAY });
     launched(w);
     const out = await w.run();
-    expect(out).toMatchObject({ code: 0, stage: "wait" });
-    expect(out.text).toContain(`${utc8(Date.parse(STEP1_OPEN))} UTC+8`);
-    expect(utc8(Date.parse(STEP1_OPEN))).toBe("2026-10-24 20:00");
-    expect(w.site.calls.some((c) => c.includes("/api/league/assignment"))).toBe(false);
+    expect(out).toMatchObject({ code: 2, ok: true, stage: "buy-card" });
+    expect(w.site.calls.some((c) => c.includes("/api/league/assignment"))).toBe(true);
   });
 
   for (const [status, minutes] of [["not-registered", 10], ["before-cutoff", 5], ["no-table", 60]] as const) {
@@ -394,7 +393,7 @@ describe("FL enter: today's coin", () => {
     expect(w.shots.requests).toEqual([]);
   });
 
-  it("after the buy: the transaction, the hold line and the next step; entry.json written (en)", async () => {
+  it("after the buy: the transaction and one line, no reward; entry.json written (en)", async () => {
     const w = world();
     launched(w);
     await w.run();
@@ -402,9 +401,8 @@ describe("FL enter: today's coin", () => {
     expect(out).toMatchObject({ code: 0, ok: true, stage: "bought" });
     expect(w.shots.requests).toHaveLength(1);
     expect(w.shots.requests[0]![0]).toMatchObject({ kind: "buy", coin: TODAY_COIN, bnb: 0.0085 });
-    expect(out.text).toContain("Hold it: held 24 h, it earns 2 USDT worth of FEAST, and 72 h 1 USDT more.");
-    expect(out.text).toContain("Entry is done. On season day: FL plan … then FL start … --yes --detach.");
-    expect(out.text).toMatch(/transaction 0x0000…[0-9a-f]{4}/);
+    expect(out.text.split("\n").slice(-2)).toEqual([expect.stringMatching(/^Bought TODAY \(0x0000…0de1\), transaction 0x0000…[0-9a-f]{4}\.$/), "You're in. On season day run `FL start`."]);
+    expect(out.text).not.toMatch(/USDT worth|Hold it|24 h|72 h/);
     expect(w.entry()).toMatchObject({ agentId: ID, bodyCoin: BODY, buy: { coin: TODAY_COIN, bnb: 0.0085, usdtAtBuy: 5.1, at: new Date(DAY_ONE).toISOString() } });
     expect(loadAgent(w.home, ENTRY_AGENT)?.confirmed).not.toBeNull();
   });
@@ -415,8 +413,8 @@ describe("FL enter: today's coin", () => {
     await w.run({ lang: "zh" });
     const out = await w.run({ yes: true, lang: "zh" });
     expect(out.code).toBe(0);
-    expect(out.text).toContain("拿住它：持有 24 小时得 2 USDT 等值的 FEAST，持有 72 小时再得 1 USDT。");
-    expect(out.text).toContain("报名完成。");
+    expect(out.text.split("\n").at(-1)).toBe("你已报名。开赛当天运行 `FL start`。");
+    expect(out.text).not.toMatch(/拿住|持有|等值/);
   });
 
   it("a second run after a qualifying buy: already entered, exit 0, and nothing is asked of anyone", async () => {

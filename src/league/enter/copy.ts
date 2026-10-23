@@ -133,12 +133,6 @@ export function cardChanged(lang: Lang): string {
 
 // --- today's coin --------------------------------------------------------------------------
 
-export function beforeStep1(openMs: number, lang: Lang): string {
-  return lang === "zh"
-    ? `第 1 步在 ${at8(openMs, lang)} 开放：在那之前买今天的币不算数，所以这次没有买。请在 ${at8(openMs, lang)} 再运行一次 FL enter。`
-    : `Step 1 opens at ${at8(openMs, lang)}: a buy of today's coin before then does not count, so nothing was bought. Run FL enter again at ${at8(openMs, lang)}.`;
-}
-
 export type Wait = "not-registered" | "before-cutoff" | "no-table" | "missing";
 
 export function comeBack(what: Wait, reason: string | null, atMs: number, lang: Lang): string {
@@ -212,13 +206,9 @@ export function boughtLine(symbol: string | null, coin: string, txHash: string |
   return lang === "zh" ? `已买入 ${shown}，交易 ${txHash ? short(txHash) : "（无哈希）"}。` : `Bought ${shown}, transaction ${txHash ? short(txHash) : "(no hash)"}.`;
 }
 
-/** Task 960 §4's wording. */
-export function holdLine(lang: Lang): string {
-  return lang === "zh" ? "拿住它：持有 24 小时得 2 USDT 等值的 FEAST，持有 72 小时再得 1 USDT。" : "Hold it: held 24 h, it earns 2 USDT worth of FEAST, and 72 h 1 USDT more.";
-}
-
+/** After the buy: the only line besides the transaction (the coordinator's ruling, 2026-10-23). */
 export function doneLine(lang: Lang): string {
-  return lang === "zh" ? "报名完成。开赛当天：先 FL plan …，再 FL start … --yes --detach。" : "Entry is done. On season day: FL plan … then FL start … --yes --detach.";
+  return lang === "zh" ? "你已报名。开赛当天运行 `FL start`。" : "You're in. On season day run `FL start`.";
 }
 
 export function buyFailed(reason: string, lang: Lang): string {
@@ -227,6 +217,6 @@ export function buyFailed(reason: string, lang: Lang): string {
 
 export function alreadyEntered(view: { agentId: string; coin: string; txHash: string | null; atMs: number }, lang: Lang): string {
   return lang === "zh"
-    ? [`已经报名：${shownName(view.agentId)} 在 ${at8(view.atMs, lang)} 买了今天的币 ${short(view.coin)}，交易 ${view.txHash ? short(view.txHash) : "（无哈希）"}。现在不用再做什么。`, holdLine(lang), doneLine(lang)].join("\n")
-    : [`Already entered: ${shownName(view.agentId)} bought today's coin ${short(view.coin)} at ${at8(view.atMs, lang)}, transaction ${view.txHash ? short(view.txHash) : "(no hash)"}. Nothing more to do now.`, holdLine(lang), doneLine(lang)].join("\n");
+    ? [`已经报名：${shownName(view.agentId)} 在 ${at8(view.atMs, lang)} 买了今天的币 ${short(view.coin)}，交易 ${view.txHash ? short(view.txHash) : "（无哈希）"}。现在不用再做什么。`, doneLine(lang)].join("\n")
+    : [`Already entered: ${shownName(view.agentId)} bought today's coin ${short(view.coin)} at ${at8(view.atMs, lang)}, transaction ${view.txHash ? short(view.txHash) : "(no hash)"}. Nothing more to do now.`, doneLine(lang)].join("\n");
 }
