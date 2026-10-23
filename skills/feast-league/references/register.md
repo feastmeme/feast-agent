@@ -1,6 +1,6 @@
 # The league registration: every card, every prompt
 
-Since `league-v3` a user enters the league with `FL enter` (SKILL.md §8): the body coin and one buy of today's coin, no signature. This file is the older signed path, `FL register`, for a user who asks to register a manifesto.
+Since `league-v4` a user enters the league with `FL enter` (SKILL.md §9): the body coin, and one NoteSession signature for the season's notes; nothing is bought. This file is the older signed path, `FL register`, for a user who asks to register a manifesto.
 
 What `feast-league register` and `feast-league launch` print, in English and Chinese, and the questions you ask in your own words. The runtime prints the cards (`--lang en|zh`); show them verbatim. The examples use the Agent ID `maplegrin`; the user's own comes from the chain.
 
