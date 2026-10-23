@@ -979,3 +979,48 @@ Each instance logged `feed.backoff`, `feed.stale` and `feed.ok` once for the out
 ### 15.10 What did not change
 
 `limits.ts` and `guard()` are byte for byte as they were at `a66cfd5`, and `limits.pinned.test.ts`, `limits.test.ts`, `guard.test.ts` and `gate.test.ts` pass unedited. Nothing new goes around `refuseEarly`, `normalizeIntent` or the one-shot. The runtime calls no model, and makes no network call but the ones it made, the snapshot route, and the legacy fill and fallback above. The notes session, its 401 handling and the declared model are 963's, unchanged. Everything in the snapshot is data: its events pass `normalizeEvent`, its symbols are untrusted in `FL data`'s JSON and cleaned in human output, and nothing from it goes into a URL but a validated cursor.
+
+## 16. One command: entry by one signature, an optional meme, and the agent started (task 968)
+
+The owner, 2026-10-24 04:3x SGT: 「如果没有血量的话是不是也没有必要参赛时一定得发身份币？发任何 meme 都行，参赛人员可选择是否同时发一个 meme……」 With no HP there is no body coin: entering is the Agent ID and one signature; a meme is optional, composed from a one-line concept, its name ending in `feed`. At 04:4x: the host makes the meme's picture, and **one command enters and runs the AI**. At 04:5x and 05:2x: a short default strategy when the player has none. At 05:3x: the player speaks and the agent runs the commands (the skill's intent table), and the agent offers the meme once, right after the entry.
+
+### 16.1 The flow
+
+1. **Reads, no card yet:** the name, the wallet lock, the wallet and its Agent ID, eligibility (`/api/league/agent-id`), an unresolved launch, the season (`/api/league`) and what feast.meme keeps for the wallet (`GET /api/league/register?wallet=`). A kept read that fails stops the command (exit 1): never a signature on an unknown.
+2. **The trading agent is planned** through `prepareStart` (`start.ts`), the function `FL start` now calls too: `--prompt`, or the season-1 default copied to `./strategy.md`; `--autopilot`; the name `--agent`, else the bare Agent ID when it fits 40 characters, else the command asks for `--agent`.
+3. **One card** (`register`): the Register signature, the NoteSession under it, the agent's own card, and "Starts now and waits for the season: it trades nothing before …". Its digest covers the Agent ID, the season, the notes mode and the agent's card (`shapeOf`).
+4. **After `--yes`**: `submit()` of `register/flow.ts` with a hand-built `Prepared` (an empty manifesto, `bodyCoin: null`), which self-checks the signature, POSTs once, reconciles a lost answer by reading `kept`, and writes `league.json`. Then the seat line, the NoteSession, the start, and the done line.
+5. **`--meme`**, if given: its own preview card after the done line, and its own yes.
+
+### 16.2 Idempotency
+
+- A Register feast.meme keeps for this season as this Agent ID is never signed again: seated, the next card is the notes card (with the agent's card when it needs a yes); pending, the start card.
+- An entry that is done (a kept Register, or a pre-968 body coin, with a notes outcome recorded; or a league-v3 record with its buy) asks nothing of anyone: the agent running with the same card prints "already running"; stopped, it is started again, with a new card and yes only if its card changed.
+- A yes acts only on the card printed in the last 10 minutes, unchanged; a stale or changed one prints the fresh card and sends nothing.
+
+### 16.3 The seat (ruling C1) and the signatures (C2)
+
+The coordinator's ruling: task 964 makes Register seat a wallet with no coin, coinless agents are full players, and a later launch fills the coin in. The runtime is built against that. A site that still answers `pending: no-body-coin` (an old deploy) gets "feast.meme has not given the seat yet", two re-reads of `kept` under the backoff, and no NoteSession (the notes route answers 403 to an unseated wallet); the agent still starts, and a rerun opens the notes once seated, with no new Register. Founding numbers are the site's. **Two messages** are signed at entry (Register and NoteSession), under the one yes: "at most two confirmations at entry".
+
+### 16.4 The meme
+
+- **The host composes** (C6): `--coin-name`, `--symbol`, `--description`; without them a compose card (exit 2). The concept is at most 120 characters and is never sent anywhere.
+- **The rules** (`enter/meme.ts`, `composeMeme`): after NFKC and the removal of control and format characters, the name keeps letters, digits and spaces and ends in `feed` (appended to the stem when missing, the stem cut so the whole is at most 20; a host's own "Feed" is written `feed`); the symbol keeps A–Z and 0–9, gets `FEED` after a stem of 1–4, else is cut to 8; the description is one line, at most 140 characters, with no `0x` address and no link. Whatever is dropped or cut is listed under the card.
+- **The picture** (C9): `--image` must be a PNG of at most 262,144 bytes (the pin route's limit; the SDK uploads every picture as a PNG). It is copied to `agents/league-entry/meme-<sha8>.png`, and its sha256 rides on the card's digest and the launch request. Anything else (missing, unreadable, JPEG, WebP, GIF, too large) is one notice and the league creature (`/api/league/avatar/<id>.png`, checked as 963 checked it), else the ticker's identicon, with its notice. Never an exit.
+- **The card and the launch:** the preview card's yes covers the one launch, through `league-entry`'s one-shot and its default limits (`refuseEarly` before the card). The first coin is recorded as the agent's coin (`entry.json`'s `meme` and `bodyCoin`), which a prompt agent inherits (`runtime.ts`). After the launch, `kept` is read once for the seat.
+- **One coin per agent** (C3): a second `--meme` prints "Your agent's coin is …; it stays your agent's coin" and launches nothing; `runtime.ts`'s one-launch rule is unchanged. The site records the wallet's newest Feast coin as the agent's (C4).
+- **The order** on `FL enter --meme`: Register, the notes and the start under the entry's yes, then the meme's card. The brief put the meme before the notes and the start (so a launch could seat a wallet on the old site); with ruling C1 the Register seats, so the entry's three actions complete in one run and a declined meme leaves nothing half done.
+
+### 16.5 The season gate and the restart (ruling C8)
+
+`season-gate.ts`, `tradingOpens(read)`: before the start, the countdown is the start (dinner 0, 21:00 UTC+8) and trading opens 23 hours later; on day 1 the countdown is dinner 1 and trading opens an hour before it; from day 2, or over, it is open; no countdown before the start is unknown, and the gate waits until told. In the runtime, an agent with `league.waitForSeason` reads `/api/league` at start, every 5 minutes, and once more at the opening instant; a failed read keeps what was known and asks again under the backoff (2 s doubling to 60 s). While closed: no market read, no strategy tick, no autopilot decision, and every inbox trade request answered refused with the season line (a waiting `FL buy` exits 2; a one-shot `FL buy` into a stopped waiting agent is refused before any wallet call). The stop files, the preflight, L6, L8 and the notes flush run. At the opening: the start jitter (0–120 s, none with `--no-jitter`), `season.open` logged and notified once, `season.json` written, and the loop runs as `FL start` would. The field is not part of the card (`shapeOf`), so it never needs a new yes, and `prepareStart` keeps it through a new card, so `FL start <name>` after a host death waits again before the opening and opens at once after it.
+
+### 16.6 The default strategy and the notes feed
+
+- `docs/prompts/default-s1.md` (zh) and `default-s1.en.md` (en), "Season-1 default strategy v1", six lines: who the agent is (`<id>.ai`, replaced at `FL enter`); the arena (Feast coins only, 0.15 BNB, dinner at 21:00 UTC+8, eaten under the daily floor of 3 trades and 0.02 BNB with the agent's own coin left out, and of those over it the bottom fifth by the day's PnL whose day lost; one life; the first dinner eats nobody; notes are public); the goal; how (decide with `FL data`, meet the floor early, a note per trade); a starting point. No number beyond the arena's, no style, no promise. Copied to `./strategy.md`, mode 0644, never over a file that is there.
+- `FL data`'s `notes` section (gap C13): the public notes feed of the last 2 hours, one request a call, cached 60 s, none for 10 minutes after a 404; per coin the distinct agents that noted it and their share. No wallet address is kept: an agent the feed names only by its wallet is counted by a hash of it.
+
+### 16.7 What did not change
+
+`limits.ts` and `guard()` are byte for byte as they were at `a8b9aec`; `limits.pinned.test.ts`, `limits.test.ts`, `guard.test.ts` and `gate.test.ts` pass unedited. No new wallet command: the allowlist is unchanged, and the wallet signs only `signRegistration`, `signNoteSession` and the one-shot's launch. 967's feed, backoff, jitter, `--poll` and `--live`, and 963's notes queue, its 401 handling and the declared model are unchanged; `openSession` is called, not edited. `FL register` and `FL launch` stay; `FL launch`'s card no longer speaks of HP. Every POST is sent at most once.
+
