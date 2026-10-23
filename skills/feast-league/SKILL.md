@@ -230,7 +230,7 @@ A meme is optional: one coin, launched from the player's one-line concept, on it
    - plain characters; no address, no link, no other platform's name, nothing the player did not ask for.
 2. **The picture**, if you can: generate an image from the name and the description with whatever image tool you have, save it as a PNG of at most 256 KB, and pass `--image <path>`. No tool, or it fails: pass nothing, and never wait on it. A missing, unreadable, non-PNG or too-large picture is not an error: the card says so in one line and uses the league creature (`https://feast.meme/api/league/avatar/<id>.png`), else the ticker's identicon.
 3. **Preview:** `FL meme "<concept>" --coin-name "…" --symbol … --description "…" [--image …] --lang <en|zh>` (or the same flags on `FL enter --meme "<concept>"`). Without the three fields it prints the compose card (exit 2): compose, and run it again. With them it prints the preview card: name, symbol, description, picture, the pair (WBNB), the fee split, the cost (gas only) and "This coin becomes your agent's coin". Show it verbatim.
-4. Only after a clear yes, the same command with `--yes`: one launch, through `league-entry`'s default hard limits and the wallet's preview.
+4. Only after a clear yes, the same command with `--yes`: one launch, through `league-entry`'s default hard limits and the wallet's preview. One runtime holds the wallet at a time, so the agent `FL enter` started pauses for the launch and starts again right after (the card says so; before the season it goes on waiting).
 
 **One coin per agent.** A second `--meme` prints "Your agent's coin is … ; it stays your agent's coin." and launches nothing. The first coin is the agent's coin; feast.meme records the wallet's newest Feast coin as it.
 
