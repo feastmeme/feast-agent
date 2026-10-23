@@ -13,7 +13,9 @@ import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
 import { Executor } from "./executor.ts";
 import { backstopExits } from "./exits.ts";
+import { Backoff } from "./feed/backoff.ts";
 import { MarketFeed } from "./feed/feed.ts";
+import { drawStartJitter } from "./feed/snapshot.ts";
 import { guard, warmupActive, warmupAfter, type GuardInput, type GuardVerdict, type Intent, type WalletState } from "./guard.ts";
 import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type Limits } from "./limits.ts";
 import { Market } from "./market.ts";
@@ -22,7 +24,8 @@ import { presetStrategy } from "./presets/logic.ts";
 import { SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
 import { autopilotGate, lastHostAction, promptChanged } from "./prompt/host.ts";
 import { sessionNotice } from "./register/copy.ts";
-import { siteFromEnv } from "./register/site.ts";
+import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
+import { GATE_READ_MS, seasonClosedLine, tradingOpens, writeGate } from "./season-gate.ts";
 import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
 import { freshMemory, pastEnd, sessionStep, sessionView, type SessionMemory, type SessionView } from "./session.ts";
@@ -45,6 +48,11 @@ import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExt
  * `FL start` spreads the 20:00 start: the runtime's first read of the site, its
  * first strategy tick and its first autopilot decision wait `startJitterMs`;
  * the stop files, the inbox, the preflight, L6 and L8 run from the start.
+ *
+ * An agent `FL enter` started (task 968, `agent.league.waitForSeason`) waits for the season behind a gate: until
+ * feast.meme's season opens (one hour before dinner 1) it reads no market, asks no strategy or autopilot, and answers
+ * every `FL buy`, `FL sell` and launch request as refused; the stop files, the preflight, L6 and L8 run. At the
+ * opening instant it draws the start jitter, logs `season.open` once, and runs as `FL start` would.
  *
  * A prompt agent (task 963) has no strategy of its own: the user's agent decides
  * and acts through `FL buy` and `FL sell`, which reach this loop as inbox
@@ -88,6 +96,10 @@ export type RuntimeDeps = {
   startJitterMs?: number;
   /** The jitter's random (tests pass a seeded one). */
   random?: () => number;
+  /** Task 968: the season gate's read of `/api/league` (default: feast.meme's, one ask); null when it cannot be read. */
+  seasonRead?: () => Promise<LeagueRead | null>;
+  /** `--no-jitter`: the gate opens without the start jitter. */
+  noJitter?: boolean;
 };
 
 type Loaded = {
@@ -229,6 +241,30 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     await preflight();
     if (!walletState.connected) return { exit: "refused", reason: "the wallet is not connected: sign in first (baw auth signin)" };
     if (!walletState.devMode) return { exit: "refused", reason: "Developer Mode is off, expired, or the balance is above its limit: fix it in the Binance App" };
+
+    // --- the season gate (task 968) ------------------------------------------------------------
+    const waits = agent.league?.waitForSeason === true && agent.track !== "entry";
+    const random = deps.random ?? Math.random;
+    const gate = { open: !waits, opensAt: null as number | null, nextRead: 0 };
+    const gateBackoff = new Backoff({ now: clock, random });
+    const readSeason = deps.seasonRead ?? (() => new LeagueSite(deps.site ?? siteFromEnv(), deps.fetch ?? fetch, 8_000).league("today", null));
+    const saveGate = () => writeGate(deps.home, deps.name, { state: gate.open ? "open" : "waiting", opensAt: gate.opensAt === null ? null : new Date(gate.opensAt).toISOString(), at: new Date(clock()).toISOString() });
+    /** One read of the league: when trading opens. A failed read keeps what was known, and asks again under the backoff. */
+    const readGate = async () => {
+      const now = clock();
+      const read = await readSeason().catch(() => null);
+      if (!read) {
+        gate.nextRead = now + gateBackoff.fail({ status: null, reason: "the league could not be read" });
+        return;
+      }
+      gateBackoff.ok();
+      const opening = tradingOpens(read);
+      gate.opensAt = opening.kind === "open" ? now : opening.kind === "at" ? opening.at : null;
+      // Every 5 minutes, and once more at the instant.
+      gate.nextRead = gate.opensAt !== null && gate.opensAt > now ? Math.min(now + GATE_READ_MS, gate.opensAt) : now + GATE_READ_MS;
+      saveGate();
+    };
+    if (waits) await readGate();
 
     // --- the book and the strategy --------------------------------------------------------
     let book: Book = existsSync(paths.state) ? parseBook(readFileSync(paths.state, "utf8")) : emptyBook();
@@ -683,7 +719,13 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           request = null;
         }
         rmSync(full, { force: true });
-        if (request?.type === "intent" && request.request) {
+        if (request?.type === "intent" && request.request && !gate.open) {
+          // The season has not opened: the request is answered at once, and nothing is queued.
+          const requestId = typeof request.requestId === "string" && /^[a-z0-9-]{1,64}$/i.test(request.requestId) ? request.requestId : null;
+          const message = seasonClosedLine(gate.opensAt);
+          log("inbox.refused", { problem: message, season: "closed", kind: request.request.kind });
+          if (requestId) log("request.outcome", { requestId, outcome: "refused", kind: request.request.kind, limit: null, message });
+        } else if (request?.type === "intent" && request.request) {
           const slippage = typeof request.slippagePct === "number" ? request.slippagePct : Math.min(3, agent!.limits.maxSlippagePct);
           const normal = normalizeIntent(request.request, { snapshot: { feast, now: clock(), limits: agent!.limits }, source: "manual", slippagePct: slippage, ttlMs: 120_000 });
           // The CLI's own id for the request, so `FL buy` can wait for its outcome: a plain token, never a path.
@@ -731,6 +773,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const watched = () => new Set([...Object.keys(book.positions), ...loaded!.meta.watch.map((w) => (w.toUpperCase() === "FEAST" ? feast.toLowerCase() : w.toLowerCase()))]);
     // The one-shot comes before any strategy is loaded or listened for: it runs the manual requests and nothing else.
     if (deps.only) {
+      // An agent that waits for the season takes no manual trade before it opens, running or not.
+      if (waits && !(gate.opensAt !== null && clock() >= gate.opensAt)) return { exit: "refused", reason: seasonClosedLine(gate.opensAt) };
       // An outcome an earlier run could not learn is asked about first, so the guard reads a book that is up to date.
       if (book.unresolved.length > 0) await resolvePending().catch((error: unknown) => log("unresolved.check.failed", { reason: String((error as Error).message) }));
       for (const request of deps.only) {
@@ -833,10 +877,22 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           })
         : null;
     let feedOn = false;
-    const startJitterMs = Math.max(0, deps.startJitterMs ?? 0);
-    const jitterUntil = startedAt + startJitterMs;
+    const startJitterMs = gate.open ? Math.max(0, deps.startJitterMs ?? 0) : 0;
+    let jitterUntil = startedAt + startJitterMs;
     let jitterDone = startJitterMs === 0;
-    log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null, feed: feed ? feed.mode : null, pollMs: deps.pollMs ?? 5_000, startJitterMs });
+    /** The gate opens: the start jitter is drawn now, and the loop runs as `FL start` would. Once a run. */
+    const openGate = (now: number) => {
+      gate.open = true;
+      const jitter = deps.noJitter ? 0 : drawStartJitter(random);
+      jitterUntil = now + jitter;
+      jitterDone = jitter === 0;
+      nextTick = 0;
+      log("season.open", { opensAt: new Date(gate.opensAt ?? now).toISOString(), jitterMs: jitter });
+      notify("season", `the season is open: trading starts${jitter > 0 ? ` within ${Math.ceil(jitter / 1_000)} s` : " now"}`);
+      saveGate();
+    };
+    log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null, feed: feed ? feed.mode : null, pollMs: deps.pollMs ?? 5_000, startJitterMs, ...(waits ? { waitForSeason: true, opensAt: gate.opensAt === null ? null : new Date(gate.opensAt).toISOString() } : {}) });
+    if (!gate.open) notify("season", `waiting for the season: it trades nothing until ${seasonClosedLine(gate.opensAt).replace(/^the season has not started; it opens /, "it opens ")}`);
     if (agent.track === "prompt") {
       notify("started", `prompt mode; your agent decides; ${agent.preset && agent.autopilot ? `autopilot ${agent.preset} after ${agent.autopilot.idleMinutes} min of silence` : "no autopilot"}`);
     } else {
@@ -878,15 +934,21 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         save();
         return { exit: "finished", reason: "the run's time is up" };
       }
+      if (!gate.open) {
+        if (now >= gate.nextRead) await readGate();
+        if (gate.opensAt !== null && clock() >= gate.opensAt) openGate(clock());
+      }
       drainInbox();
       // FL start's spread: until it is over, nothing reads the site and no strategy is asked; the safety runs.
-      const warming = now < jitterUntil;
+      // The season gate holds the same back, longer.
+      const spreading = now < jitterUntil;
+      const warming = spreading || !gate.open;
       if (!warming && !jitterDone) {
         jitterDone = true;
         nextTick = 0;
         log("jitter.done", { afterMs: now - startedAt });
       }
-      if (agent.track === "prompt" && agent.preset && agent.autopilot) {
+      if (gate.open && agent.track === "prompt" && agent.preset && agent.autopilot) {
         const on = silent();
         if (on !== autopilotOn) {
           autopilotOn = on;
@@ -896,7 +958,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : `your agent acted: autopilot ${agent.preset} steps back`);
         }
       }
-      if (!warming) flushQueuedNotes(now);
+      // Notes are not trades: the gate lets them through.
+      if (!spreading) flushQueuedNotes(now);
       if (now >= nextPreflight) {
         await preflight();
         nextPreflight = now + (deps.preflightMs ?? 300_000);
