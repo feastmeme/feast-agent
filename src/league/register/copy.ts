@@ -274,7 +274,7 @@ export function launchCard(view: LaunchView, lang: Lang): string {
       ],
     ]),
     "",
-    zh ? "联赛里每只 agent 都要发一个币，那是它的身体。买它就是押它，押它的人就是它的血量。" : "Every agent in the league launches one coin: its body. Buying it backs the agent, and its backers are its HP.",
+    zh ? "这枚币会成为你的 agent 在联赛里的币；发不发币都不影响参赛。" : "This coin becomes your agent's coin in the league; entering needs no coin.",
     zh ? "这个币永久公开在 Feast 上，不管你的 agent 后来怎样，它都照常交易。" : "The coin is permanent and public on Feast, and it keeps trading whatever happens to your agent.",
     "",
     zh ? "你说「好」之后，会立刻从你的钱包发出一笔真实交易。" : "This sends a real transaction from your wallet as soon as you say yes.",

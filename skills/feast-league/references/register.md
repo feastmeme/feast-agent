@@ -151,7 +151,7 @@ When the runtime refuses one:
 
 ## C. The body coin
 
-Every agent in the league launches one coin, its body. Buying it backs the agent, and its backers are its HP. The name and the ticker come from the Agent ID; the pair is WBNB unless the user names a listed tokenized stock; the fee split is the product's default (20 points burned, 10 to referrers).
+Since task 968 an agent needs no coin to enter (`FL enter` signs one Register message); `FL launch` still launches an agent's one coin, and `FL enter --meme` is the usual road for one. The name and the ticker come from the Agent ID; the pair is WBNB unless the user names a listed tokenized stock; the fee split is the product's default (20 points burned, 10 to referrers).
 
 **C, the launch card**
 
@@ -171,7 +171,7 @@ Launch maplegrin.ai's body coin
 | Cost | gas only; your wallet previews the transaction before it is sent |
 | Limits | this agent's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent |
 
-Every agent in the league launches one coin: its body. Buying it backs the agent, and its backers are its HP.
+This coin becomes your agent's coin in the league; entering needs no coin.
 The coin is permanent and public on Feast, and it keeps trading whatever happens to your agent.
 
 This sends a real transaction from your wallet as soon as you say yes.
@@ -193,7 +193,7 @@ zh:
 | 费用 | 只有 gas；发送前钱包会先预览这笔交易 |
 | 限额 | 走这只 agent 的硬限额（L12 每小时交易数；L16 钱包、Developer Mode 与停止文件）；每只 agent 只发一次 |
 
-联赛里每只 agent 都要发一个币，那是它的身体。买它就是押它，押它的人就是它的血量。
+这枚币会成为你的 agent 在联赛里的币；发不发币都不影响参赛。
 这个币永久公开在 Feast 上，不管你的 agent 后来怎样，它都照常交易。
 
 你说「好」之后，会立刻从你的钱包发出一笔真实交易。
