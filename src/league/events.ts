@@ -1,14 +1,17 @@
 import { getAddress, isAddress, type Address, type Hex } from "viem";
 
 /**
- * The event stream (PLAN.md §2.2). There is no client-facing realtime feed, so
- * the runtime polls the Feast indexer's `/v1/events` every 2 s with a cursor.
+ * The event stream (PLAN.md §2.2, §15). There is no client-facing realtime
+ * feed. Since task 967 the runtime reads its events from feast.meme's cached
+ * market snapshot (`feed/`); this poller of the Feast indexer's `/v1/events`,
+ * with a cursor, is the fallback while that route is not deployed and the path
+ * `--live` keeps, at the same 5–8 s interval and under the same backoff.
  *
  * Checked live on 2026-10-21: a cursor `{"b": block, "i": logIndex}` (base64url)
  * is accepted and exclusive; the indexer caches each exact query for 30 s, and a
  * repeated query returned the cached page while one with another `limit` came
- * back fresh. So the poller cycles `limit` through fifteen values: at one poll
- * every 2 s, no query repeats inside the cache's 30 s.
+ * back fresh. So the poller cycles `limit` through fifteen values: no query
+ * repeats inside the cache's 30 s, at any interval of 2 s or more.
  */
 
 export const INDEXER_URL = "https://indexer.feast.meme";
@@ -88,6 +91,17 @@ export function normalizeEvent(raw: Raw): LeagueEvent | null {
   return null;
 }
 
+/** An answer of the indexer's other than a 2xx, with what the backoff needs of it. */
+export class IndexerError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfter: string | null,
+  ) {
+    super(message);
+  }
+}
+
 export type PollerOptions = {
   base?: string;
   types?: ("launch" | "trade")[];
@@ -115,11 +129,11 @@ export class IndexerPoller {
 
   private async get(path: string): Promise<{ asOf?: { block?: number }; data?: unknown }> {
     const response = await this.fetchImpl(`${this.base}${path}`, { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error(`the indexer answered HTTP ${response.status} for ${path.split("?")[0]}`);
+    if (!response.ok) throw new IndexerError(`the indexer answered HTTP ${response.status} for ${path.split("?")[0]}`, response.status, response.headers.get("retry-after"));
     return (await response.json()) as { asOf?: { block?: number }; data?: unknown };
   }
 
-  /** Start at the indexer's head, unless the book carries a cursor from an earlier run. */
+  /** Start at the indexer's head, unless given a cursor (the snapshot feed's position, when the runtime falls back to this poller). */
   async start(): Promise<string> {
     if (this.cursor) return this.cursor;
     const head = await this.get("/v1/events?types=launch&limit=1");

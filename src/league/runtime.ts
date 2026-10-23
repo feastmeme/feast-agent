@@ -10,10 +10,10 @@ import { auditRefusal } from "./audit/verdict.ts";
 import { BawError, type Signer } from "./baw.ts";
 import { bookView, clearPause, emptyBook, pendingBuysWei, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
-import { IndexerPoller } from "./events.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
 import { Executor } from "./executor.ts";
 import { backstopExits } from "./exits.ts";
+import { MarketFeed } from "./feed/feed.ts";
 import { guard, warmupActive, warmupAfter, type GuardInput, type GuardVerdict, type Intent, type WalletState } from "./guard.ts";
 import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type Limits } from "./limits.ts";
 import { Market } from "./market.ts";
@@ -32,12 +32,19 @@ import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExt
 /**
  * The runtime (PLAN.md §2): one process per wallet, no model anywhere in it.
  *
- * Every second it checks the stop files and its inbox; every 2 s it polls the
- * indexer's event stream when the strategy listens for events; on its tick it
- * refreshes the snapshot, makes the runtime's own exits (the backstop L6, the
- * drawdown halt L8) and asks the strategy. Every intent then takes one road:
- * the guard, the executor (allowlist, lock, preview, gate, execute, receipt),
- * the book. One at a time, exits first.
+ * Every second it checks the stop files and its inbox; every 5–8 s (`--poll`)
+ * it reads feast.meme's cached market snapshot when the strategy listens for
+ * events or reads the board (`feed/`, PLAN.md §15: the indexer's legacy routes
+ * while that route is not deployed, or with `--live`), under one backoff; on
+ * its tick it marks the book on the chain, makes the runtime's own exits (the
+ * backstop L6, the drawdown halt L8) and asks the strategy, which reads the
+ * newest snapshot it holds, marked stale while the feed backs off. Every intent
+ * then takes one road: the guard, the executor (allowlist, lock, preview, gate,
+ * execute, receipt), the book. One at a time, exits first.
+ *
+ * `FL start` spreads the 20:00 start: the runtime's first read of the site, its
+ * first strategy tick and its first autopilot decision wait `startJitterMs`;
+ * the stop files, the inbox, the preflight, L6 and L8 run from the start.
  *
  * A prompt agent (task 963) has no strategy of its own: the user's agent decides
  * and acts through `FL buy` and `FL sell`, which reach this loop as inbox
@@ -72,8 +79,15 @@ export type RuntimeDeps = {
   /** feast.meme, for the notes flush (default `FEAST_LEAGUE_SITE` or https://feast.meme). */
   site?: string;
   loopMs?: number;
+  /** The market snapshot's interval before its 0–3 s jitter (`--poll`; default 5 s, at least 3 s from the CLI). */
   pollMs?: number;
   preflightMs?: number;
+  /** `--live`: the indexer's legacy reads instead of feast.meme's snapshot (task 967). */
+  live?: boolean;
+  /** FL start's wait before the first read of the site, the first strategy tick and the first autopilot decision. None by default. */
+  startJitterMs?: number;
+  /** The jitter's random (tests pass a seeded one). */
+  random?: () => number;
 };
 
 type Loaded = {
@@ -709,7 +723,6 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     // the autopilot preset is asked on its own tick, below.
     const tickMs = () => (agent!.track === "prompt" ? Math.min(SAFETY_PASS_SECONDS, agent!.tickSeconds) : agent!.tickSeconds) * 1_000;
     let nextStrategyTick = 0;
-    let nextPoll = 0;
     let nextTick = 0;
     let nextPreflight = clock() + (deps.preflightMs ?? 300_000);
     let nextUnresolvedCheck = 0;
@@ -799,9 +812,31 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     }
 
     const listens = (loaded.meta.events ?? []).length > 0;
-    const poller = listens ? new IndexerPoller({ base: deps.indexer, fetch: deps.fetch }) : null;
-    if (poller) await poller.start().catch((error: unknown) => log("events.start.failed", { reason: String((error as Error).message) }));
-    log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null });
+    // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
+    const needBoard = () => agent!.track === "script" || agent!.preset === "momentum" || (agent!.preset === "dca" && agent!.params.targets === "topHolders");
+    // The market feed (task 967), only for a strategy that listens or reads the board: a prompt agent without an
+    // autopilot, and the launch preset, read nothing; an autopilot reads only while it is on.
+    const feed =
+      listens || needBoard()
+        ? new MarketFeed({
+            site: deps.site ?? siteFromEnv(),
+            indexer: deps.indexer,
+            fetch: deps.fetch ?? fetch,
+            now: clock,
+            random: deps.random ?? Math.random,
+            pollSeconds: (deps.pollMs ?? 5_000) / 1_000,
+            live: deps.live,
+            market,
+            log,
+            cache: { home: deps.home, wallet },
+            onStale: (failure) => notify("market", `feast.meme's market data is not answering (${failure.reason}): the agent decides on its last good read, marked stale, and asks again with a growing wait; its exits and the drawdown halt read the chain`, {}, "feed-stale"),
+          })
+        : null;
+    let feedOn = false;
+    const startJitterMs = Math.max(0, deps.startJitterMs ?? 0);
+    const jitterUntil = startedAt + startJitterMs;
+    let jitterDone = startJitterMs === 0;
+    log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null, feed: feed ? feed.mode : null, pollMs: deps.pollMs ?? 5_000, startJitterMs });
     if (agent.track === "prompt") {
       notify("started", `prompt mode; your agent decides; ${agent.preset && agent.autopilot ? `autopilot ${agent.preset} after ${agent.autopilot.idleMinutes} min of silence` : "no autopilot"}`);
     } else {
@@ -844,6 +879,13 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         return { exit: "finished", reason: "the run's time is up" };
       }
       drainInbox();
+      // FL start's spread: until it is over, nothing reads the site and no strategy is asked; the safety runs.
+      const warming = now < jitterUntil;
+      if (!warming && !jitterDone) {
+        jitterDone = true;
+        nextTick = 0;
+        log("jitter.done", { afterMs: now - startedAt });
+      }
       if (agent.track === "prompt" && agent.preset && agent.autopilot) {
         const on = silent();
         if (on !== autopilotOn) {
@@ -854,31 +896,37 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : `your agent acted: autopilot ${agent.preset} steps back`);
         }
       }
-      flushQueuedNotes(now);
+      if (!warming) flushQueuedNotes(now);
       if (now >= nextPreflight) {
         await preflight();
         nextPreflight = now + (deps.preflightMs ?? 300_000);
       }
-      if (poller && now >= nextPoll) {
-        nextPoll = now + (deps.pollMs ?? 2_000);
-        try {
-          const events = await poller.poll();
-          if (events.length > 0) {
-            const marks = await market.marks(book);
-            const balanceWei = await chain.balance(wallet).catch(() => walletState.balanceWei);
-            const snapshot = await market.snapshot({ now: clock(), balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: false });
-            const seen = watched();
-            for (const event of events) {
-              for (const strategyEvent of await market.ingest(event, clock(), seen)) {
-                // Only fresh events reach a strategy: a replayed backlog is history, not a signal.
-                if (clock() - strategyEvent.at > 120_000) continue;
-                if (!loaded.meta.events.includes(strategyEvent.type)) continue;
-                await runStrategy("onEvent", snapshot, strategyEvent);
+      if (feed && !warming) {
+        // An autopilot listens only while it is on; when it steps back, the next read starts at the head again.
+        const wanted = agent.track !== "prompt" || autopilotOn;
+        if (!wanted && feedOn) feed.reset();
+        feedOn = wanted;
+        // A strategy that listens reads every interval; one that only reads the board, once a tick.
+        if (wanted && feed.due() && (listens || (needBoard() && now >= nextTick))) {
+          const events = await feed.step({ events: listens });
+          try {
+            if (events.length > 0) {
+              const marks = await market.marks(book);
+              const balanceWei = await chain.balance(wallet).catch(() => walletState.balanceWei);
+              const snapshot = await market.snapshot({ now: clock(), balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: false, stale: feed.stale() });
+              const seen = watched();
+              for (const event of events) {
+                for (const strategyEvent of await market.ingest(event, clock(), seen)) {
+                  // Only fresh events reach a strategy: a replayed backlog is history, not a signal.
+                  if (clock() - strategyEvent.at > 120_000) continue;
+                  if (!loaded.meta.events.includes(strategyEvent.type)) continue;
+                  await runStrategy("onEvent", snapshot, strategyEvent);
+                }
               }
             }
+          } catch (error) {
+            log("events.failed", { reason: String((error as Error).message).slice(0, 200) });
           }
-        } catch (error) {
-          log("events.failed", { reason: String((error as Error).message).slice(0, 200) });
         }
       }
       if (book.unresolved.length > 0 && now >= nextUnresolvedCheck) {
@@ -903,12 +951,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             ),
           );
           // The strategy on its own tick: a prompt agent's autopilot only while it is on, a preset's or a script's every tick.
-          const asks = agent.track !== "prompt" || (autopilotOn && now >= nextStrategyTick);
+          const asks = !warming && (agent.track !== "prompt" || (autopilotOn && now >= nextStrategyTick));
           if (asks) {
             if (agent.track === "prompt") nextStrategyTick = now + agent.tickSeconds * 1_000;
-            // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
-            const needBoard = agent.track === "script" || agent.preset === "momentum" || (agent.preset === "dca" && agent.params.targets === "topHolders");
-            const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard });
+            if (feed && needBoard()) await feed.prepareBoard(now);
+            const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: needBoard(), stale: feed?.stale() ?? null });
             await runStrategy("onTick", snapshot);
           } else save();
         } catch (error) {

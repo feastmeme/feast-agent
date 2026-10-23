@@ -1,5 +1,7 @@
 import { getAddress, isAddress, type Address } from "viem";
 
+import { failureOf, retrying, type Failure, type Retry } from "../feed/backoff.ts";
+
 /**
  * The league page's API, as an agent's runtime reads it (docs/PLAN-941.md §4).
  *
@@ -253,20 +255,37 @@ export class LeagueSite {
     readonly base: string = siteFromEnv(),
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = 15_000,
+    /** Task 967: the GETs back off on a 429, a 5xx or no answer (FL enter's: at most 3 asks, 2 minutes). Never a POST. */
+    private readonly retry?: Retry,
   ) {}
 
+  /** An answer's status as a failure to ask again after, under the retry policy; null to take it. */
+  private failed(status: number, retryAfter: string | null): Failure | null {
+    return failureOf(status, retryAfter, this.retry?.now() ?? Date.now());
+  }
+
   private async getJson(path: string, timeoutMs = this.timeoutMs): Promise<{ status: number; body: unknown } | { error: string }> {
-    try {
-      const response = await this.fetchImpl(`${this.base}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
-      const text = await response.text();
+    const once = async (): Promise<{ status: number; body: unknown; retryAfter: string | null } | { error: string; status?: number; retryAfter?: string | null }> => {
       try {
-        return { status: response.status, body: JSON.parse(text) as unknown };
-      } catch {
-        return { error: `the page answered ${response.status}, not JSON` };
+        const response = await this.fetchImpl(`${this.base}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs) });
+        const text = await response.text();
+        const retryAfter = response.headers.get("retry-after");
+        try {
+          return { status: response.status, body: JSON.parse(text) as unknown, retryAfter };
+        } catch {
+          return { error: `the page answered ${response.status}, not JSON`, status: response.status, retryAfter };
+        }
+      } catch (error) {
+        return { error: (error as Error).message };
       }
-    } catch (error) {
-      return { error: (error as Error).message };
-    }
+    };
+    const got = await retrying(this.retry, once, (o) => {
+      if ("error" in o) return null;
+      const v = o.value;
+      if (v.status === undefined) return { status: null, reason: "no answer" };
+      return this.failed(v.status, v.retryAfter ?? null);
+    });
+    return "error" in got ? { error: got.error } : { status: got.status, body: got.body };
   }
 
   /** What the page keeps for this wallet: an agent, null for none, or unreadable. */
@@ -310,16 +329,22 @@ export class LeagueSite {
     }
   }
 
-  private async getRaw(path: string): Promise<{ status: number; text: string; contentType: string }> {
+  /** A GET under the retry policy when there is one (by its status, or no answer); otherwise `getOnce`, as before. */
+  private asked<T extends { status: number; retryAfter?: string | null }>(ask: () => Promise<T>): Promise<T> {
+    if (!this.retry) return this.getOnce(ask);
+    return retrying(this.retry, ask, (o) => ("error" in o ? (isTransportError(o.error) ? { status: null, reason: "no answer" } : null) : this.failed(o.value.status, o.value.retryAfter ?? null)));
+  }
+
+  private async getRaw(path: string): Promise<{ status: number; text: string; contentType: string; retryAfter: string | null }> {
     const response = await this.fetchImpl(`${this.base}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(this.timeoutMs) });
-    return { status: response.status, text: await response.text(), contentType: response.headers.get("content-type") ?? "" };
+    return { status: response.status, text: await response.text(), contentType: response.headers.get("content-type") ?? "", retryAfter: response.headers.get("retry-after") };
   }
 
   /** The page's read of this wallet's Agent ID (task 960): `{ wallet, agentId, coins }`, or 503 `upstream-unavailable`. */
   async agentIdOnPage(wallet: Address): Promise<PageAgentId> {
     let got: { status: number; text: string };
     try {
-      got = await this.getOnce(() => this.getRaw(`/api/league/agent-id?wallet=${wallet.toLowerCase()}`));
+      got = await this.asked(() => this.getRaw(`/api/league/agent-id?wallet=${wallet.toLowerCase()}`));
     } catch (error) {
       return { state: "unavailable", reason: (error as Error).message };
     }
@@ -345,7 +370,7 @@ export class LeagueSite {
   /** The league's picture of an agent (task 960), read up to `maxBytes` (and one byte more, to know it is too big). */
   async avatar(agentId: string, maxBytes: number): Promise<AvatarAnswer> {
     try {
-      return await this.getOnce(async () => {
+      return await this.asked(async () => {
         const response = await this.fetchImpl(`${this.base}/api/league/avatar/${agentId}.png`, { headers: { accept: "image/png" }, signal: AbortSignal.timeout(this.timeoutMs) });
         const declared = Number(response.headers.get("content-length") ?? "");
         const contentType = response.headers.get("content-type") ?? "";

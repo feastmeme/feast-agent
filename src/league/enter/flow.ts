@@ -5,6 +5,7 @@ import type { Address, Hex } from "viem";
 
 import { confirmAgent, loadAgent, saveAgent, type AgentConfig } from "../agent.ts";
 import type { Signer, SignOptions } from "../baw.ts";
+import type { Retry } from "../feed/backoff.ts";
 import type { Book } from "../book.ts";
 import type { AgentIdRead, CoinInfo, LeagueChain } from "../chain.ts";
 import { refuseEarly } from "../early.ts";
@@ -73,6 +74,8 @@ export type EnterDeps = {
   notesDev?: boolean;
   /** How the notes signature waits for the App's confirmation (tests make it instant). */
   signOptions?: SignOptions;
+  /** Task 967: the indexer's launches read backs off as the site's GETs do (the CLI passes real time). */
+  retry?: Retry;
 };
 
 export type EnterInput = { name: string | undefined; yes: boolean; lang: Lang };
@@ -281,7 +284,8 @@ async function symbolOf(chain: EnterChain, coin: Address): Promise<string | null
  */
 async function bodyCoinSince(wallet: Address, deps: EnterDeps): Promise<Address | null | "unreadable"> {
   const options = { indexer: deps.indexer ?? INDEXER_URL, fetch: deps.fetch };
-  const indexed = (await launchesBy(wallet, options)) ?? (await launchesBy(wallet, options));
+  // Under the backoff, one read of at most 3 asks; without it, asked twice at most, as before.
+  const indexed = deps.retry ? await launchesBy(wallet, { ...options, retry: deps.retry }) : ((await launchesBy(wallet, options)) ?? (await launchesBy(wallet, options)));
   if (indexed === null) return "unreadable";
   const since = Date.parse(BODY_SINCE);
   // A launch whose time the indexer does not give may be a recent one: it cannot be ruled out.

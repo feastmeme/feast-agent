@@ -43,6 +43,8 @@ export type FakeSiteOptions = {
   wallet: Address;
   /** `/api/league/agent-id`: the page's row, or a raw answer. */
   agentId?: { agentId: string | null; wallet?: string; coins?: { coin: string; launchedAt: string }[] | null } | Answer;
+  /** Raw answers `/api/league/agent-id` gives first, one per ask, before `agentId` (task 967's backoff). */
+  agentIdFirst?: Answer[];
   /** `/api/league/avatar/<id>.png`. */
   avatar?: { status?: number; contentType?: string; bytes?: Uint8Array } | "timeout";
   /** `POST /api/league/notes/session`. */
@@ -89,6 +91,8 @@ export class FakeEnterSite {
     }
     if (url.origin !== SITE) throw new Error(`the fake site has no ${url.origin}`);
     if (url.pathname === "/api/league/agent-id") {
+      const first = o.agentIdFirst?.shift();
+      if (first) return this.answer(first, signal);
       const a = o.agentId ?? { agentId: null };
       if (a === "timeout" || a === "refused" || "status" in a) return this.answer(a, signal);
       return Response.json({ wallet: (a.wallet ?? o.wallet).toLowerCase(), agentId: a.agentId, coins: a.coins ?? null });

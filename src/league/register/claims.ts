@@ -1,5 +1,6 @@
 import { getAddress, isAddress, type Address } from "viem";
 
+import { failureOf, retrying, type Retry } from "../feed/backoff.ts";
 import type { PresetId } from "../presets/specs.ts";
 
 /**
@@ -33,9 +34,11 @@ export function bodyCoinNames(agentId: string): { name: string; symbol: string }
 export type IndexedLaunch = { coin: Address; launchedAt: number };
 
 /** The coins this wallet launched, newest first, from the indexer's `/v1/creators`; null when it cannot be read. */
-export async function launchesBy(wallet: Address, options: { indexer: string; fetch?: typeof fetch; timeoutMs?: number }): Promise<IndexedLaunch[] | null> {
+export async function launchesBy(wallet: Address, options: { indexer: string; fetch?: typeof fetch; timeoutMs?: number; retry?: Retry }): Promise<IndexedLaunch[] | null> {
   try {
-    const response = await (options.fetch ?? fetch)(`${options.indexer.replace(/\/+$/, "")}/v1/creators`, { signal: AbortSignal.timeout(options.timeoutMs ?? 15_000) });
+    // Under a retry policy (FL enter's, task 967) a 429, a 5xx or no answer is asked again after the backoff's wait.
+    const ask = () => (options.fetch ?? fetch)(`${options.indexer.replace(/\/+$/, "")}/v1/creators`, { signal: AbortSignal.timeout(options.timeoutMs ?? 15_000) });
+    const response = await retrying(options.retry, ask, (o) => ("error" in o ? { status: null, reason: "no answer" } : failureOf(o.value.status, o.value.headers.get("retry-after"), options.retry?.now() ?? Date.now())));
     if (!response.ok) return null;
     const body = (await response.json()) as { data?: unknown };
     if (!Array.isArray(body.data)) return null;

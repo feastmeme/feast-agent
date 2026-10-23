@@ -12,6 +12,7 @@ import { addToLedger, agentPaths, appendJsonl, writeFileAtomic, writeJsonAtomic 
 import { dataFace, type FaceDeps } from "./face.ts";
 import { BOB, C1, C2, C3, C5, CAROL, EVIL, FakeFeast, fakeFaceChain, hourly, INDEXER, OWN, SITE, SQRT_HIGH, SQRT_LOW, STOCK, WALLET, WBNB, type FakeFeastOptions } from "./fakes.ts";
 import { candles, parseSince, sqrtToBnb } from "./ohlcv.ts";
+import * as feedFakes from "../feed/fakes.ts";
 
 const NOW = Date.parse("2026-10-27T05:00:00Z");
 const E18 = 10n ** 18n;
@@ -207,7 +208,7 @@ describe("FL data: names and symbols are data, never instructions", () => {
     const capped = (await long.run({})).data as Json;
     expect([...capped.coins[0].name.text]).toHaveLength(120);
     // Nothing besides the reads: no command, no other route.
-    expect(w.feast.calls.every((c) => /\/api\/v1\/pools|\/api\/league\?/.test(c))).toBe(true);
+    expect(w.feast.calls.every((c) => /\/api\/v1\/snapshot|\/api\/v1\/pools|\/api\/league\?/.test(c))).toBe(true);
     expect(w.chain.reads.every((r) => /^(coinInfo|quoteBnbE18|markWei|bnbUsd|agentIdOf) /.test(r) || r === "bnbUsd")).toBe(true);
   });
 });
@@ -271,13 +272,15 @@ describe("FL data: rates and failures", () => {
     const w = world({ feast: { ohlcv: { [C1.toLowerCase()]: hourly(NOW, 30) } } });
     await w.run({ since: "24h" });
     const first = w.feast.siteCalls().length;
-    // 2 pool pages + the league + at most 20 history reads (+1, a note's flush).
-    expect(first).toBeLessThanOrEqual(1 + 2 + 1 + 20);
+    // The snapshot (a 404 here: not deployed) + 2 pool pages + the league + at most 20 history reads (+1, a note's flush).
+    expect(first).toBeLessThanOrEqual(1 + 1 + 2 + 1 + 20);
     expect(w.feast.siteCalls().filter((c) => c.includes("/api/v1/pools"))).toHaveLength(2);
     w.clock.now += 10_000;
     await w.run({ since: "24h" });
     const second = w.feast.siteCalls().slice(first);
     expect(second.filter((c) => c.includes("/api/v1/pools"))).toEqual([]);
+    // The route's 404 is remembered for 10 minutes, in the home's snapshot cache: it is not asked again.
+    expect(second.filter((c) => c.includes("/api/v1/snapshot"))).toEqual([]);
     expect(second.filter((c) => c.includes("/api/v1/ohlcv"))).toEqual([]);
     w.clock.now += 31_000;
     await w.run({});
@@ -297,5 +300,104 @@ describe("FL data: rates and failures", () => {
   it("an Agent ID the chain cannot give is a null bodyCoin, never a false", async () => {
     const out = await world({ chain: { ids: { [BOB.toLowerCase()]: "unreadable", [CAROL.toLowerCase()]: null } } }).run({});
     expect((out.data as Json).coins.find((c: Json) => c.coin === C1).bodyCoin).toBeNull();
+  });
+});
+
+describe("FL data on the snapshot (task 967)", () => {
+  // The feed's own fixtures, so the snapshot here is the one the runtime reads.
+  const { coinRow, snapshotBody } = feedFakes;
+
+  const snapshotOf = (coins: unknown[]) => ({ status: 200, body: snapshotBody({ coins, events: [] }), etag: '"d1"' });
+  const rows = () => [
+    coinRow(C1, { creator: BOB.toLowerCase(), launchedAt: "2026-10-24T02:00:00.000Z", priceBnb: 0.000002, volume24hBnb: 3, trades24h: 9, holders: 40 }),
+    // The proxy could not price it (null: unknown, never zero), but its price in the quote is known.
+    coinRow(C3, { quote: STOCK.toLowerCase(), symbol: null, creator: CAROL.toLowerCase(), priceBnb: null, priceQuote: 0.000004 }),
+    // A row without the fields task 965 may not carry yet.
+    { ...coinRow(OWN, { creator: WALLET, symbol: "MAPLE", name: "maplegrin" }), trades24h: undefined, lastTradeAt: undefined },
+  ];
+
+  it("by default: one snapshot request, source snapshot, no pools read; what the snapshot lacks is null and listed under missing", async () => {
+    const w = world({ feast: { snapshot: snapshotOf(rows()) } });
+    const out = await w.run({});
+    const data = out.data as Json;
+    expect(data.source).toBe("snapshot");
+    expect(w.feast.calls.filter((c) => c.includes("/api/v1/snapshot"))).toHaveLength(1);
+    expect(w.feast.calls.filter((c) => c.includes("/api/v1/pools") || c.includes("/v1/board"))).toEqual([]);
+    expect(data.coins.find((c: Json) => c.coin === C1)).toEqual({
+      coin: C1,
+      symbol: { untrusted: true, text: "C01" },
+      name: { untrusted: true, text: "Coin 01" },
+      quote: { address: WBNB, symbol: { untrusted: true, text: "WBNB" } },
+      launchedAt: "2026-10-24T02:00:00.000Z",
+      creator: BOB,
+      own: false,
+      bodyCoin: true,
+      priceBnb: 0.000002,
+      volume24hBnb: 3,
+      trades24h: 9,
+      holders: 40,
+      lastTradeAt: "2026-10-26T12:59:00.000Z",
+    });
+    const c3 = data.coins.find((c: Json) => c.coin === C3);
+    expect(c3.symbol).toBeNull();
+    // 0.000004 of a quote worth 0.5 BNB.
+    expect(c3.priceBnb).toBeCloseTo(0.000002, 12);
+    expect(data.coins.find((c: Json) => c.coin === OWN)).toMatchObject({ own: true, creator: "self", trades24h: null, lastTradeAt: null });
+    expect(data.missing).toEqual(["coins[].symbol", "coins[].trades24h", "coins[].lastTradeAt"]);
+    expect(out.code).toBe(0);
+    // No chain read per row for a price the snapshot gives: only the stock quote's value, for C3.
+    expect(w.chain.reads.filter((r) => r.startsWith("quoteBnbE18"))).toEqual([`quoteBnbE18 ${STOCK.toLowerCase()}`]);
+  });
+
+  it("shares the runtime's cache: none asked when it is fresher than 5 s, and a 304 when it is older", async () => {
+    const w = world({ feast: { snapshot: snapshotOf(rows()) } });
+    await w.run({});
+    w.clock.now += 3_000;
+    await w.run({});
+    expect(w.feast.calls.filter((c) => c.includes("/api/v1/snapshot"))).toHaveLength(1);
+    w.clock.now += 10_000;
+    const third = await w.run({});
+    expect(w.feast.calls.filter((c) => c.includes("/api/v1/snapshot"))).toHaveLength(2);
+    expect((third.data as Json).source).toBe("snapshot");
+    expect((third.data as Json).coins).toHaveLength(3);
+  });
+
+  it("--live: today's reads exactly, the pools and then the board, and never the snapshot", async () => {
+    const w = world({ feast: { snapshot: snapshotOf(rows()) } });
+    const out = await w.run({ live: true });
+    expect((out.data as Json).source).toBe("pools");
+    expect(w.feast.calls.filter((c) => c.includes("/api/v1/snapshot"))).toEqual([]);
+    expect(w.feast.calls.filter((c) => c.includes("/api/v1/pools"))).toHaveLength(2);
+    const board = { status: 200, body: { data: [{ coin: C1.toLowerCase(), creator: BOB.toLowerCase(), quote: WBNB.toLowerCase(), metadataHash: `0x${"0".repeat(64)}`, launchedAt: "2026-10-24T02:00:00.000Z", lastPriceSqrtX96: String(SQRT_LOW), volume24h: "2000000000000000000", trades24h: 3, holders: 9 }] } };
+    const down = world({ feast: { snapshot: snapshotOf(rows()), poolsAnswer: { 0: "refused" }, board } });
+    expect(((await down.run({ live: true })).data as Json).source).toBe("indexer");
+    expect(down.feast.calls.filter((c) => c.includes("/api/v1/snapshot"))).toEqual([]);
+  });
+
+  it("a 429 on the snapshot: the rate line, partial, and the cached snapshot marked stale; nothing else is read", async () => {
+    const w = world({ feast: { snapshot: snapshotOf(rows()) } });
+    await w.run({});
+    w.clock.now += 60_000;
+    w.feast.options.snapshot = { status: 429, body: { error: "rate-limited" } };
+    const out = await w.run({});
+    expect(out.code).toBe(1);
+    expect(out.text).toContain("feast.meme's rate limit (60): try again in a minute");
+    expect(out.data).toMatchObject({ partial: true, source: "snapshot", stale: { since: new Date(NOW).toISOString(), reason: "HTTP 429" } });
+    expect((out.data as Json).coins).toHaveLength(3);
+    const after = w.feast.calls.slice(w.feast.calls.findLastIndex((c) => c.includes("/api/v1/snapshot")) + 1);
+    expect(after.filter((c) => c.includes(SITE))).toEqual([]);
+    // With no snapshot held, the same line, and no coins.
+    const cold = world({ feast: { snapshot: { status: 429, body: {} } } });
+    const none = await cold.run({});
+    expect(none.data).toMatchObject({ partial: true, coins: [] });
+    expect(none.text).toContain("feast.meme's rate limit (60): try again in a minute");
+  });
+
+  it("the shared cache never holds the wallet's address", async () => {
+    const w = world({ feast: { snapshot: snapshotOf(rows()) } });
+    await w.run({});
+    const text = readFileSync(join(w.home, "cache", "snapshot.json"), "utf8").toLowerCase();
+    expect(text.includes(WALLET.slice(2).toLowerCase())).toBe(false);
+    expect(text).toContain('"self"');
   });
 });

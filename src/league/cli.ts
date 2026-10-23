@@ -16,6 +16,8 @@ import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { dataFace } from "./data/face.ts";
+import { realRetry } from "./feed/backoff.ts";
+import { drawStartJitter, parsePoll, START_JITTER_MS } from "./feed/snapshot.ts";
 import { selfView } from "./data/self.ts";
 import { INDEXER_URL } from "./events.ts";
 import { refuseEarly } from "./early.ts";
@@ -84,6 +86,10 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   start <name> --yes [--detach]   the user said yes: confirm and start (real BNB, no practice mode)
   stop <name> | --all             write the stop file and wait for the agent to halt
   resume <name> [--all] [--detach] remove the stop file (--all: the global one too) and start again
+  start|resume <name> … [--poll <s>] [--live] [--no-jitter]
+                                  the market: feast.meme's cached snapshot every s + 0–3 s (default 5, at least 3), backing off
+                                  when the site is busy; --live reads the indexer's routes instead, at the same interval; the
+                                  first read waits a random 0–120 s, so the 20:00 start is spread (--no-jitter: at once)
   status <name> [--json] [--lang en|zh] [--no-league]
                                   the book, the limits, what is new since the last status, and the league
   set <name> [--set k=v]… [--limit k=v]… [--tick s] (--yes | --review)
@@ -93,9 +99,10 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   the script audit: static rules, then the model read's verdict
   script check <file.mjs> [--json] the script against a stub world, through the real guard; a pass on record with a
                                   passed audit counts as the warm-up done for that exact file
-  data [<name>] [--since 24h|90m|7d|<iso>] [--coin 0x…] [--json]
+  data [<name>] [--since 24h|90m|7d|<iso>] [--coin 0x…] [--json] [--live]
                                   every Feast coin in BNB, the agent's book and PnL in BNB, the league's clock and boards;
-                                  with --since, hourly history. Reads only
+                                  with --since, hourly history. Reads only: the coins from feast.meme's snapshot (--live: its
+                                  pools, then the indexer's board)
   note <name> "<text>" [--tx 0x…] [--model grok|codex|claude|other]
                                   one reason, at most 280 characters, and the AI that wrote it (default: the host's hint,
                                   else other): kept here, sent to feast.meme with the season's notes session
@@ -207,6 +214,11 @@ async function main(argv: string[]): Promise<number> {
       "no-wait": { type: "boolean", default: false },
       model: { type: "string" },
       login: { type: "boolean", default: false },
+      poll: { type: "string" },
+      live: { type: "boolean", default: false },
+      "no-jitter": { type: "boolean", default: false },
+      // FL start's drawn wait, handed to a detached `run` (seconds); not for the user.
+      "start-jitter": { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -268,6 +280,14 @@ async function main(argv: string[]): Promise<number> {
     case "start":
     case "resume":
     case "run": {
+      // The market's interval (task 967), checked before anything else: below 3 s is refused, never clamped.
+      const poll = parsePoll(values.poll);
+      if (!poll.ok) {
+        print(json, { ok: false, error: poll.error }, () => poll.error);
+        return 2;
+      }
+      const given = values["start-jitter"];
+      if (given !== undefined && !(/^\d{1,3}$/.test(given) && Number(given) * 1_000 <= START_JITTER_MS)) throw new Error("--start-jitter is FL start's own: 0–120 whole seconds");
       const name = notEntry(need(args[0], "an agent name"));
       let agent = loadAgent(home, name);
       let replanned = false;
@@ -316,7 +336,11 @@ async function main(argv: string[]): Promise<number> {
           return 2;
         }
       }
-      const extra = values["max-runtime"] ? ["--max-runtime", values["max-runtime"]] : [];
+      const extra = [...(values["max-runtime"] ? ["--max-runtime", values["max-runtime"]] : []), ...(values.poll !== undefined ? ["--poll", String(poll.seconds)] : []), ...(values.live ? ["--live"] : [])];
+      // FL start (and resume, which is a start) spreads the 20:00 start; `run` waits only what it is handed.
+      const jitterMs = command === "run" ? Number(given ?? 0) * 1_000 : values["no-jitter"] ? 0 : drawStartJitter();
+      const readsMarket = agent.track === "script" || (agent.preset !== null && agent.preset !== "launch");
+      const jitterLine = readsMarket && jitterMs > 0 ? `starts reading the market within ${Math.ceil(jitterMs / 1_000)} s` : null;
       if (command === "resume" && statusOf(home, name).running) {
         // Running already (an L14 pause stops entries, not the runtime): the user's resume clears the pause in place.
         const paths = agentPaths(home, name);
@@ -328,17 +352,24 @@ async function main(argv: string[]): Promise<number> {
       if (values.detach && command !== "run") {
         const holder = walletLockHolder(home);
         if (holder) throw new Error(`the wallet is in use by agent "${holder.agent}"; stop it first`);
-        const pid = detach(home, name, command === "resume" ? [...extra, "--clear-pause"] : extra);
+        const pid = detach(home, name, [...extra, ...(command === "resume" ? ["--clear-pause"] : []), ...(jitterMs > 0 ? ["--start-jitter", String(Math.ceil(jitterMs / 1_000))] : [])]);
         console.log(`started "${name}" in the background (pid ${pid}); feast-league status ${name}`);
+        if (jitterLine) console.log(jitterLine);
         return 0;
       }
+      if (jitterLine && command !== "run") console.log(jitterLine);
       const outcome = await runAgent({
         home,
         name,
         signer: signerFor(home, name),
         rpcUrl: rpc(),
+        site: siteFromEnv(),
+        indexer: indexer(),
         maxRuntimeMs: values["max-runtime"] ? Number(values["max-runtime"]) * 1_000 : undefined,
         clearPause: command === "resume" || values["clear-pause"],
+        pollMs: poll.seconds * 1_000,
+        live: values.live,
+        startJitterMs: jitterMs,
       });
       console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
       return outcome.exit === "error" ? 1 : outcome.exit === "refused" ? 2 : 0;
@@ -531,7 +562,7 @@ async function main(argv: string[]): Promise<number> {
       const signer = signerFor(home, null);
       const result = await dataFace(
         { home, site: siteFromEnv(), indexer: indexer(), fetch, chain: new LeagueChain(MAINNET, rpc()), wallet: () => signer.address() },
-        { name: args[0], since: values.since, coin: values.coin },
+        { name: args[0], since: values.since, coin: values.coin, live: values.live },
       );
       print(json, result.data, () => result.text);
       return result.code;
@@ -645,7 +676,9 @@ async function enterCommand(home: string, values: Values, json: boolean): Promis
       home,
       signer,
       chain: new LeagueChain(MAINNET, rpc()),
-      site: new LeagueSite(siteFromEnv()),
+      // FL enter's GETs back off (task 967): at most 3 asks and 2 minutes each; its POSTs are never asked twice.
+      site: new LeagueSite(siteFromEnv(), fetch, 15_000, realRetry()),
+      retry: realRetry(),
       oneShot: entryOneShot({ home, signer, rpcUrl: rpc() }),
       signOptions: { onPending: () => process.stderr.write("Confirm the notes signature in the Binance App; waiting up to 10 minutes.\n") },
     },

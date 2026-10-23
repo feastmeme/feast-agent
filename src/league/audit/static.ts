@@ -84,7 +84,7 @@ const MAX_LOOP_BOUND = 1_000;
 
 const EXPORTS = new Set(["meta", "params", "onTick", "onEvent"]);
 const API_MEMBERS = new Set(["buy", "sell", "launch", "read", "state", "params", "log"]);
-const READ_MEMBERS = new Set(["now", "balance", "limits", "warmup", "coins", "coin", "trades", "positions", "position", "holders", "launchesBy", "launched"]);
+const READ_MEMBERS = new Set(["now", "balance", "limits", "warmup", "coins", "coin", "trades", "positions", "position", "holders", "launchesBy", "launched", "stale"]);
 
 type Node = { type: string; start: number; end: number; loc?: { start: { line: number; column: number } }; [key: string]: unknown };
 
