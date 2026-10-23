@@ -20,7 +20,7 @@ import type { KeptAgent, LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { tradingOpens } from "../season-gate.ts";
 import { prepareStart, shapeOf } from "../start.ts";
-import { agentPaths, appendJsonl, checkAgentName, readJson, walletLockHolder, writeJsonAtomic } from "../store.ts";
+import { agentPaths, appendJsonl, readJson, removeStop, walletLockHolder, writeJsonAtomic, writeStop } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
 import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
@@ -85,6 +85,8 @@ export type EnterDeps = {
   start?: (name: string, options: { noJitter: boolean }) => Promise<number>;
   /** Where `./strategy.md` is looked for and the default copied (the CLI: the working directory). */
   cwd?: string;
+  /** Wait for an agent's runtime to exit after its stop file is written; false when it did not in time (the CLI: 150 s). */
+  waitForExit?: (name: string) => Promise<boolean>;
 };
 
 export type MemeInput = { concept: string; name?: string; symbol?: string; description?: string; image?: string };
@@ -200,8 +202,10 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     } else if (AGENT_NAME.test(given) && given !== ENTRY_AGENT) agentName = given;
     else return end(2, false, "agent", copy.agentNameNeeded(given, lang), { agentId: given });
   }
+  // The wallet held by the agent this entry started is ours: a meme pauses it for the launch.
   const holder = walletLockHolder(deps.home);
-  if (holder && holder.agent !== agentName) return end(2, false, "busy", copy.walletBusy(holder.agent, lang), { agent: holder.agent });
+  const ours = agentName ?? record?.agent ?? null;
+  if (holder && holder.agent !== ours) return end(2, false, "busy", copy.walletBusy(holder.agent, lang), { agent: holder.agent });
   const stored = loadAgent(deps.home, ENTRY_AGENT);
   if (stored && !isEntryAgent(stored)) return end(2, false, "agent", copy.entryAgentChanged(lang));
   if (record && record.agentId !== given) return end(2, false, "agent-id", copy.foreignHome(record.agentId, given, lang));
@@ -400,7 +404,9 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const facts = { stage: "meme", agentId, name: c.name, symbol: c.symbol, description: c.description, quote: BODY_COIN_QUOTE, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, picture: picture.source === "ticker" ? "ticker" : picture.sha256 };
     const digest = sha256(JSON.stringify(facts));
     const shownPicture: copy.MemePictureShown = picture.source === "host" ? { source: "host", name: picture.name, bytes: picture.bytes } : picture.source === "league" ? { source: "league", url: `${deps.site.base}/api/league/avatar/${agentId}.png` } : { source: "ticker" };
-    const card = copy.memeCard({ name: c.name, symbol: c.symbol, description: c.description, quote: BODY_COIN_QUOTE, picture: shownPicture, first: true }, lang);
+    // One runtime per wallet: the agent this entry started pauses for the launch, and starts again after it.
+    const pausing = record?.agent && statusOf(deps.home, record.agent).running ? record.agent : null;
+    const card = [copy.memeCard({ name: c.name, symbol: c.symbol, description: c.description, quote: BODY_COIN_QUOTE, picture: shownPicture, first: true }, lang), ...(pausing ? ["", copy.memePause(pausing, lang)] : [])].join("\n");
     const shown = { meme: { name: c.name, symbol: c.symbol, description: { untrusted: true, text: c.description }, changed: c.changed, quote: BODY_COIN_QUOTE, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, picture: picture.source === "ticker" ? { source: "ticker", reason: picture.reason } : { source: picture.source, sha256: picture.sha256 } } };
     const request: IntentRequest = { kind: "launch", name: c.name, symbol: c.symbol, quote: BODY_COIN_QUOTE, description: c.description, burn: BODY_COIN_SPLIT.burn, referrer: BODY_COIN_SPLIT.referrer, reason: "the player's meme", ...(imagePath && picture.source !== "ticker" ? { image: { path: imagePath, sha256: picture.sha256 } } : {}) };
     // The limits that need no wallet are read before the card, so a yes is never asked for a launch they refuse.
@@ -411,7 +417,24 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     // The user's yes on this card confirms league-entry, and the one launch goes through its limits.
     confirmEntry();
     log("enter.meme", { symbol: c.symbol, picture: facts.picture });
-    const result = await deps.oneShot([request]);
+    let result: OneShotResult;
+    if (pausing) {
+      const stop = agentPaths(deps.home, pausing).stop;
+      writeStop(stop, "paused for the meme's launch (FL meme)");
+      const exited = deps.waitForExit ? await deps.waitForExit(pausing) : false;
+      if (!exited) {
+        removeStop(stop);
+        return end(1, false, "paused", copy.pauseFailed(pausing, lang), { agent: pausing });
+      }
+      log("enter.paused", { agent: pausing });
+      try {
+        result = await deps.oneShot([request]);
+      } finally {
+        removeStop(stop);
+        const pid = deps.start ? await deps.start(pausing, { noJitter: input.noJitter === true }) : null;
+        if (pid !== null) lines.push(copy.startedLine(pausing, pid, lang));
+      }
+    } else result = await deps.oneShot([request]);
     if (!result.launched && result.unresolved) return end(1, false, "unresolved", copy.pendingOutcome("launch", lang), { kind: "launch" });
     if (!result.launched) return end(result.exit === "error" ? 1 : 2, false, "launch", copy.launchFailed(result.failure ?? `${result.exit}: ${result.reason}`, lang), { exit: result.exit });
     const r = base();

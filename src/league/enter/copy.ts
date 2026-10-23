@@ -353,6 +353,16 @@ export function memeCard(view: { name: string; symbol: string; description: stri
   ].join("\n");
 }
 
+export function memePause(name: string, lang: Lang): string {
+  return lang === "zh" ? `「${name}」正在运行：发币时它会暂停一下，发完马上重新启动（开赛前它照样等待）。` : `"${name}" is running: it pauses for the launch and starts again right after (before the season it goes on waiting).`;
+}
+
+export function pauseFailed(name: string, lang: Lang): string {
+  return lang === "zh"
+    ? `「${name}」没有在 150 秒内停下（它先把已发出的交易记完）。没有发币，它照常运行。过一分钟再运行同一条命令。`
+    : `"${name}" did not stop within 150 s (it finishes recording a sent transaction first). Nothing was launched, and it keeps running. Run the same command again in a minute.`;
+}
+
 export function secondMeme(symbol: string | null, coin: string, lang: Lang): string {
   return lang === "zh"
     ? `你的 agent 的币是 ${coinShown(symbol, coin)}，它一直是你的 agent 的币。league-entry 只发一枚币，这次没有发。`

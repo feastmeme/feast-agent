@@ -693,6 +693,7 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       signOptions: { onPending: () => process.stderr.write("Confirm the signature in the Binance App; waiting up to 10 minutes.\n") },
       // The trading agent, detached as FL start --detach starts it; it waits for the season itself.
       start: async (name, options) => detach(home, name, options.noJitter ? ["--no-jitter"] : []),
+      waitForExit: (name) => waitForExit(home, name, 150),
       cwd: process.cwd(),
     },
     {
