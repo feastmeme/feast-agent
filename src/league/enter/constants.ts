@@ -15,6 +15,9 @@ export const BODY_SINCE = "2026-10-23T00:00:00Z";
  */
 export const ENTRY_BNB = 0.01;
 
+/** A league-v3 record's buy was sized in USDT (at least 5 USDT worth): such a record still counts as entered, never bought twice. */
+export const LEGACY_ENTRY_USDT = 5;
+
 /** The largest picture the pin route takes (feast-app `src/lib/ipfs/cid.ts:36`): a bigger league picture is not used. */
 export const AVATAR_MAX_BYTES = 262_144;
 

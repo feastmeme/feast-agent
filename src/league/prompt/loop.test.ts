@@ -10,6 +10,8 @@ import { agentPaths, writeFileAtomic, writeJsonAtomic } from "../store.ts";
 import { FEAST, fakeClock, tradeWorld } from "./fakes.ts";
 import { hostPath, recordHostAction } from "./host.ts";
 
+const writeStopFile = (h: string) => writeFileSync(agentPaths(h, "demo").stop, "stop requested by the user\n");
+
 const T0 = Date.parse("2026-10-26T13:00:00Z");
 const MIN = 60_000;
 let dirs: string[] = [];
@@ -102,6 +104,26 @@ describe("prompt mode, no autopilot: the runtime only enforces", () => {
     expect(w.calls).not.toContain("preview");
   });
 
+  it("every request still queued when the agent stops is answered, so no FL buy waits on it", async () => {
+    const { home: h } = home();
+    const c = fakeClock(T0);
+    const w = tradeWorld({ now: c.now });
+    // The first buy's preview: the user stops the agent right then.
+    const preview = w.signer.preview.bind(w.signer);
+    w.signer.preview = async (tx) => (writeStopFile(h), preview(tx));
+    mkdirSync(agentPaths(h, "demo").inbox, { recursive: true });
+    writeJsonAtomic(join(agentPaths(h, "demo").inbox, "1-buy.json"), { type: "intent", requestId: "req-1", request: { kind: "buy", coin: FEAST, bnb: 0.002 } });
+    writeJsonAtomic(join(agentPaths(h, "demo").inbox, "2-buy.json"), { type: "intent", requestId: "req-2", request: { kind: "buy", coin: "0x00000000000000000000000000000000000c0de9", bnb: 0.002 } });
+    const outcome = await runAgent({ home: h, name: "demo", signer: w.signer, chain: w.chain, fetch: board, now: c.now, sleep: c.sleep, loopMs: MIN, maxRuntimeMs: 10 * MIN, out: () => {} });
+    expect(outcome.exit).toBe("stopped");
+    const answered = lines(h).filter((l) => l.event === "request.outcome");
+    expect(answered.map((l) => [l.requestId, l.outcome])).toEqual([
+      ["req-1", "dropped"],
+      ["req-2", "dropped"],
+    ]);
+    expect(w.calls).not.toContain("execute");
+  });
+
   it("refuses to start when the prompt changed since the user's yes, before the wallet is asked", async () => {
     const { home: h, promptPath } = home();
     writeFileSync(promptPath, "Something else entirely.\n");
@@ -114,6 +136,21 @@ describe("prompt mode, no autopilot: the runtime only enforces", () => {
 });
 
 describe("prompt mode with autopilot: the preset trades only after the host's silence", () => {
+  it("the safety pass keeps its minute whatever the autopilot's tick: L6 sells within it, under a dca autopilot of an hour", async () => {
+    const { home: h } = home({ preset: "dca", params: { buyOnStart: false } });
+    const c = fakeClock(T0);
+    const w = tradeWorld({ sellBnbWei: 4n * 10n ** 15n, now: c.now });
+    const book = recordBuy(emptyBook(), { coin: FEAST, symbol: "FEAST", quote: FEAST, coinsOut: 10_000n * 10n ** 18n, bnbInWei: 10n ** 16n, gasWei: 0n, at: T0 - 60 * MIN, fundedBy: "wallet", ownLaunch: false, source: "manual" });
+    writeFileAtomic(agentPaths(h, "demo").state, serializeBook(book));
+    recordHostAction(h, "demo", "buy", T0);
+    // A minute in, the coin falls 60%: the next safety pass, not the preset's hourly tick, sells it.
+    c.at(T0 + MIN, () => (w.marks.wei = 4n * 10n ** 15n));
+    await runAgent({ home: h, name: "demo", signer: w.signer, chain: w.chain, fetch: board, now: c.now, sleep: c.sleep, loopMs: 15_000, pollMs: 10_000 * MIN, maxRuntimeMs: 5 * MIN, out: () => {} });
+    const sold = lines(h).find((l) => l.event === "sell.filled");
+    expect(sold).toBeDefined();
+    expect(Date.parse(sold!.at) - T0).toBeLessThanOrEqual(3 * MIN);
+  });
+
   it("a launch autopilot runs the wallet's body coin from FL enter, and never launches a second coin", async () => {
     const { home: h } = home({ preset: "launch", idleMinutes: 1, params: { name: "Maple", symbol: "MAPLE", openingBuyBnb: 0 } });
     const BODY = "0x00000000000000000000000000000000000b0d1e";

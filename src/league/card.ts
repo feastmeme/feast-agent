@@ -33,7 +33,7 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
       const spec = PRESETS[agent.preset];
       lines.push(`Autopilot: preset ${agent.preset} (${spec.title}), only after ${agent.autopilot.idleMinutes} min with no FL buy, FL sell or FL note from your agent; it steps back as soon as your agent acts. It ${spec.does}.`);
     } else {
-      lines.push(`Autopilot: none. Nothing trades on its own except the runtime's hard stop-loss (L6). The league page's rule: ${PAGE_IDLE_RULE}.`);
+      lines.push(`Autopilot: none. Nothing trades on its own except the runtime's hard stop-loss (L6), which never sells your own coin. The league page's rule: ${PAGE_IDLE_RULE}.`);
     }
   } else if (agent.preset) {
     const spec = PRESETS[agent.preset];

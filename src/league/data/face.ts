@@ -133,7 +133,8 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     name = input.name;
   } else {
     const holder = walletLockHolder(home);
-    const planned = existsSync(join(home, "agents")) ? readdirSync(join(home, "agents")).filter((n) => n !== ENTRY_AGENT && existsSync(agentPaths(home, n).agent)) : [];
+    // Only folders named as agents are: a stray one (a Finder .DS_Store, say) is not an agent.
+    const planned = existsSync(join(home, "agents")) ? readdirSync(join(home, "agents")).filter((n) => n !== ENTRY_AGENT && /^[a-z0-9][a-z0-9-]{0,39}$/.test(n) && existsSync(agentPaths(home, n).agent)) : [];
     if (holder && holder.agent !== ENTRY_AGENT) name = holder.agent;
     else if (planned.length === 1) name = planned[0]!;
     else selfNote = planned.length === 0 ? "no agent is planned on this machine: there is no book to show" : `${planned.length} agents are planned (${planned.join(", ")}): name one, as in FL data <name>`;
@@ -205,8 +206,12 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
       cursor = typeof body.nextCursor === "string" && body.nextCursor ? body.nextCursor : null;
       if (!cursor) break;
     }
-    if (rateLimited) partial = true;
-    else if (failed !== null) {
+    if (rateLimited) {
+      // What was read before the 429 is still given, marked partial.
+      partial = true;
+      pools = raws.flatMap((raw) => poolOf(raw, self));
+      source = pools.length > 0 ? "pools" : null;
+    } else if (failed !== null) {
       problems.push(`feast.meme's pools could not be read (${failed}); the indexer's board stands in`);
       pools = await boardPools(deps, get, self);
       source = pools.length > 0 ? "indexer" : null;
@@ -365,7 +370,8 @@ function poolOf(raw: RawPool, self: string | null): Pool[] {
       symbol: raw.coin?.symbol ?? "",
       quote,
       quoteSymbol: raw.quote?.symbol ?? "",
-      coinIsCurrency0: currency0 ? currency0.toLowerCase() === coin.toLowerCase() : true,
+      // Without a pool key, the pool's order: currency0 is the lower address.
+      coinIsCurrency0: currency0 ? currency0.toLowerCase() === coin.toLowerCase() : coin.toLowerCase() < quote.toLowerCase(),
       creator: creator !== "self" && creator.toLowerCase() === self ? "self" : creator,
       launchedAt: ms(raw.createdAt),
       sqrt: sqrtOf(raw.market?.lastPriceSqrtX96),

@@ -67,7 +67,7 @@ describe("FL script check", () => {
   it("a script that stays inside every limit passes, and its report is written beside its audit", async () => {
     const report = await checkScript(PASSING, { file: "busy.mjs" });
     expect(report.verdict).toBe("pass");
-    expect(report.checks.map((c) => c.id)).toEqual(["load", "meta", "calls", "normalize", "size", "feast", "held", "launch", "guard"]);
+    expect(report.checks.map((c) => c.id)).toEqual(["load", "meta", "calls", "normalize", "size", "feast", "held", "launch", "guard", "trades"]);
     expect(report.checks.every((c) => c.pass)).toBe(true);
     expect(report.stats).toMatchObject({ buys: 1, sells: 1, launches: 0, refusals: 0 });
     expect(report.stats.ticks).toBeGreaterThanOrEqual(30);
@@ -102,6 +102,14 @@ describe("FL script check", () => {
       if (["size", "feast", "held", "launch", "guard"].includes(check)) expect(failed.request).toBeDefined();
     }, 20_000);
   }
+
+  it("a script that never trades passes nothing a warm-up would test: it fails, and keeps its warm-up", async () => {
+    const report = await checkScript(tick(`api.log("watching");`));
+    expect(report.verdict).toBe("fail");
+    expect(report.checks.filter((c) => !c.pass).map((c) => c.id)).toEqual(["trades"]);
+    const buyOnly = await checkScript(tick(`if (!api.state.done) { api.state.done = true; api.buy({ coin: "FEAST", bnb: 0.002 }); }`));
+    expect(buyOnly.checks.find((c) => !c.pass)?.id).toBe("trades");
+  });
 
   it("a module that does not load fails the load check", async () => {
     const report = await checkScript("export const = ;");

@@ -18,7 +18,7 @@ import type { LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { agentPaths, appendJsonl, readJson, walletLockHolder, writeJsonAtomic } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
-import { AVATAR_MAX_BYTES, BODY_SINCE, ENTRY_AGENT, ENTRY_BNB, PENDING_MAX_AGE_MS } from "./constants.ts";
+import { AVATAR_MAX_BYTES, BODY_SINCE, ENTRY_AGENT, ENTRY_BNB, LEGACY_ENTRY_USDT, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
 
 /**
@@ -110,8 +110,8 @@ export function entryPaths(home: string) {
 
 export const readEntry = (home: string) => readJson<EntryRecord>(entryPaths(home).entry);
 
-/** The entry's buy is made: of at least ENTRY_BNB. A second run then buys nothing more. */
-const qualifies = (buy: EntryRecord["buy"]) => buy !== null && buy.bnb >= ENTRY_BNB;
+/** The entry's buy is made: of at least ENTRY_BNB, or a league-v3 record's 5 USDT worth. A second run then buys nothing more. */
+const qualifies = (buy: EntryRecord["buy"]) => buy !== null && (buy.bnb >= ENTRY_BNB || (typeof buy.usdtAtBuy === "number" && buy.usdtAtBuy >= LEGACY_ENTRY_USDT));
 
 /** A reason fit to print: the first line, no URL (an RPC URL may carry a key), cleaned. */
 const reasonOf = (error: unknown) => copy.clean(String((error as Error)?.message ?? error).split("\n")[0]!.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>"));

@@ -376,14 +376,18 @@ describe("FL enter: today's coin", () => {
     expect(w.sent()).toEqual([]);
   });
 
-  it("a recorded buy of 0.01 BNB is entered; one under it (the old 5 USDT) is not", async () => {
+  it("a recorded buy of 0.01 BNB is entered, and so is a league-v3 record of 5 USDT worth; a smaller buy is not", async () => {
     const w = world();
     launched(w);
-    const record = (bnb: number) => writeFileAtomic(join(agentPaths(w.home, ENTRY_AGENT).dir, "entry.json"), JSON.stringify({ agentId: ID, bodyCoin: BODY, launchTx: null, buy: { coin: TODAY_COIN, txHash: `0x${"cd".repeat(32)}`, bnb, at: new Date(w.clock.now).toISOString() } }));
+    const record = (bnb: number, usdtAtBuy?: number) => writeFileAtomic(join(agentPaths(w.home, ENTRY_AGENT).dir, "entry.json"), JSON.stringify({ agentId: ID, bodyCoin: BODY, launchTx: null, buy: { coin: TODAY_COIN, txHash: `0x${"cd".repeat(32)}`, bnb, usdtAtBuy, at: new Date(w.clock.now).toISOString() } }));
     record(0.01);
+    expect(await w.run()).toMatchObject({ code: 0, stage: "entered" });
+    // league-v3 bought 5.10 USDT of BNB: 0.0068 BNB at $750. Never bought twice.
+    record(0.0068, 5.1);
     expect(await w.run()).toMatchObject({ code: 0, stage: "entered" });
     record(0.0068);
     expect((await w.run()).stage).toBe("buy-card");
+    expect(w.shots.requests).toEqual([]);
   });
 
   it("--yes with no card shown, a stale one or a changed one: the fresh card, and nothing is sent", async () => {
