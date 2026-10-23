@@ -1,4 +1,4 @@
-import { short, type Lang } from "../register/copy.ts";
+import { short, utc8, type Lang } from "../register/copy.ts";
 import { shownName } from "../register/message.ts";
 
 /**
@@ -166,16 +166,234 @@ export function notesCard(view: { agentId: string; season: number }, lang: Lang)
   ].join("\n");
 }
 
+// --- the entry: one signed Register (task 968) --------------------------------------------------
+
+/** When trading opens, as the cards say it. */
+export type OpensShown = { kind: "at"; at: number } | { kind: "open" } | { kind: "unknown" };
+
+const opensText = (opens: OpensShown, lang: Lang) => {
+  const zh = lang === "zh";
+  if (opens.kind === "at") return zh ? `${utc8(opens.at)}（UTC+8）` : `${utc8(opens.at)} UTC+8`;
+  return zh ? "feast.meme 宣布开赛的时刻" : "feast.meme announces the start";
+};
+
+/** Under the entry card: the agent's own card, and when it starts trading. */
+export function waitingLine(opens: OpensShown, lang: Lang): string {
+  const zh = lang === "zh";
+  if (opens.kind === "open") return zh ? "现在就启动：赛季已经开始，它马上开始交易。" : "Starts now: the season is open, so it trades from the start.";
+  if (opens.kind === "at") return zh ? `现在就启动，等待赛季开始：${opensText(opens, lang)}之前它不做任何交易。` : `Starts now and waits for the season: it trades nothing before ${opensText(opens, lang)}.`;
+  return zh ? "现在就启动，等待赛季开始：在 feast.meme 宣布开赛之前，它不做任何交易。" : "Starts now and waits for the season: it trades nothing until feast.meme announces the start.";
+}
+
+export type StrategyShown = { kind: "default"; path: string } | { kind: "existing"; path: string } | { kind: "given"; path: string };
+
+export function strategyLine(view: StrategyShown, name: string, lang: Lang): string {
+  const zh = lang === "zh";
+  if (view.kind === "default")
+    return zh
+      ? `策略：第一季默认策略，已复制到 ${view.path}；随时可以改，改完运行 \`FL start ${name} --prompt ${view.path}\` 会给出新卡片。`
+      : `Strategy: the season-1 default strategy, copied to ${view.path}; edit it any time, then \`FL start ${name} --prompt ${view.path}\` shows the new card.`;
+  if (view.kind === "existing") return zh ? `策略：你的 strategy.md（已有的，没有改动）：${view.path}` : `Strategy: your strategy.md (existing, left as it is): ${view.path}`;
+  return zh ? `策略：你的 ${view.path}` : `Strategy: your ${view.path}`;
+}
+
+/** The entry card: the Register signature, the notes signature, and the agent's start, under one yes. */
+export function entryCard(view: { agentId: string; season: number; notes: boolean; agent: string | null }, lang: Lang): string {
+  const zh = lang === "zh";
+  const who = shownName(view.agentId);
+  const rows: [string, string][] = [
+    [zh ? "内容" : "What", zh ? "签一条消息报名本季：不是交易，不花 gas，不动资金" : "sign one message to enter the season: no transaction, no gas, no funds"],
+    [zh ? "消息里有" : "It carries", zh ? `这个钱包、Agent ID ${who}、一段空的公开宣言、签名时间（EIP-712 Register）` : `this wallet, the Agent ID ${who}, an empty public manifesto, the time (EIP-712 Register)`],
+    [zh ? "发送到" : "Sent to", zh ? "feast.meme（/api/league/register）" : "feast.meme (/api/league/register)"],
+  ];
+  if (view.notes) rows.push([zh ? "然后" : "Then", zh ? `再签一条消息，开通 ${who} 第 ${view.season} 季的笔记会话（EIP-712 NoteSession），同一个「好」` : `one more message, under the same yes, that opens ${who}'s notes session for season ${view.season} (EIP-712 NoteSession)`]);
+  if (view.agent) rows.push([zh ? "最后" : "Last", zh ? `启动你的 agent「${view.agent}」，等待赛季开始（它的卡片在下面）` : `your agent "${view.agent}" starts and waits for the season (its card is below)`]);
+  const count = view.notes ? 2 : 1;
+  return [
+    zh ? `${who} 报名第 ${view.season} 季` : `Enter ${who} in season ${view.season}`,
+    "",
+    table(rows),
+    "",
+    zh
+      ? `你说「好」之后，钱包会请你签 ${count === 2 ? "最多两条" : "一条"}消息；Binance App 可能要你逐条确认。`
+      : `Your wallet asks for ${count === 2 ? "at most two signatures" : "one signature"} as soon as you say yes; the Binance App may ask you to confirm ${count === 2 ? "each" : "it"}.`,
+  ].join("\n");
+}
+
+/** The agent's part of a card: the strategy, its card, and when it trades. */
+export function agentSection(view: { strategy: StrategyShown; name: string; card: string; opens: OpensShown }, lang: Lang): string {
+  return [strategyLine(view.strategy, view.name, lang), "", view.card, "", waitingLine(view.opens, lang)].join("\n");
+}
+
+export function keptUnreadable(reason: string, lang: Lang): string {
+  return lang === "zh"
+    ? `暂时读不到 feast.meme 上这个钱包的报名记录（${plain(reason)}）。没有签名，也没有发送任何东西。过几分钟再运行一次 FL enter。`
+    : `feast.meme's record of this wallet could not be read (${plain(reason)}). Nothing was signed or sent. Run FL enter again in a few minutes.`;
+}
+
+/** The site kept the Register, without a seat: it was not updated for seats without a coin yet (ruling C1). */
+export function seatPending(season: number, lang: Lang): string {
+  return lang === "zh"
+    ? `已签名报名第 ${season} 季。feast.meme 还没给出席位（网站还没更新到不发币也给席位）：笔记会话等有了席位再开；过一会儿再运行一次 FL enter。`
+    : `Signed in for season ${season}. feast.meme has not given the seat yet (the site is not yet updated to seat an agent without a coin): the notes session waits for the seat; run FL enter again in a while.`;
+}
+
+export function agentNameNeeded(agentId: string, lang: Lang): string {
+  return lang === "zh"
+    ? `${shownName(agentId)} 太长，不能直接做 agent 的名字（最多 40 个小写字母、数字或横线）：用 --agent <name> 给它起个名字。没有发送任何东西。`
+    : `${shownName(agentId)} is too long for an agent's name (at most 40 lowercase letters, digits or dashes): name it with --agent <name>. Nothing was sent.`;
+}
+
+export function agentNameBad(given: string, lang: Lang): string {
+  const g = clean(given, 60);
+  return lang === "zh" ? `「${g}」不能做 agent 的名字：1–40 个小写字母、数字或横线，且不能是 league-entry。没有发送任何东西。` : `"${g}" can't be an agent's name: 1–40 lowercase letters, digits or dashes, and not league-entry. Nothing was sent.`;
+}
+
+export function notPlanned(errors: string[], lang: Lang): string {
+  const list = errors.map((e) => `- ${clean(e, 200)}`).join("\n");
+  return lang === "zh" ? `agent 没能规划，没有发送任何东西：\n${list}` : `The agent could not be planned, and nothing was sent:\n${list}`;
+}
+
+export function runningOtherCard(name: string, lang: Lang): string {
+  return lang === "zh"
+    ? `agent「${name}」正在运行，但卡片变了：先停下它（FL stop ${name}），再运行 FL enter。没有发送任何东西。`
+    : `Agent "${name}" is running, and its card changed: stop it first (FL stop ${name}), then run FL enter again. Nothing was sent.`;
+}
+
+export function startRefused(why: string, lang: Lang): string {
+  return lang === "zh" ? `没有启动：${clean(why, 300)}` : `Not started: ${clean(why, 300)}`;
+}
+
+export function startedLine(name: string, pid: number, lang: Lang): string {
+  return lang === "zh" ? `已在后台启动「${name}」（pid ${pid}）；FL status ${name} 查看。` : `started "${name}" in the background (pid ${pid}); FL status ${name}`;
+}
+
+export function alreadyRunning(name: string, lang: Lang): string {
+  return lang === "zh" ? `「${name}」已经在运行，没有再启动一个。` : `"${name}" is already running; it was not started again.`;
+}
+
+export function startCard(lang: Lang): string {
+  return lang === "zh" ? "启动你的 agent" : "Start your agent";
+}
+
+// --- the meme (task 968) ----------------------------------------------------------------------------
+
+export const MEME_RULES_EN =
+  'the name ends with "feed", at most 20 letters, digits and spaces; the symbol at most 8 capitals or digits; the description one sentence on one line, at most 140 characters, with no address and no link; from the player\'s concept only, and no other platform\'s name. A picture is optional: a PNG of at most 256 KB made from the name and the description; without one, the league creature is used';
+export const MEME_RULES_ZH = "名字以 feed 结尾，最多 20 个字母、数字或空格；代码最多 8 个大写字母或数字；简介一句话、一行、最多 140 个字符，不能有地址或链接；只用玩家的概念，不提其他平台的名字。图片可选：用名字和简介生成一张不超过 256 KB 的 PNG；没有的话用联赛形象。";
+
+/** `--meme` without the composed fields: the host composes them from the concept, and runs the command again. */
+export function composeCard(concept: string, lang: Lang): string {
+  const zh = lang === "zh";
+  return [
+    zh ? `按玩家的概念组一枚 meme：「${clean(concept, 120)}」` : `Compose the meme from the player's concept: "${clean(concept, 120)}"`,
+    "",
+    zh ? "然后带上这些参数再运行同一条命令：" : "Then run the same command again with:",
+    '  --coin-name "<…feed>" --symbol <SYMBOL> --description "<one sentence>" [--image <file.png>]',
+    "",
+    zh ? `规则：${MEME_RULES_ZH}` : `The rules: ${MEME_RULES_EN}.`,
+    "",
+    zh ? "还没有发送任何东西。" : "Nothing was sent.",
+  ].join("\n");
+}
+
+export function memeRefused(reason: string, lang: Lang): string {
+  const zh = lang === "zh";
+  const why: Record<string, [string, string]> = {
+    "concept-empty": ["give the meme a one-line concept", "给 meme 一句话的概念"],
+    "concept-too-long": ["the concept is over 120 characters: make it one line", "概念超过 120 个字符：写成一句话"],
+    "name-empty": ["give the coin a name (letters, digits and spaces)", "给这个币起个名字（字母、数字或空格）"],
+    "symbol-empty": ["give the coin a symbol (capitals or digits)", "给这个币一个代码（大写字母或数字）"],
+    "description-empty": ["give the coin a one-sentence description", "给这个币一句话简介"],
+    "description-too-long": ["the description is over 140 characters", "简介超过 140 个字符"],
+    "description-lines": ["the description is one line", "简介只能一行"],
+    "description-address": ["the description holds an address: it would be published for good", "简介里有地址：它会被永久公开"],
+    "description-url": ["the description holds a link: it would be published for good", "简介里有链接：它会被永久公开"],
+  };
+  const [en, cn] = why[reason] ?? [reason, reason];
+  return zh ? `这枚 meme 不能发：${cn}。没有发送任何东西；改好后再运行一次。` : `The meme can't launch as composed: ${en}. Nothing was sent; fix it and run the command again.`;
+}
+
+export type MemePictureShown = { source: "host"; name: string; bytes: number } | { source: "league"; url: string } | { source: "ticker" };
+
+function memePictureRow(picture: MemePictureShown, lang: Lang): string {
+  const zh = lang === "zh";
+  if (picture.source === "host") return zh ? `你的图片 ${clean(picture.name, 60)}（PNG，${Math.ceil(picture.bytes / 1024)} KB）` : `your picture ${clean(picture.name, 60)} (PNG, ${Math.ceil(picture.bytes / 1024)} KB)`;
+  if (picture.source === "league") return zh ? `联赛形象 ${picture.url}` : `the league creature, ${picture.url}`;
+  return zh ? "按代码生成的图案" : "the ticker's identicon";
+}
+
+export function hostPictureNotUsed(why: string, lang: Lang): string {
+  return lang === "zh" ? `你的图片没有用上：${plain(why)}；改用联赛形象。` : `Your picture was not used: ${plain(why)}; the league creature is used instead.`;
+}
+
+/** The meme's preview card: what will launch, and the yes it needs. */
+export function memeCard(view: { name: string; symbol: string; description: string; quote: string; picture: MemePictureShown; first: boolean }, lang: Lang): string {
+  const zh = lang === "zh";
+  return [
+    zh ? `发出你的 meme：${view.name}` : `Launch your meme: ${view.name}`,
+    "",
+    table([
+      [zh ? "名字" : "Name", view.name],
+      [zh ? "代码" : "Ticker", view.symbol],
+      [zh ? "简介" : "About", zh ? `「${clean(view.description, 140)}」` : `"${clean(view.description, 140)}"`],
+      [zh ? "图片" : "Picture", memePictureRow(view.picture, lang)],
+      [zh ? "配对" : "Paired with", view.quote],
+      [
+        zh ? "手续费分配" : "Fee split",
+        zh
+          ? "默认：每笔交易 1% 的手续费里，平台 20 点，回购销毁 20 点，引荐人 10 点，你作为创建者 50 点（没有引荐人的交易是 60 点）"
+          : "the default: of the 1% fee on every trade, 20 points go to the platform, 20 are bought back and burned, 10 go to referrers, and 50 go to you as its creator (60 when a trade has no referrer)",
+      ],
+      [zh ? "费用" : "Cost", zh ? "只有 gas；发送前钱包会先预览这笔交易" : "gas only; your wallet previews the transaction before it is sent"],
+      [zh ? "限额" : "Limits", zh ? "走 league-entry 的硬限额（L12 每小时交易数；L16 钱包、Developer Mode 与停止文件）；每只 agent 只发一次" : "league-entry's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent"],
+    ]),
+    "",
+    ...(view.first ? [zh ? "这枚币会成为你的 agent 的币。" : "This coin becomes your agent's coin."] : []),
+    zh ? "这个币永久公开在 Feast 上，不管你的 agent 后来怎样，它都照常交易。" : "The coin is permanent and public on Feast, and it keeps trading whatever happens to your agent.",
+    "",
+    zh ? "你说「好」之后，会立刻从你的钱包发出一笔真实交易。" : "This sends a real transaction from your wallet as soon as you say yes.",
+  ].join("\n");
+}
+
+export function secondMeme(symbol: string | null, coin: string, lang: Lang): string {
+  return lang === "zh"
+    ? `你的 agent 的币是 ${coinShown(symbol, coin)}，它一直是你的 agent 的币。league-entry 只发一枚币，这次没有发。`
+    : `Your agent's coin is ${coinShown(symbol, coin)}; it stays your agent's coin. league-entry launches one coin, so nothing was launched.`;
+}
+
+export function seatAfterLaunch(seat: number | null, lang: Lang): string {
+  if (seat !== null) return lang === "zh" ? `你的席位：第 ${seat} 号。` : `Your seat: ${seat}.`;
+  return lang === "zh" ? "feast.meme 很快会按这次发币给你的 agent 席位；FL status 会显示。" : "feast.meme seats your agent from its launch shortly; FL status shows the seat.";
+}
+
+export function memeNoEntry(lang: Lang): string {
+  return lang === "zh" ? "这台电脑上还没有报名：先运行 FL enter。" : "No entry on this machine: run FL enter first.";
+}
+
 // --- done ------------------------------------------------------------------------------------
 
-/** After the entry: the next step is the prompt (the owner's ruling, 2026-10-24). */
+/** After the entry with --no-start: the next step is the prompt (the owner's ruling, 2026-10-24). */
 export function doneLine(lang: Lang): string {
   return lang === "zh" ? "你已报名。写好你的 strategy.md，然后运行 `FL start <name> --prompt strategy.md`" : "You're in. Write your strategy.md and run `FL start <name> --prompt strategy.md`";
 }
 
-export function alreadyEntered(view: { agentId: string; coin: string; notes: string | null }, lang: Lang): string {
+/** After the entry that started the agent (task 968). */
+export function doneRunning(name: string, opens: OpensShown, lang: Lang): string {
   const zh = lang === "zh";
-  const head = zh ? `已经报名：${shownName(view.agentId)} 的身体币是 ${short(view.coin)}。现在不用再做什么。` : `Already entered: ${shownName(view.agentId)}'s body coin is ${short(view.coin)}. Nothing more to do now.`;
+  const when =
+    opens.kind === "open" ? (zh ? "赛季已经开始，它现在就交易" : "the season is open, so it trades now") : opens.kind === "at" ? (zh ? `它等待赛季开始，从 ${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
+  return zh
+    ? `你已报名，「${name}」正在运行：${when}。如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`
+    : `You're in, and ${name} is running: ${when}. If it stops, run \`FL start ${name}\`. A changed strategy.md needs \`FL start ${name} --prompt strategy.md\`, its new card and your yes.`;
+}
+
+export function alreadyEntered(view: { agentId: string; coin: string | null; notes: string | null; season?: number | null; seat?: number | null }, lang: Lang): string {
+  const zh = lang === "zh";
+  const who = shownName(view.agentId);
+  const seat = view.seat !== null && view.seat !== undefined ? (zh ? `，第 ${view.seat} 号席位` : `, seat ${view.seat}`) : "";
+  const coin = view.coin ? (zh ? `；它的币是 ${short(view.coin)}` : `; its coin is ${short(view.coin)}`) : "";
+  const head = zh ? `已经报名：${who}${view.season ? ` 在第 ${view.season} 季` : ""}${seat}${coin}。现在不用再做什么。` : `Already entered: ${who}${view.season ? ` is in season ${view.season}` : ""}${seat}${coin}. Nothing more to do now.`;
   const notes = view.notes === "open" || view.notes === "dev" ? [] : [zh ? "还没有笔记会话：用 FL note --login 开通（签一条消息，不花 gas）。" : "No notes session yet: FL note --login opens one (one signed message, no gas)."];
-  return [head, ...notes, doneLine(lang)].join("\n");
+  return [head, ...notes].join("\n");
 }
