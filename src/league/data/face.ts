@@ -29,7 +29,8 @@ import { untrusted, UNTRUSTED_NOTE, UNTRUSTED_PATHS, type Untrusted } from "./un
  *   whether it is a league body coin;
  * - **self**: the agent's own book in BNB (`self.ts`);
  * - **league**: the page's clock, the newest dinner and the top of each board;
- * - **ohlcv**, with `--since`: hourly history in BNB per coin.
+ * - **ohlcv**, with `--since`: hourly history in BNB per coin, for the agent's
+ *   positions, then the body coins, then the busiest others (at most 20).
  *
  * It reads only. No wallet call but the address (raced against 5 s, as `status`
  * does); at most 1 + pages + 1 + 20 requests to feast.meme a call (a note's
@@ -284,9 +285,13 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
   let ohlcv: Record<string, Candle[]> | undefined;
   if (since !== null) {
     ohlcv = {};
+    // The agent's positions first, then the body coins, then the busiest of the rest: at most 20, so a host with no
+    // position still sees the history of what it may buy.
+    const byVolume = (list: CoinOut[]) => [...list].sort((a, b) => b.volume24hBnb - a.volume24hBnb).map((c) => c.coin);
     const wanted = coinFilter ? [coinFilter] : [...(mine?.positions ?? []), ...(mine?.ownCoin ?? [])].map((p) => p.coin);
-    const body = coinFilter ? [] : [...coins].filter((c) => c.bodyCoin === true).sort((a, b) => b.volume24hBnb - a.volume24hBnb).map((c) => c.coin);
-    const inScope = [...new Map([...wanted, ...body].map((c) => [c.toLowerCase(), c])).values()].slice(0, OHLCV_MAX);
+    const body = coinFilter ? [] : byVolume(coins.filter((c) => c.bodyCoin === true));
+    const busiest = coinFilter ? [] : byVolume(coins.filter((c) => c.bodyCoin !== true));
+    const inScope = [...new Map([...wanted, ...body, ...busiest].map((c) => [c.toLowerCase(), c])).values()].slice(0, OHLCV_MAX);
     for (const coin of inScope) {
       if (rateLimited) break;
       const pool = pools.find((p) => p.coin.toLowerCase() === coin.toLowerCase()) ?? scope.find((p) => p.coin.toLowerCase() === coin.toLowerCase());

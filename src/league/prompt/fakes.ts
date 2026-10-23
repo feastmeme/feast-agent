@@ -37,7 +37,7 @@ const settings = (): WalletSettings =>
   ({ devModeEnabled: true, devModeExpiresAt: null, devModeDailyLimitUsd: 1_000, devModeQuotaUsedUsd: 0, balanceExceeded: false, sessionExpireTime: null, inactiveSignOutTime: null, abnormalTxnHandling: null }) as WalletSettings;
 
 /** One coin's trades: a buy fills `coins` for whatever BNB was sent; a sale of anything pays `sellBnbWei`. */
-export function tradeWorld(options: { coin?: Address; coins?: bigint; sellBnbWei?: bigint; balanceWei?: bigint; now?: () => number } = {}): TradeWorld {
+export function tradeWorld(options: { coin?: Address; symbol?: string; coins?: bigint; sellBnbWei?: bigint; balanceWei?: bigint; now?: () => number } = {}): TradeWorld {
   const coin = options.coin ?? FEAST;
   const coins = options.coins ?? 10_000n * 10n ** 18n;
   const calls: string[] = [];
@@ -78,7 +78,7 @@ export function tradeWorld(options: { coin?: Address; coins?: bigint; sellBnbWei
   const key = { currency0: coin, currency1: WBNB, hooks: MAINNET.contracts.hook, poolManager: MAINNET.contracts.poolManager, fee: 100, parameters: "0x0000000000000000000000000000000000000000000000000000000000c80cc1" };
   const chain = {
     client: { simulateContract: async () => ({ result: [coins, 0n] }), getTransactionReceipt: async () => null, getTransaction: async () => null },
-    coinInfo: async (c: Address) => (notFeast.has(c.toLowerCase()) ? null : { coin: c, quote: WBNB, creator: WALLET, poolId: MAINNET.platformCoin!.poolId, coinIsCurrency0: true, symbol: "FEAST", name: "Feast" }),
+    coinInfo: async (c: Address) => (notFeast.has(c.toLowerCase()) ? null : { coin: c, quote: WBNB, creator: WALLET, poolId: MAINNET.platformCoin!.poolId, coinIsCurrency0: true, symbol: options.symbol ?? "FEAST", name: options.symbol ?? "Feast" }),
     isFeastCoin: async (c: Address) => !notFeast.has(c.toLowerCase()),
     poolKey: async () => key,
     hops: () => [],

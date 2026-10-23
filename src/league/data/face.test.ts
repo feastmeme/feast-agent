@@ -156,8 +156,8 @@ describe("FL data: the JSON", () => {
     const ohlcv = (out.data as Json).ohlcv as Record<string, Json[]>;
     expect(ohlcv[C1]).toHaveLength(25);
     expect(ohlcv[C1]![0]).toMatchObject({ t: new Date(NOW - 24 * 3_600_000).toISOString(), open: expect.closeTo(2 ** -20, 15), volumeBnb: 1 });
-    // The positions (C1, the own coin), then the body coins by volume: C5 too, launched since 10/23 by an Agent ID.
-    expect(Object.keys(ohlcv).sort()).toEqual([C1, OWN, C5].sort());
+    // The positions (C1, the own coin), then the body coins (C5 too), then the busiest of the rest: every coin here.
+    expect(Object.keys(ohlcv)).toEqual([C1, OWN, C5, C2, C3]);
     expect(ohlcv[C5]).toEqual([]);
     const one = await w.run({ coin: C1.toLowerCase(), since: "2h" });
     expect((one.data as Json).coins.map((c: Json) => c.coin)).toEqual([C1]);

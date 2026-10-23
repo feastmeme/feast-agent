@@ -59,12 +59,11 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
-import { clean } from "./enter/copy.ts";
 import { enter, entryOneShot } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
-import { checkScript, scriptCheckPassed, writeCheckReport, type CheckReport } from "./script/check.ts";
+import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./script/check.ts";
 import { standingLines } from "./season-card.ts";
 import { sessionView } from "./session.ts";
 import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
@@ -572,24 +571,6 @@ async function main(argv: string[]): Promise<number> {
       console.error(`unknown command "${command}"\n\n${HELP}`);
       return 1;
   }
-}
-
-/** `feast-league script check`, as a person reads it: each check, the failure's snapshot and request, and what a pass means. */
-function checkLines(report: CheckReport, path: string, audit: string | null): string {
-  const sha = `${report.sha256.slice(0, 6)}…${report.sha256.slice(-4)}`;
-  const s = report.stats;
-  return [
-    `FL script check: ${report.file ?? "the script"} (sha256 ${sha})`,
-    `The stub world: ${report.world.snapshots} snapshots, ${report.world.coins} coins, ${report.world.balanceBnb} BNB, the default limits with the 0.15 BNB cap.`,
-    ...report.checks.map((c) => `  ${c.pass ? "ok" : "NO"} ${c.id}: ${c.label}${c.pass ? "" : ` — ${c.detail ?? ""}${c.snapshot !== undefined ? ` (snapshot ${c.snapshot})` : ""}${c.request ? `: ${clean(c.request, 200)}` : ""}`}`),
-    `${report.verdict.toUpperCase()}: ${s.ticks} ticks, ${s.events} events, ${s.requests} requests (${s.buys} buys, ${s.sells} sales, ${s.launches} launches), ${s.refusals} refused by the guard`,
-    `Report: ${path}`,
-    report.verdict === "pass"
-      ? audit === null
-        ? "With its audit passed, this counts as the warm-up done for this exact file: it starts at its own sizes, within the hard limits. Any edit is a new file."
-        : `The audit has not passed yet (${audit}): once it does, this check counts as the warm-up done for this exact file.`
-      : "Fix the script and run the check again; until a check passes, its first 5 trades run at 0.001 BNB.",
-  ].join("\n");
 }
 
 /** 280 characters, zh and en mixed, for the preview of the Register message. */

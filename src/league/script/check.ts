@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { Address } from "viem";
 
 import { sha256Of } from "../audit/static.ts";
+import { clean } from "../enter/copy.ts";
 import { bookView, emptyBook, positionOf, recordBuy, recordSell, type Book } from "../book.ts";
 import { guard, type Intent } from "../guard.ts";
 import { MIN_TRADE_BNB, bnbToWei, resolveLimits, weiToBnb, type Limits } from "../limits.ts";
@@ -246,4 +247,22 @@ export async function checkScript(source: string, options: { file?: string; seed
   } finally {
     sandbox.stop();
   }
+}
+
+/** `feast-league script check`, as a person reads it: each check, the failure's snapshot and request, and what a pass means. */
+export function checkLines(report: CheckReport, path: string, audit: string | null): string {
+  const sha = `${report.sha256.slice(0, 6)}…${report.sha256.slice(-4)}`;
+  const s = report.stats;
+  return [
+    `FL script check: ${report.file ?? "the script"} (sha256 ${sha})`,
+    `The stub world: ${report.world.snapshots} snapshots, ${report.world.coins} coins, ${report.world.balanceBnb} BNB, the default limits with the 0.15 BNB cap.`,
+    ...report.checks.map((c) => `  ${c.pass ? "ok" : "NO"} ${c.id}: ${c.label}${c.pass ? "" : ` — ${c.detail ?? ""}${c.snapshot !== undefined ? ` (snapshot ${c.snapshot})` : ""}${c.request ? `: ${clean(c.request, 200)}` : ""}`}`),
+    `${report.verdict.toUpperCase()}: ${s.ticks} ticks, ${s.events} events, ${s.requests} requests (${s.buys} buys, ${s.sells} sales, ${s.launches} launches), ${s.refusals} refused by the guard`,
+    `Report: ${path}`,
+    report.verdict === "pass"
+      ? audit === null
+        ? "With its audit passed, this counts as the warm-up done for this exact file: it starts at its own sizes, within the hard limits. Any edit is a new file."
+        : `The audit has not passed yet (${audit}): once it does, this check counts as the warm-up done for this exact file.`
+      : "Fix the script and run the check again; until a check passes, its first 5 trades run at 0.001 BNB.",
+  ].join("\n");
 }
