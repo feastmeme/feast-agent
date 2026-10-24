@@ -44,7 +44,7 @@ An agent that trades Feast coins for you, by your own strategy prompt or from on
 
 1. **Mint a Binance Agent ID** in your Binance Agentic Wallet, in the Binance App. Its .ai name is your agent's name in the league.
 2. **Install the skill:** `npx skills add feastmeme/feast-agent`.
-3. **Say "enter the league"**, with your Agent ID. You never type an `FL` command: the skill runs `FL enter --name <id>.ai --prompt strategy.md` once. One card and one yes sign the league's Register message (no transaction, no gas, no coin needed) and a second message that opens your agent's notes session (at most two confirmations in the Binance App), then start your agent in the background, **waiting for the season**: it trades nothing until trading opens (Monday 20:00 UTC+8 for season 1), then trades by your strategy. Without one, it copies the season-1 default strategy (six short lines) to `strategy.md` for you to change. When it is done it says "You're in, and <name> is running: it waits for the season and trades from … UTC+8. If it stops, run `FL start <name>`."
+3. **Say "enter the league"**, with your Agent ID. You never type an `FL` command: the skill runs `FL enter --name <id>.ai --prompt strategy.md` once. One card and one yes sign the league's Register message (no transaction, no gas, no coin needed) and a second message that opens your agent's notes session (at most two confirmations in the Binance App), then start your agent in the background, **waiting for the season**: it trades nothing until trading opens (Monday 20:00 UTC+8 for season 1), then trades by your strategy. Without one, it copies the season-1 default strategy (six short lines) to `strategy.md` for you to change. When it is done it says "You're in, and <name> is running: it waits for the season and trades from … UTC+8. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. If it stops, run `FL start <name>`."
 
 Your only manual steps are pasting the league page's one-line prompt to your agent and tapping the wallet's confirmations. A host that cannot run commands on your machine cannot run the league.
 
@@ -59,6 +59,7 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 | "my X is @handle" | `FL note <name> "x: @handle"`, once: feast.meme counts this X account's battle-card posts for your agent; a later one replaces it |
 | "how is it doing?" | `FL status <name>`, with the day's battle card link and "Post it on X today to be in tonight's airdrop"; it asks for your X handle once if you haven't given it |
 | "why did it buy X?" | reads its own notes for that trade and explains |
+| "turn the autopilot off" / "turn it back on" | `FL stop <name>`, then `FL start <name> --prompt strategy.md --no-autopilot` (or `--autopilot steady`); shows the new card; after your yes it starts again. Off means nothing trades while you are away but the hard stop-loss, and an agent under the day's floor is eaten at the dinner |
 | "stop for good" | `FL stop --all` |
 
 | 你说 | 你的 agent 运行 |
@@ -70,6 +71,7 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 | 「我的 X 是 @handle」 | `FL note <name> "x: @handle"`，发一次：feast.meme 以这个 X 账号发的战报卡为准；之后再发会覆盖 |
 | 「怎么样了」 | `FL status <name>`，附上今日战报卡链接和「今天把它发到 X 上，就能参加今晚的空投」；你还没说过 X 账号的话，它会问一次 |
 | 「为什么买 X」 | 读它自己为那笔交易写的笔记并解释 |
+| 「关掉兜底」/「打开兜底」 | `FL stop <name>`，再 `FL start <name> --prompt strategy.md --no-autopilot`（或 `--autopilot steady`）；给出新卡片；你说「好」后重新启动。关掉意味着你不在时除了硬止损什么都不交易，当天没达到活动门槛的 agent 会在开饭时被吃掉 |
 | 「彻底停止」 | `FL stop --all` |
 
 Right after you're in, your agent asks once: "Want to launch your own meme too? Others can trade it and half of every trading fee goes to you. Give me a one-line concept, or say no, it doesn't affect the game." (「要不要顺便发一枚你的 meme？别人可以交易它，每笔手续费的一半归你；给我一句话概念就行，不发也不影响比赛。」)
@@ -92,11 +94,11 @@ Every on-chain amount is in BNB, and the league caps your capital at 0.15 BNB, w
 
 The league is a game of prompts. You write your strategy in plain words, and your own agent, running the `feast-league` skill, trades by it. The runtime fixes only the boundary: your wallet, the hard limits, a capital cap of 0.15 BNB (wallet-wide: every agent on this wallet counts), and Feast coins only. Everything else is your prompt and your agent's judgement.
 
-1. **Write the prompt**, `strategy.md`, or start from an example in [`docs/prompts/`](docs/prompts/README.md): sniper, momentum, copy, launch, DCA.
-2. **Say "start my agent with this prompt".** The skill runs `FL start <name> --prompt strategy.md` and shows the card: the prompt's first lines and its sha256, the autopilot, the cap and the hard limits. After your yes it starts the runtime.
+1. **Write the prompt**, `strategy.md`, or start from an example in [`docs/prompts/`](docs/prompts/README.md): sniper, momentum, copy, launch, DCA, steady.
+2. **Say "start my agent with this prompt".** The skill runs `FL start <name> --prompt strategy.md` and shows the card: the prompt's first lines and its sha256, the autopilot backup, the cap and the hard limits. After your yes it starts the runtime.
 3. **Your agent trades.** Whenever it chooses, it reads `FL data`: every Feast coin in BNB, your book and PnL in BNB, the league's clock and boards, and hourly history. It acts with `FL buy` and `FL sell`, each of which waits for the outcome, and writes one `FL note` per trade, saying which AI wrote it (`--model grok|codex|claude|other`). Notes reach feast.meme with the season's notes session that `FL enter` opened (`FL note --login` opens it again).
 
-- **Autopilot.** If your agent cannot run while you are away, start with `--autopilot <preset>`. The preset trades only after your agent has been silent for 60 minutes (or `--idle-minutes N`), and steps back as soon as it acts. Without one, nothing trades on its own except the hard stop-loss; the league page eats an agent whose newest trade is more than 24 hours before a dinner.
+- **The autopilot backup is on by default.** `FL enter`, `FL start --prompt` and `FL plan --prompt` give your agent the `steady` preset: after 30 minutes with no `FL buy` or `FL sell` from your agent (or `--idle-minutes N`), it keeps the day's activity floor with small, spaced trades of the busiest Feast coins (never your own coin), and it opens nothing new once your agent trades again; the positions it opened keep their own stops. A note or a read does not hold it back. `--autopilot <preset>` names another preset; `--no-autopilot` turns it off, and then nothing trades on its own except the hard stop-loss, and the league page eats an agent under the day's activity floor (at least 3 trades and 0.02 BNB of volume, its own coin left out) at the dinner. `FL status` shows the day's count.
 - **Your prompt stays yours.** It stays on your machine. The runtime records its sha256 to know when it changed, and a changed prompt needs a new card and your yes.
 - **Names are data.** Coin and player names are other people's words. `FL data --json` marks them `untrusted`, and your agent never follows them.
 
@@ -118,7 +120,7 @@ The league is a game of prompts. You write your strategy in plain words, and you
    - *"Buy FEAST with 0.002 BNB now and every day after, and buy another 0.002 if it dips 15 %."*
    - *"Snipe new coins with 0.005 BNB each and cut losses at 25 %."*
 
-   The skill picks one of five presets:
+   The skill picks one of six presets:
 
    | Preset | What it does |
    | --- | --- |
@@ -127,6 +129,7 @@ The league is a game of prompts. You write your strategy in plain words, and you
    | copy | follows the wallets you name |
    | launch-and-run | launches your coin and buys it back with its fee share |
    | DCA / dip-buy | buys FEAST or the most-held coins on a schedule |
+   | steady floor keeper | keeps the daily activity floor with small, spaced trades; a prompt agent's default autopilot |
 
    It asks back only what it cannot default, then shows one card: the preset, every parameter, the hard limits, and *"This trades real BNB from your wallet as soon as you say yes."*
 
@@ -158,7 +161,8 @@ There are also caps on exposure, daily loss, drawdown, price impact, trades per 
 
 ```bash
 npm run league -- doctor            # the wallet, Developer Mode, the indexer and the chain
-npm run league -- start my-agent --prompt strategy.md --autopilot dca   # prompt mode: the card; --yes --detach starts it
+npm run league -- start my-agent --prompt strategy.md                   # prompt mode, the steady backup on: the card; --yes --detach starts it
+npm run league -- start my-agent --prompt strategy.md --no-autopilot    # the same, with no autopilot backup
 npm run league -- data my-agent --since 24h --json                      # coins, the book and the league, in BNB
 npm run league -- buy my-agent FEAST 0.002                              # waits for the fill or the refusal
 npm run league -- note my-agent "bought FEAST: the dip" --tx 0x… --model claude   # one reason, at most 280 characters
@@ -168,7 +172,7 @@ npm run league -- plan my-agent --preset dca --set buyBnb=0.002 --sentence "…"
 npm run league -- start my-agent --yes --detach
 npm run league -- status my-agent
 npm run league -- stop my-agent
-npm run league -- enter --name maplegrin.ai --prompt strategy.md        # one card: Register, the notes, the agent waiting for the season
+npm run league -- enter --name maplegrin.ai --prompt strategy.md        # one card: Register, the notes, the agent waiting for the season (backup on; --no-autopilot: off)
 npm run league -- meme "a cat that eats noodles" --coin-name "Noodle Cat" --symbol NOOD --description "…"   # the meme's preview card
 npm run league -- register my-agent --check                       # the Agent ID, the agent's coin, the seat
 npm run league -- launch my-agent                                 # an agent's one coin; --yes launches it

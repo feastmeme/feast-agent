@@ -1,4 +1,4 @@
-# The five presets
+# The six presets
 
 Generated from the runtime's own specs (`src/league/presets/specs.ts`); a test holds this file to them.
 Every size is bounded by L1, every stop-loss by L6, every slippage by L9, every position count by L5.
@@ -96,3 +96,24 @@ It buys FEAST (or the coins with the most holders) on a schedule, with an extra 
 | `maxBuysPerDay` | 2 | 1 – 24 | at most this many buys a day |
 | `takeProfitPct` | off | off, or 10 – 1000 % | sell all this far above entry (off by default: DCA holds) |
 | `slippagePct` | 1 | 0.1 – L9 % | slippage bound |
+
+## `steady`: Steady floor keeper
+
+It keeps the league's daily activity floor with small buys of the busiest Feast coins (never your own coin), spaced out and done early in the day, each sold by a take-profit, a stop-loss or a time stop. Tick 60 s.
+
+| Parameter | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `buyBnb` | 0.006 | 0.001 – L1 BNB | size of each buy |
+| `topN` | 5 | 1 – 20 | choose among the N busiest coins by 24 h volume |
+| `minVolumeBnb` | 0.5 | 0.01 – 100 BNB | a coin's 24 h volume at least this (none does: the busiest with any) |
+| `minAgeMinutes` | 60 | 0 – 10080 min | skip a coin's first minutes |
+| `minDailyTrades` | 4 | 3 – 20 | the day's trades it makes sure of, buys and sales, own coin left out |
+| `minDailyVolumeBnb` | 0.022 | 0.02 – 0.15 BNB | the day's volume it makes sure of |
+| `maxEntriesPerDay` | 3 | 1 – 12 | at most this many buys a day (dinner to dinner) |
+| `spacingMinutes` | 15 | 3 – 240 min | at least this long between two of its buys |
+| `rushMinutes` | 60 | 0 – 180 min | in this last stretch before dinner, with the floor not met, buys and sales 3 min apart (0: off) |
+| `takeProfitPct` | 15 | 5 – 1000 % | sell all this far above entry |
+| `stopLossPct` | 10 | 5 – L6 % | sell all this far below entry |
+| `timeStopMinutes` | 30 | 5 – 720 min | sell what is left after this long |
+| `maxPositions` | 2 | 1 – L5 | its positions at once |
+| `slippagePct` | 5 | 0.1 – L9 % | slippage bound |
