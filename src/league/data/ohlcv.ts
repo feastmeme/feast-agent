@@ -58,7 +58,7 @@ export function candles(rows: unknown, options: { coinIsCurrency0: boolean; quot
 
 /** `--since`: a duration back from now (90m, 24h, 7d) or an ISO time. */
 export function parseSince(text: string, now: number): { ok: true; at: number } | { ok: false; error: string } {
-  const error = "--since is a duration (90m, 24h, 7d) or an ISO time (2026-10-26T12:00:00Z)";
+  const error = "--since is a duration (90m, 24h, 7d) or an ISO time (2026-10-28T12:00:00Z)";
   const value = text.trim();
   const span = /^(\d{1,5})(m|h|d)$/.exec(value);
   if (span) {

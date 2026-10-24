@@ -14,7 +14,7 @@ import { BOB, C1, C2, C3, C5, CAROL, EVIL, FakeFeast, fakeFaceChain, hourly, IND
 import { candles, parseSince, sqrtToBnb } from "./ohlcv.ts";
 import * as feedFakes from "../feed/fakes.ts";
 
-const NOW = Date.parse("2026-10-27T05:00:00Z");
+const NOW = Date.parse("2026-10-29T05:00:00Z");
 const E18 = 10n ** 18n;
 let homes: string[] = [];
 afterEach(() => {
@@ -65,10 +65,10 @@ describe("the sqrt price as BNB per coin", () => {
   });
 
   it("an hourly row: open, high, low, close in BNB per coin, high and low swapped when the coin is currency1", () => {
-    const at = Date.parse("2026-10-27T04:00:00Z") / 1_000;
+    const at = Date.parse("2026-10-29T04:00:00Z") / 1_000;
     const row = [at, String(SQRT_HIGH), String(SQRT_HIGH * 2n), String(SQRT_HIGH / 2n), String(SQRT_HIGH), "3000000000000000000"];
     const [c] = candles([row], { coinIsCurrency0: false, quoteBnbE18: 5n * 10n ** 17n, sinceMs: 0 });
-    expect(c!.t).toBe("2026-10-27T04:00:00.000Z");
+    expect(c!.t).toBe("2026-10-29T04:00:00.000Z");
     // The higher sqrt (×2) is the LOWER coin price: 2^-20 / 4 = 2^-22, times 0.5.
     expect(c!.high).toBeCloseTo(2 ** -18 * 0.5, 15);
     expect(c!.low).toBeCloseTo(2 ** -22 * 0.5, 15);
@@ -83,7 +83,7 @@ describe("the sqrt price as BNB per coin", () => {
     expect(parseSince("24h", NOW)).toEqual({ ok: true, at: NOW - 24 * 3_600_000 });
     expect(parseSince("90m", NOW)).toEqual({ ok: true, at: NOW - 90 * 60_000 });
     expect(parseSince("7d", NOW)).toEqual({ ok: true, at: NOW - 7 * 86_400_000 });
-    expect(parseSince("2026-10-26T00:00:00Z", NOW)).toEqual({ ok: true, at: Date.parse("2026-10-26T00:00:00Z") });
+    expect(parseSince("2026-10-28T00:00:00Z", NOW)).toEqual({ ok: true, at: Date.parse("2026-10-28T00:00:00Z") });
     for (const bad of ["yesterday", "24", "-1h", "1w", "", "24h; rm -rf"]) expect(parseSince(bad, NOW).ok, bad).toBe(false);
   });
 });
@@ -112,7 +112,7 @@ describe("FL data: the JSON", () => {
       volume24hBnb: 2,
       trades24h: 12,
       holders: 30,
-      lastTradeAt: "2026-10-26T12:30:00.000Z",
+      lastTradeAt: "2026-10-28T12:30:00.000Z",
     });
     expect(data.coins.find((c: Json) => c.coin === C2)).toMatchObject({ bodyCoin: false, priceBnb: expect.closeTo(2 ** -20, 15) });
     expect(data.coins.find((c: Json) => c.coin === C3)).toMatchObject({ bodyCoin: false, priceBnb: expect.closeTo(2 ** -21, 15), volume24hBnb: 1, quote: { address: STOCK } });
@@ -133,10 +133,10 @@ describe("FL data: the JSON", () => {
     expect(data.league).toMatchObject({
       state: "season",
       season: { number: 1, day: 2 },
-      nextDinnerAt: "2026-10-27T13:00:00.000Z",
+      nextDinnerAt: "2026-10-29T13:00:00.000Z",
       timeLeft: "8 h 0 min",
       dinner: { day: 1, eaten: 3 },
-      window: { from: "2026-10-26T13:00:00.000Z", to: "2026-10-27T13:00:00.000Z" },
+      window: { from: "2026-10-28T13:00:00.000Z", to: "2026-10-29T13:00:00.000Z" },
       boards: {
         earners: [
           { rank: 1, name: { untrusted: true, text: EVIL }, wallet: "0x0000…b0b0", pnlUsd: 12.3, hp: 40, trades: 9 },
@@ -338,7 +338,7 @@ describe("FL data on the snapshot (task 967)", () => {
       volume24hBnb: 3,
       trades24h: 9,
       holders: 40,
-      lastTradeAt: "2026-10-26T12:59:00.000Z",
+      lastTradeAt: "2026-10-28T12:59:00.000Z",
     });
     const c3 = data.coins.find((c: Json) => c.coin === C3);
     expect(c3.symbol).toBeNull();

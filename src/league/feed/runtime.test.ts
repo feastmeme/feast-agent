@@ -17,7 +17,7 @@ import { C1, C2, coinRow, FakeFeed, INDEXER, seeded, SITE, snapshotBody } from "
  * trade end to end, a clock the loop's sleep moves, and feast.meme's snapshot served in process.
  */
 
-const T0 = Date.parse("2026-10-26T13:00:00Z");
+const T0 = Date.parse("2026-10-28T13:00:00Z");
 const S = 1_000;
 const MIN = 60_000;
 let dirs: string[] = [];

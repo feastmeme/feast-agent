@@ -15,7 +15,7 @@ const OWN = "0x00000000000000000000000000000000000b0d1e";
 const FEAST = "0x000000000000000000000000000000000000fea5";
 const C1 = "0x00000000000000000000000000000000000c0e01";
 const C2 = "0x00000000000000000000000000000000000c0e02";
-const DINNER = Date.parse("2026-10-27T13:00:00Z");
+const DINNER = Date.parse("2026-10-29T13:00:00Z");
 const MIN = 60_000;
 const WEI = (bnb: number) => String(BigInt(Math.round(bnb * 1e9)) * 10n ** 9n);
 
@@ -37,9 +37,9 @@ describe("nextDinner: the first 13:00 UTC strictly after now", () => {
     expect(nextDinner(DINNER - 1)).toBe(DINNER);
     expect(nextDinner(DINNER)).toBe(DINNER + 24 * 60 * MIN);
     expect(nextDinner(DINNER + 1)).toBe(DINNER + 24 * 60 * MIN);
-    expect(nextDinner(Date.parse("2026-10-27T00:00:00Z"))).toBe(DINNER);
+    expect(nextDinner(Date.parse("2026-10-29T00:00:00Z"))).toBe(DINNER);
     // 21:00 UTC+8 across a month's end.
-    expect(new Date(nextDinner(Date.parse("2026-10-31T13:30:00Z"))).toISOString()).toBe("2026-11-01T13:00:00.000Z");
+    expect(new Date(nextDinner(Date.parse("2026-11-02T13:30:00Z"))).toISOString()).toBe("2026-11-03T13:00:00.000Z");
   });
 });
 
@@ -103,7 +103,7 @@ describe("dayCount", () => {
     const h = home();
     log(h, DINNER - 2 * 60 * MIN, "buy.filled", { coin: C1, bnbInWei: WEI(0.006) });
     const view = dayView(dayCount(h, "demo", DINNER - 72 * MIN, []));
-    expect(view).toEqual({ startsAt: "2026-10-26T13:00:00.000Z", endsAt: "2026-10-27T13:00:00.000Z", trades: 1, volumeBnb: 0.006, floor: { trades: 3, volumeBnb: 0.02 }, passed: false });
+    expect(view).toEqual({ startsAt: "2026-10-28T13:00:00.000Z", endsAt: "2026-10-29T13:00:00.000Z", trades: 1, volumeBnb: 0.006, floor: { trades: 3, volumeBnb: 0.02 }, passed: false });
     expect(dayLine(view, DINNER - 72 * MIN)).toBe("today: 1 trade, 0.006 BNB of volume (the floor: 3 and 0.02 BNB, own coin left out): not yet; dinner at 21:00 UTC+8, in 1 h 12 min");
   });
 });

@@ -62,8 +62,8 @@ describe("the signer's one signing path (PLAN-941 §5.3)", () => {
 
   it("reads signInMaxTime from the settings", async () => {
     const account = privateKeyToAccount(generatePrivateKey());
-    const settings = await new BawSigner(fakeBaw({ account, settings: { signInMaxTime: "2026-10-28T10:34:11+08:00", sessionExpireTime: "2026-10-24T00:26:09+08:00" } }).runner).settings();
-    expect(settings.signInMaxTime).toBe("2026-10-28T10:34:11+08:00");
+    const settings = await new BawSigner(fakeBaw({ account, settings: { signInMaxTime: "2026-10-30T10:34:11+08:00", sessionExpireTime: "2026-10-24T00:26:09+08:00" } }).runner).settings();
+    expect(settings.signInMaxTime).toBe("2026-10-30T10:34:11+08:00");
     expect(settings.sessionExpireTime).toBe("2026-10-24T00:26:09+08:00");
   });
 });

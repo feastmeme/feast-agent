@@ -8,7 +8,7 @@
  *   npx tsx src/league/prompt/dryrun.ts > docs/league/autopilot-dryrun-<UTC stamp>.md
  *
  * (a) the cards: FL start with no flag and with --no-autopilot; FL enter's agent section and its "You're in" line, en
- * and zh. (b) the takeover: the host's last trade at Tuesday 14:00 UTC+8, a note at 14:10 (which does not hold the
+ * and zh. (b) the takeover: the host's last trade at Thursday 14:00 UTC+8, a note at 14:10 (which does not hold the
  * backup back), then nothing, run to 23:00. (c) a dump: one of its coins falls 50 % between two ticks. (d) a late
  * takeover, in the rush before the dinner. (e) the host comes back 20 minutes after the takeover. (f) the requests,
  * under four hosts. (g) an agent entered days ahead, at the season's opening instant. Scenes (b)–(g) are the floor
@@ -44,8 +44,8 @@ import { dayCount, nextDinner, passesFloor } from "./floor.ts";
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const BIN = join(import.meta.dirname, "../bin.mjs");
-/** Tuesday 10/27: the season's day 2 ends at its dinner, 21:00 UTC+8. */
-const DINNER = Date.parse("2026-10-27T13:00:00Z");
+/** Thursday 10/29: the season's day 2 ends at its dinner, 21:00 UTC+8. */
+const DINNER = Date.parse("2026-10-29T13:00:00Z");
 const at8 = (hhmm: string) => DINNER - 21 * HOUR + Number(hhmm.slice(0, 2)) * HOUR + Number(hhmm.slice(3)) * MIN;
 // Made up, every one of them: the coins, the own coin and the host's wallet.
 const coin = (n: number): Address => getAddress(`0x${n.toString(16).padStart(40, "0")}`);
@@ -105,7 +105,7 @@ async function enterCards(): Promise<void> {
     // A key made for this run only, never printed: the fake wallet signs with it, nothing else does.
     const account = privateKeyToAccount(generatePrivateKey());
     const { runner } = fakeBaw({ account });
-    const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: "maplegrin" }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } }, ...(seasonOn ? { league: ON } : {}) });
+    const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: "maplegrin" }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-04T13:00:00.000Z", season: 1 } }, ...(seasonOn ? { league: ON } : {}) });
     const deps = {
       home,
       signer: new BawSigner(runner),
@@ -125,7 +125,7 @@ async function enterCards(): Promise<void> {
     const card = await enter(deps, { name: "maplegrin.ai", yes: false, lang });
     const text = card.text;
     const from = text.indexOf(lang === "zh" ? "策略：" : "Strategy:");
-    const when = seasonOn ? "once the season is on (Tuesday 14:00 UTC+8)" : "before the season (Saturday)";
+    const when = seasonOn ? "once the season is on (Thursday 14:00 UTC+8)" : "before the season (Saturday)";
     if (!seasonOn) {
       say(`### \`FL enter --name maplegrin.ai --lang ${lang}\`, ${when}: the entry card's table, with the signing domain and both messages' fields\n`);
       block(text.slice(0, text.indexOf("\n\n", text.indexOf("| --- | --- |"))));
@@ -253,7 +253,7 @@ async function askCards(): Promise<void> {
       mkdirSync(cwd, { recursive: true });
       const account = privateKeyToAccount(generatePrivateKey());
       const { runner } = fakeBaw({ account });
-      const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: "maplegrin" }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } }, ...(seasonOn ? { league: ON } : {}) });
+      const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: "maplegrin" }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-04T13:00:00.000Z", season: 1 } }, ...(seasonOn ? { league: ON } : {}) });
       const deps = { home: join(root, "home"), signer: new BawSigner(runner), chain: fakeEnterChain({ agentId: "maplegrin" }), site: new LeagueSite(ENTER_SITE, site.fetch), indexer: ENTER_INDEXER, fetch: site.fetch, now: () => (seasonOn ? at8("14:00") : Date.parse("2026-10-24T13:00:00Z")), notesDev: false, signOptions: { pollMs: 1, sleep: async () => {} }, cwd, start: async () => 4242, oneShot: async () => { throw new Error("the dry run never launches"); } };
       const card = await enter(deps, { name: "maplegrin.ai", yes: false, lang });
       if (lang === "en" && !seasonOn) {
@@ -490,9 +490,9 @@ async function requests(): Promise<void> {
 // --- (g) entered days ahead: the opening instant ----------------------------------------------------------------
 
 async function opening(): Promise<void> {
-  section("(g) Entered on Saturday, the host quiet since: the opening instant, Monday 20:00 UTC+8");
-  const opensAt = Date.parse("2026-10-26T12:00:00Z");
-  const s = scene(opensAt - 10 * MIN, { confirmedAt: Date.parse("2026-10-24T13:00:00Z"), league: () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(Date.parse("2026-10-25T13:00:00Z")).toISOString() } }) });
+  section("(g) Entered on Saturday, the host quiet since: the opening instant, Wednesday 20:00 UTC+8");
+  const opensAt = Date.parse("2026-10-28T12:00:00Z");
+  const s = scene(opensAt - 10 * MIN, { confirmedAt: Date.parse("2026-10-24T13:00:00Z"), league: () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(Date.parse("2026-10-27T13:00:00Z")).toISOString() } }) });
   await run(s, opensAt + 90 * MIN);
   events(s.home, ["season.open", "autopilot.on"]);
   say("");

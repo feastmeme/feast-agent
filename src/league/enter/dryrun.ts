@@ -55,7 +55,7 @@ function world(page: Partial<FakeSiteOptions> = {}) {
   const account = privateKeyToAccount(generatePrivateKey());
   wallets.add(account.address.toLowerCase());
   const { runner, calls } = fakeBaw({ account });
-  const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: AGENT_ID }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } }, ...page });
+  const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: AGENT_ID }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-04T13:00:00.000Z", season: 1 } }, ...page });
   const starts: string[] = [];
   const run = (input: Partial<EnterInput> = {}) =>
     enter(
@@ -169,7 +169,7 @@ try {
     const from = agentPaths(e.home, AGENT_ID);
     mkdirSync(agentPaths(home, AGENT_ID).dir, { recursive: true });
     writeFileSync(agentPaths(home, AGENT_ID).agent, readFileSync(from.agent));
-    const T0 = Date.parse("2026-10-26T11:57:00Z");
+    const T0 = Date.parse("2026-10-28T11:57:00Z");
     const clock = fakeClock(T0);
     const tw = tradeWorld({ now: clock.now });
     const feed = new FakeFeed(clock.now);
@@ -193,7 +193,7 @@ try {
     say(`First market read: ${market[0] ? `${utc8(market[0].at)}:${String(new Date(market[0].at).getUTCSeconds()).padStart(2, "0")} (${market[0].url.replace(FEED_SITE, "<site>")})` : "none"}; market reads in all: ${market.length}`);
     say(`Wallet trades (preview/execute): ${tw.calls.filter((x) => x === "preview" || x === "execute").length}`);
   };
-  await gated("(h) The agent from the default, under the gate; trading opens in 3 simulated minutes (Monday 20:00 UTC+8)", () => leagueWire({ state: "season", season: { number: 1, day: 1, countdownTo: "2026-10-26T13:00:00.000Z" } }), 6, 60_000);
+  await gated("(h) The agent from the default, under the gate; trading opens in 3 simulated minutes (Wednesday 20:00 UTC+8)", () => leagueWire({ state: "season", season: { number: 1, day: 1, countdownTo: "2026-10-28T13:00:00.000Z" } }), 6, 60_000);
   await gated("(i) The same, with no start announced: it waits, and reads the league every 5 minutes", () => leagueWire({ state: "coming-soon", season: { number: 1, day: null, countdownTo: null } }), 16, 60_000);
 } finally {
   for (const root of roots) rmSync(root, { recursive: true, force: true });

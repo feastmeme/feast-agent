@@ -10,7 +10,7 @@ import { comparePosition, decodeCursor, EventStream } from "./events.ts";
 import { BOB, C1, C3, CAROL, launchRow, META_HASH, tradeRow, WBNB } from "./fakes.ts";
 import { parseSnapshot, type FeastSnapshot } from "./snapshot.ts";
 
-const T0 = Date.parse("2026-10-26T13:00:00Z");
+const T0 = Date.parse("2026-10-28T13:00:00Z");
 
 const snap = (o: { block: number; events?: unknown[]; fromCursor?: string; cursor?: string }): FeastSnapshot =>
   parseSnapshot({ generatedAt: new Date(T0 + o.block * 1_000).toISOString(), block: o.block, coins: [], events: o.events ?? [], cursor: o.cursor ?? cursorAt(o.block, 999), ...(o.fromCursor ? { fromCursor: o.fromCursor } : {}) })!;

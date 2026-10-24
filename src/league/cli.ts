@@ -33,6 +33,9 @@ import { notesLogin, recordedAgentId } from "./notes/session.ts";
 import { checkModel, declareHost, modelHint, readDeclaredHost } from "./headers.ts";
 import { PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { dayLine } from "./prompt/floor.ts";
+import { readStanding } from "./data/standing.ts";
+import { cadenceLine, readCadence } from "./feed/cadence.ts";
+import { activeWaits } from "./doors.ts";
 import { lastSleep, promptChanged, within } from "./prompt/host.ts";
 import { outcomeLine, sendRequest, waitForOutcome } from "./prompt/inbox.ts";
 import { PRESETS, PRESET_IDS } from "./presets/specs.ts";
@@ -503,6 +506,9 @@ async function main(argv: string[]): Promise<number> {
         wallet: mine?.wallet ?? null,
         headroom: mine?.headroom ?? null,
         recentFills: mine?.recentFills ?? [],
+        // Task 975, addendum 6: how often it reads the market, and the doors that asked it to wait.
+        cadence: readCadence(home, name),
+        doorWaits: activeWaits(home, name, Date.now()).map((w) => ({ door: w.door, until: new Date(w.until).toISOString() })),
         // Task 975, addendum 3: the newest time the machine slept under the runtime.
         slept: sleptAt ? { at: new Date(sleptAt.at).toISOString(), minutes: sleptAt.minutes } : null,
         notifications: s.notifications,
@@ -527,6 +533,8 @@ async function main(argv: string[]): Promise<number> {
                         mine.autopilot ? `floor keeper: ${mine.autopilot.preset}, when ${hostShown(s.agent!.ask.with)} fails twice in a row, and 20 min before dinner with the floor unmet` : "floor keeper: none",
                       ]
                     : [mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no trade from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss"]),
+                  ...(cadenceLine(readCadence(home, name)) ? [cadenceLine(readCadence(home, name))!] : []),
+                  ...activeWaits(home, name, Date.now()).concat(activeWaits(home, ENTRY_AGENT, Date.now())).map((w) => `feast.meme asked ${w.door === "notes" ? "the notes" : w.door === "session" ? "the notes session" : w.door} to wait until ${utc8(w.until)} UTC+8 (429): nothing is sent there before`),
                   ...(mine.wallet ? [`wallet: ${mine.wallet.balanceBnb} BNB, ${mine.wallet.spendableBnb} spendable (${mine.wallet.gasReserveBnb} kept for gas); left today ${mine.headroom.leftTodayBnb} BNB, this season ${mine.headroom.leftSeasonBnb} BNB`] : []),
                   `last trade ${ago(mine.lastTradeAt)}; last action by your agent ${ago(mine.lastActionAt)}`,
                   ...(mine.day ? [dayLine(mine.day, Date.now())] : []),
@@ -675,7 +683,8 @@ async function main(argv: string[]): Promise<number> {
     }
     case "note": {
       const signer = signerFor(home, null);
-      const site = new LeagueSite(siteFromEnv());
+      // The session's door: the home's identity (league-entry's), and its Retry-After.
+      const site = new LeagueSite(siteFromEnv(), fetch, 15_000, undefined, { home, name: ENTRY_AGENT });
       const login = () => notesLogin({ home, signer, site, chain: new LeagueChain(MAINNET, rpc()), signOptions: { onPending: () => process.stderr.write("Confirm the notes signature in the Binance App; waiting up to 10 minutes.\n") } }, langOf(values.lang));
       if (values.login) {
         const out = await login();
@@ -790,6 +799,13 @@ async function main(argv: string[]): Promise<number> {
       const wallet = await within(signer.address(), 5_000).catch(() => null);
       const chain = new LeagueChain(MAINNET, rpc());
       const quoter = new Executor({ signer: null as never, chain, wallet: wallet ?? ZERO, network: MAINNET, rpcUrl: rpc(), stopReason: () => "a quote only", log: () => {} });
+      // The gas (addendum 6): one eth_estimateGas of the prepared call, at today's gas price; never sent.
+      const gas = async (call: { to: Address; data: `0x${string}`; value: bigint }) => {
+        if (!wallet) return null;
+        const units = await chain.client.estimateGas({ account: wallet, to: call.to, data: call.data, value: call.value });
+        const price = await chain.client.getGasPrice();
+        return weiToBnb(units * price);
+      };
       let out: Awaited<ReturnType<typeof quoteBuy>>;
       if (values.sell) {
         if (!wallet) throw new Error("the wallet could not be read: a sale's quote is of what it holds");
@@ -801,11 +817,11 @@ async function main(argv: string[]): Promise<number> {
           const perCoin = await chain.markWei(coin, 10n ** 18n);
           coins = perCoin > 0n ? (bnbToWei(Number(values.bnb)) * 10n ** 18n) / perCoin : 0n;
         }
-        out = await quoteSell(quoter, chain, coin, coins);
+        out = await quoteSell(quoter, chain, coin, coins, 3, gas);
       } else {
         const bnb = Number(need(values.bnb, "--bnb <n>"));
         if (!(bnb > 0)) throw new Error("--bnb is a positive amount of BNB");
-        out = await quoteBuy(quoter, coin, bnb);
+        out = await quoteBuy(quoter, coin, bnb, 3, gas);
       }
       if ("error" in out) {
         print(json, { ok: false, error: out.error }, () => `no quote: ${out.error}`);
@@ -815,7 +831,7 @@ async function main(argv: string[]): Promise<number> {
       print(json, { ok: true, quote: q }, () =>
         [
           `${q.side === "buy" ? `buy ${q.amountIn} BNB of` : `sell ${Number(q.amountIn.toPrecision(6))} coins of`} ${short(coin)}: expected ${Number(q.expectedOut.toPrecision(6))} ${q.side === "buy" ? "coins" : "BNB"}, at least ${Number(q.minOut.toPrecision(6))} at ${q.slippagePct}% slippage`,
-          `price impact ${q.impactPct === null ? "unknown" : `${q.impactPct}%`}; a round trip's fees ${q.roundTripFeePct}%; quoted by the ${q.quotedBy}. Nothing was signed or sent.`,
+          `price impact ${q.impactPct === null ? "unknown" : `${q.impactPct}%`}; a round trip's fees ${q.roundTripFeePct}%; gas about ${q.gasBnbEstimate === null || q.gasBnbEstimate === undefined ? "unknown" : `${Number(q.gasBnbEstimate.toPrecision(3))} BNB`}; quoted by the ${q.quotedBy}. Nothing was signed or sent.`,
         ].join("\n"),
       );
       return 0;
@@ -868,9 +884,11 @@ async function leagueStanding(home: string, lang: Lang, agent: StandingInput["ag
     agentId = kept.agent.agentId ?? agentId;
     seating = seatingOfKept(kept.agent);
   }
-  const today = await site.league("today", me);
+  // The cached field, never the uncached me= board unless the site is older (task 975, addendum 6).
+  const ranked = await readStanding(site, me);
+  const today = ranked.read;
   const season = today && (today.state === "season" || today.state === "over") ? await site.league("season", me) : null;
-  const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered, agent }, lang);
+  const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered, agent, standing: ranked.standing }, lang);
   // The page's own rows, without the wallet's address: printed output keeps the home's rule.
   const own = today?.me ? { earners: today.me.earners ? { ...today.me.earners, wallet: undefined } : null, backed: today.me.backed ? { ...today.me.backed, wallet: undefined } : null, eaten: today.me.eaten } : (today?.me ?? null);
   return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own } };
@@ -887,7 +905,7 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       signer,
       chain: new LeagueChain(MAINNET, rpc()),
       // FL enter's GETs back off (task 967): at most 3 asks and 2 minutes each; its POSTs are never asked twice.
-      site: new LeagueSite(siteFromEnv(), fetch, 15_000, realRetry()),
+      site: new LeagueSite(siteFromEnv(), fetch, 15_000, realRetry(), { home, name: ENTRY_AGENT }),
       retry: realRetry(),
       oneShot: entryOneShot({ home, signer, rpcUrl: rpc() }),
       signOptions: { onPending: () => process.stderr.write("Confirm the signature in the Binance App; waiting up to 10 minutes.\n") },
@@ -928,7 +946,7 @@ async function registerCommand(home: string, name: string, values: Values, json:
     name,
     signer,
     chain: new LeagueChain(MAINNET, rpc()),
-    site: new LeagueSite(siteFromEnv()),
+    site: new LeagueSite(siteFromEnv(), fetch, 15_000, undefined, { home, name }),
     log: (event, fields) => appendJsonl(paths.log, { at: new Date().toISOString(), event, ...fields }),
   };
   const say = (data: Record<string, unknown>, text: string, code: number) => (print(json, { ...data, card: text }, () => text), code);

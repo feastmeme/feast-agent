@@ -200,7 +200,7 @@ describe("every client that reaches feast.meme", () => {
     saveAgent(home, confirmAgent(planned.agent));
     appendJsonl(join(home, "agents", "demo", "notes.jsonl"), { id: "n1", ts: new Date(0).toISOString(), text: "why", tx: null, model: "grok", sent: false });
     const r = recorder(() => new Response("{}", { status: 503 }));
-    await dataFace({ home, site: SITE, indexer: INDEXER, fetch: r.fetch, chain: fakeFaceChain(), wallet: async () => WALLET, now: () => Date.parse("2026-10-27T06:00:00Z"), timeoutMs: 50 }, { name: "demo" });
+    await dataFace({ home, site: SITE, indexer: INDEXER, fetch: r.fetch, chain: fakeFaceChain(), wallet: async () => WALLET, now: () => Date.parse("2026-10-29T06:00:00Z"), timeoutMs: 50 }, { name: "demo" });
     const site = r.seen.filter((s) => s.origin === SITE);
     const indexer = r.seen.filter((s) => s.origin === INDEXER);
     sendsBoth(site);

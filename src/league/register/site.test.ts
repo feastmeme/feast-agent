@@ -64,12 +64,12 @@ describe("the league read", () => {
     const read = parseLeague(
       leagueWire({
         state: "season",
-        season: { number: 1, day: 3, countdownTo: "2026-10-29T13:00:00.000Z" },
+        season: { number: 1, day: 3, countdownTo: "2026-10-31T13:00:00.000Z" },
         boards: { earners: [{ rank: 1, wallet: "0xAB", name: "maplegrin", pnlUsd: 3.2, trades: 7, hp: 6, eatenDay: null }], backed: [] },
         counts: { earners: 140, backed: 90 },
       }),
     );
-    expect(read).toMatchObject({ schema: 2, state: "season", season: { number: 1, day: 3, countdownTo: Date.parse("2026-10-29T13:00:00.000Z") }, seats: { taken: 412, cap: 1000 }, counts: { earners: 140 } });
+    expect(read).toMatchObject({ schema: 2, state: "season", season: { number: 1, day: 3, countdownTo: Date.parse("2026-10-31T13:00:00.000Z") }, seats: { taken: 412, cap: 1000 }, counts: { earners: 140 } });
     expect(read!.earners[0]).toMatchObject({ rank: 1, wallet: "0xab", name: "maplegrin", pnlUsd: 3.2 });
     expect(read!.me).toBeUndefined();
   });

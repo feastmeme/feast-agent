@@ -443,7 +443,7 @@ The wallet's sign-in ends at its sign-in limit, about 7 days after the scan; the
 
 | | en | zh |
 | --- | --- | --- |
-| `6h` | Your wallet's sign-in ends in under 6 hours (at 2026-10-28 10:34 UTC+8). Scan again before then so the agent can keep trading and exiting. | 钱包登录不到 6 小时后到期（2026-10-28 10:34 UTC+8）。请在那之前重新扫码，agent 才能继续交易和止损。 |
+| `6h` | Your wallet's sign-in ends in under 6 hours (at 2026-10-30 10:34 UTC+8). Scan again before then so the agent can keep trading and exiting. | 钱包登录不到 6 小时后到期（2026-10-30 10:34 UTC+8）。请在那之前重新扫码，agent 才能继续交易和止损。 |
 | `1h` | Your wallet's sign-in ends in under an hour (at 10:34 UTC+8). Scan again now. | 钱包登录不到 1 小时后到期（10:34 UTC+8）。请现在重新扫码。 |
 | `ended` | Your wallet's sign-in has ended. The agent can't trade until you scan again, and that includes its exits. Say "sign in" and scan the code in the Binance App; the agent picks up by itself. | 钱包登录已到期。重新扫码之前 agent 无法交易，包括止损和卖出。说「登录」，在 Binance App 里扫码；扫完 agent 会自己恢复。 |
 | `back` | Signed in again: the agent resumes. | 已重新登录，agent 恢复运行。 |

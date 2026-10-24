@@ -12,7 +12,7 @@ import { hostPath, recordHostAction } from "./host.ts";
 
 const writeStopFile = (h: string) => writeFileSync(agentPaths(h, "demo").stop, "stop requested by the user\n");
 
-const T0 = Date.parse("2026-10-26T13:00:00Z");
+const T0 = Date.parse("2026-10-28T13:00:00Z");
 const MIN = 60_000;
 let dirs: string[] = [];
 afterEach(() => {

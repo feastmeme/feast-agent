@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Address } from "viem";
 
 import { normalizeManifesto } from "../register/message.ts";
+import { withDoors } from "../doors.ts";
 import { checkModel, modelHint, withHostHeaders, type Model } from "../headers.ts";
 import { within } from "../prompt/host.ts";
 import { agentPaths, appendJsonl } from "../store.ts";
@@ -86,6 +87,8 @@ export type SendDeps = {
   dev?: boolean;
   /** Open the session again after a 401, once (`FL note` only: a background flush never signs). True when it opened. */
   relogin?: () => Promise<boolean>;
+  /** Task 975, addendum 6: where a door's wait is said, once. */
+  log?: (event: string, fields: Record<string, unknown>) => void;
 };
 export type Flushed = { sent: number; kept: number; refused: number; dropped: number; lastRefused: number | null; reason: string | null };
 
@@ -112,7 +115,8 @@ export async function flushNotes(home: string, name: string, wallet: Address, de
     const note = queued[i]!;
     let status: number;
     try {
-      const response = await withHostHeaders(deps.fetch, [deps.site])(`${deps.site.replace(/\/+$/, "")}/api/league/notes`, {
+      // The note's door (task 975, addendum 6): this agent's identity cookie, and the site's Retry-After honoured.
+      const response = await withHostHeaders(withDoors(deps.fetch, { site: deps.site, home, name, now, log: deps.log }), [deps.site])(`${deps.site.replace(/\/+$/, "")}/api/league/notes`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ id: note.id, wallet, ts: note.ts, text: note.text, model: note.model, ...(note.tx ? { tx: note.tx } : {}) }),

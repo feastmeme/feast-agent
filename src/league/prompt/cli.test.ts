@@ -217,10 +217,10 @@ describe("task 975, addendum 2: FL status in season, and FL doctor's indexer", (
     if (!planned.ok) throw new Error(planned.errors.join("; "));
     saveAgent(home, { ...confirmAgent(planned.agent), league: { waitForSeason: true } });
     const { writeGate } = await import("../season-gate.ts");
-    writeGate(home, "demo", { state: "open", opensAt: "2026-10-26T12:00:00.000Z", at: new Date().toISOString() });
+    writeGate(home, "demo", { state: "open", opensAt: "2026-10-28T12:00:00.000Z", at: new Date().toISOString() });
     const out = await run(["status", "demo", "--no-league"], env);
     expect(out.stdout.trimEnd().split("\n").at(-1)).toBe("The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.");
-    writeGate(home, "demo", { state: "waiting", opensAt: "2026-10-26T12:00:00.000Z", at: new Date().toISOString() });
+    writeGate(home, "demo", { state: "waiting", opensAt: "2026-10-28T12:00:00.000Z", at: new Date().toISOString() });
     expect((await run(["status", "demo", "--no-league"], env)).stdout).not.toContain("Decide and trade now");
   }, 60_000);
 

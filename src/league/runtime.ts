@@ -31,6 +31,7 @@ import { gatherPack } from "./ask/gather.ts";
 import { validateAnswer, type JournalRow, type Pack } from "./ask/pack.ts";
 import { impacts } from "./quote.ts";
 import { nextDinner } from "./prompt/floor.ts";
+import { nextSlowRead, pollCadence, writeCadence, type Cadence } from "./feed/cadence.ts";
 import { sessionNotice, utc8 } from "./register/copy.ts";
 import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { GATE_READ_MS, seasonClosedLine, tradingOpens, writeGate } from "./season-gate.ts";
@@ -948,6 +949,9 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           })
         : null;
     let feedOn = false;
+    // Addendum 6: a prompt agent's cadence, and when its next slow read is due.
+    let cadenceNow: Cadence | null = null;
+    let slowReadAt = 0;
     const startJitterMs = gate.open ? Math.max(0, deps.startJitterMs ?? 0) : 0;
     let jitterUntil = startedAt + startJitterMs;
     let jitterDone = startJitterMs === 0;
@@ -981,7 +985,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       nextNotesFlush = now + 10 * 60_000;
       if (!readNotes(deps.home, deps.name).some((n) => n.state === "queued")) return;
       flushing = true;
-      void flushNotes(deps.home, deps.name, wallet, { site: deps.site ?? siteFromEnv(), fetch: deps.fetch ?? fetch, now: clock, max: 20 })
+      void flushNotes(deps.home, deps.name, wallet, { site: deps.site ?? siteFromEnv(), fetch: deps.fetch ?? fetch, now: clock, max: 20, log })
         .then((out) => (out.sent + out.refused > 0 ? log("notes.flushed", { sent: out.sent, refused: out.refused, kept: out.kept }) : undefined))
         .catch(() => undefined)
         .finally(() => (flushing = false));
@@ -1003,6 +1007,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       askState = { ...askState, lastAskAt: startedAt };
       writeAskState(deps.home, deps.name, askState);
       save();
+      // A read right before the ask (addendum 6): the pack sees the market as it is now, not as the slow cadence left it.
+      if (feed && feed.due()) await feed.step({ events: false }).catch(() => []);
       // The pack (addenda 4 and 5): the book this runtime just saved, the snapshot the feed holds, the league, candles, impacts.
       const gathered = await gatherPack({ home: deps.home, agent: agent!, now: startedAt, wallet, chain, snapshot: feed?.held() ?? null, fetch: deps.fetch ?? fetch, site: deps.site ?? siteFromEnv(), gate: { opensAt: gate.opensAt, open: gate.open }, feast, impacts: impacts(executor, chain) });
       const pack: Pack = gathered.pack;
@@ -1134,8 +1140,21 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         const wanted = agent.track !== "prompt" || autopilotOn || askMode();
         if (!wanted && feedOn) feed.reset();
         feedOn = wanted;
-        // A strategy that listens reads every interval; one that only reads the board, once a tick.
-        if (wanted && feed.due() && (listens || (needBoard() && now >= nextTick))) {
+        // A strategy that listens reads every interval; one that only reads the board, once a tick. A prompt agent reads
+        // by need (addendum 6): fast while it holds, after a fill and before dinner, else every 30–60 s.
+        let readNow = listens || (needBoard() && now >= nextTick);
+        if (agent.track === "prompt" && !listens) {
+          const cadence = pollCadence({ now, positions: Object.keys(book.positions).length, lastFillAt: book.trades.length > 0 ? Math.max(...book.trades) : null, dinnerAt: nextDinner(now) });
+          if (cadence.mode !== cadenceNow?.mode || cadence.why !== cadenceNow?.why) {
+            cadenceNow = cadence;
+            const fast = (deps.pollMs ?? 5_000) / 1_000;
+            writeCadence(deps.home, deps.name, { ...cadence, fastSeconds: `${fast}–${fast + 3}`, at: new Date(now).toISOString() });
+            log("feed.cadence", { mode: cadence.mode, why: cadence.why });
+          }
+          readNow = cadence.mode === "fast" || now >= slowReadAt;
+        }
+        if (wanted && feed.due() && readNow) {
+          if (agent.track === "prompt") slowReadAt = nextSlowRead(now, random);
           const events = await feed.step({ events: listens });
           try {
             if (events.length > 0) {

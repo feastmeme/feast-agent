@@ -24,7 +24,7 @@ describe("the ask loop's sentences", () => {
   });
 
   it("the You're in line, before and after the season starts: the three facts, then keep this machine awake", () => {
-    const before = { kind: "at" as const, at: Date.parse("2026-10-26T12:00:00Z") };
+    const before = { kind: "at" as const, at: Date.parse("2026-10-28T12:00:00Z") };
     for (const [lang, facts] of [["en", EN], ["zh", ZH]] as const) {
       for (const opens of [before, { kind: "open" as const }]) {
         const line = copy.doneRunning("maplegrin", opens, lang, ASK);
@@ -37,7 +37,7 @@ describe("the ask loop's sentences", () => {
   });
 
   it("the status card's last line says what happens, before the season and in it", () => {
-    const read = (state: "season" | "warm-up") => parseLeague(leagueWire({ state, season: { number: 1, day: state === "season" ? 2 : null, countdownTo: "2026-10-27T13:00:00.000Z" } }))!;
+    const read = (state: "season" | "warm-up") => parseLeague(leagueWire({ state, season: { number: 1, day: state === "season" ? 2 : null, countdownTo: "2026-10-29T13:00:00.000Z" } }))!;
     const agent = { track: "prompt", autopilot: ASK, promptFile: "strategy.md" };
     expect(closingLine({ today: read("warm-up"), agent }, "en")).toBe("Whatever the league says, the league never stops your agent: your AI decides by strategy.md; every 5 minutes without its trade the runtime asks Claude Code, and the floor keeper (steady) covers it when Claude Code can't be reached or the floor is unmet 20 minutes before dinner.");
     expect(closingLine({ today: read("season"), agent }, "en")).toBe("The season is on. Decide and trade now by strategy.md; if you go quiet for 5 minutes, the runtime asks your Claude Code what to do.");

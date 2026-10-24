@@ -9,7 +9,7 @@ import { hostPath } from "../prompt/host.ts";
 import { checkModel, checkNote, flushNotes, modelHint, noteCommand, notesPath, readNotes } from "./queue.ts";
 import { readSession, saveSession } from "./session.ts";
 
-const NOW = Date.parse("2026-10-27T05:00:00Z");
+const NOW = Date.parse("2026-10-29T05:00:00Z");
 const TX = `0x${"ab".repeat(32)}`;
 let homes: string[] = [];
 afterEach(() => {

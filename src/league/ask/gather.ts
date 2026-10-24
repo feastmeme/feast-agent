@@ -3,9 +3,9 @@ import type { Address } from "viem";
 
 import type { AgentConfig } from "../agent.ts";
 import { notesCachePath } from "../data/notes.ts";
-import { picture } from "../data/picture.ts";
+import { exitImpacts, picture, type Picture } from "../data/picture.ts";
 import { selfView, type SelfChain } from "../data/self.ts";
-import { RULES, standing } from "../data/standing.ts";
+import { fromArena, fromField, readStanding, RULES, standing } from "../data/standing.ts";
 import type { FeastSnapshot } from "../feed/snapshot.ts";
 import { leftOut } from "../prompt/floor.ts";
 import { readPrompt } from "../prompt/host.ts";
@@ -51,7 +51,7 @@ export function cachedNotes(home: string, count = 5): PackNote[] {
     .slice(-count);
 }
 
-export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: PackInput; requests: number }> {
+export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: PackInput; requests: number; quotes: number; from: Picture["from"] | null }> {
   let requests = 0;
   const counted = ((input: string | URL | Request, init?: RequestInit) => ((requests += 1), d.fetch(input, init))) as typeof fetch;
   const get = async (url: string): Promise<{ status: number; body: unknown } | { error: string }> => {
@@ -63,8 +63,10 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
       return { error: String((error as Error).message).slice(0, 120) };
     }
   };
-  const mine = await selfView(d.home, d.agent.name, { chain: d.chain, now: d.now, wallet: d.wallet, exitImpact: d.impacts?.exit });
-  const league = d.league !== undefined ? d.league : await new LeagueSite(d.site, counted, 8_000).league("today", d.wallet).catch(() => null);
+  const mine = await selfView(d.home, d.agent.name, { chain: d.chain, now: d.now, wallet: d.wallet });
+  // The cached field, never the uncached me= read unless the site is older (addendum 6).
+  const leagueRead = d.league !== undefined ? { read: d.league, standing: d.league?.field ? { ...standing(fromField(d.league.field), d.wallet), from: "field" as const } : d.league?.arena ? { ...standing(fromArena(d.league.arena), d.wallet), from: "arena" as const } : null } : await readStanding(new LeagueSite(d.site, counted, 8_000), d.wallet);
+  const league = leagueRead.read;
   const own = leftOut(d.home, mine.ownCoin[0]?.coin ?? null, null);
   for (const c of mine.ownCoin) own.add(c.coin.toLowerCase());
   const pictured = await picture({
@@ -78,6 +80,8 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     held: [...mine.positions, ...mine.ownCoin].map((p) => p.coin),
     own,
   });
+  // The exit impacts after the picture (addendum 6): the server's sale table first, the local quoter only where it falls short.
+  const exits = await exitImpacts([...mine.positions, ...mine.ownCoin], pictured, d.impacts?.exit);
   const read = d.agent.prompt ? readPrompt(d.agent.prompt.path) : null;
   const state = readAskState(d.home, d.agent.name);
   const sha = read?.ok ? read.sha256 : null;
@@ -95,16 +99,17 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     lastTradeAt: mine.lastTradeAt,
     fills: mine.recentFills,
     avgGasBnb: mine.avgGasBnb,
+    gas: { buyBnb: mine.gasEstimate.buyBnb, sellBnb: mine.gasEstimate.sellBnb },
     market: d.snapshot ? pictured.market : null,
     coins: pictured.coins,
     launches: pictured.launches,
     quiet: pictured.quiet,
-    standing: league?.arena ? standing(league.arena, d.wallet) : null,
+    standing: leagueRead.standing,
     rules: RULES,
     own,
     notes: cachedNotes(d.home),
     journal: readJournal(d.home, d.agent.name),
     memo: state.memo,
   };
-  return { pack: buildPack(input), input, requests };
+  return { pack: buildPack(input), input, requests, quotes: (pictured.quotes ?? 0) + exits.quoted, from: pictured.from ?? null };
 }

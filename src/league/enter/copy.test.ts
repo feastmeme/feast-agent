@@ -29,7 +29,7 @@ describe("the entry's copy promises no reward", () => {
       const entered = copy.alreadyEntered({ agentId: "maplegrin", coin: "0x00000000000000000000000000000000000b0d1e", notes: "open" }, lang);
       for (const pattern of REWARD) expect(entered).not.toMatch(pattern);
       // Task 968: the entry that started the agent ends with it running, and how to restart it.
-      const running = copy.doneRunning("maplegrin", { kind: "at", at: Date.parse("2026-10-26T12:00:00Z") }, lang);
+      const running = copy.doneRunning("maplegrin", { kind: "at", at: Date.parse("2026-10-28T12:00:00Z") }, lang);
       expect(running).toContain("FL start maplegrin");
       for (const pattern of REWARD) expect(running).not.toMatch(pattern);
     }
@@ -45,7 +45,7 @@ describe("the entry's copy promises no reward", () => {
     expect(copy.awakeLine("en")).toBe("Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten.");
     expect(copy.awakeLine("zh")).toBe("赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。");
     for (const lang of ["en", "zh"] as const)
-      for (const opens of [{ kind: "at" as const, at: Date.parse("2026-10-26T12:00:00Z") }, { kind: "open" as const }]) {
+      for (const opens of [{ kind: "at" as const, at: Date.parse("2026-10-28T12:00:00Z") }, { kind: "open" as const }]) {
         const line = copy.doneRunning("maplegrin", opens, lang, { preset: "steady", idleMinutes: 30 });
         expect(line, `${lang} ${opens.kind}`).toContain(copy.awakeLine(lang));
         for (const pattern of REWARD) expect(line).not.toMatch(pattern);

@@ -16,7 +16,7 @@ import { FakeFeast, fakeFaceChain, INDEXER, SITE, WALLET, WBNB } from "./fakes.t
  * with the type of its value. `golden.test.ts` holds `FL data --json` to `golden-data-shape.json`.
  */
 
-export const NOW = Date.parse("2026-10-27T06:00:00Z");
+export const NOW = Date.parse("2026-10-29T06:00:00Z");
 const E18 = 10n ** 18n;
 const C1 = getAddress("0x00000000000000000000000000000000000c0d01");
 
@@ -34,7 +34,7 @@ export async function goldenRun() {
   const event = { type: "trade", at: new Date(NOW - 30_000).toISOString(), coin: C1.toLowerCase(), quote: WBNB.toLowerCase(), buy: true, quoteAmount: "10000000000000000", coinAmount: "1" };
   const snapshot = { generatedAt: new Date(NOW - 5_000).toISOString(), block: 1, coins: [coin], events: [event], coinsTotal: 9, coinsListed: 1, coinsOmitted: 8, board: { mostActive: [C1.toLowerCase()] }, asOf: { blocksBehind: 1 } };
   const arena = { set: [{ name: "demo.ai", wallet: WALLET.toLowerCase(), pnlBnb: 0.001, pnlUsd: 0.6, seasonBnb: 0.002, trades: 4, model: "claude", note: null, bodyCoin: null, danger: false, eaten: false, viewer: true, airdrop: false }] };
-  const feast = new FakeFeast({ snapshot: { status: 200, body: snapshot, etag: '"g"' }, league: { status: 200, body: { ...leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-27T13:00:00.000Z" } }), arena } }, ohlcv: { [C1.toLowerCase()]: [[Math.floor((NOW - 10 * 60_000) / 1_000), String(2n ** 96n), String(2n ** 96n), String(2n ** 96n), String(2n ** 96n), "100000000000000000"]] } });
+  const feast = new FakeFeast({ snapshot: { status: 200, body: snapshot, etag: '"g"' }, league: { status: 200, body: { ...leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-29T13:00:00.000Z" } }), arena } }, ohlcv: { [C1.toLowerCase()]: [[Math.floor((NOW - 10 * 60_000) / 1_000), String(2n ** 96n), String(2n ** 96n), String(2n ** 96n), String(2n ** 96n), "100000000000000000"]] } });
   const chain = { ...fakeFaceChain({ marks: { [C1.toLowerCase()]: 7n * 10n ** 15n } }), balance: async () => 5n * 10n ** 16n };
   const out = await dataFace({ home, site: SITE, indexer: INDEXER, fetch: feast.fetch, chain, wallet: async () => WALLET, now: () => NOW, impacts: { buy: async () => 0.8, exit: async () => 1.5 } }, { name: "demo", notes: false });
   return { home, out };

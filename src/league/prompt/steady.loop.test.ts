@@ -24,9 +24,9 @@ import { recordHostAction } from "./host.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
-/** Tuesday 10/27, 14:00 UTC+8. */
-const T0 = Date.parse("2026-10-27T06:00:00Z");
-const DINNER = Date.parse("2026-10-27T13:00:00Z");
+/** Thursday 10/29, 14:00 UTC+8: the season's day 2. */
+const T0 = Date.parse("2026-10-29T06:00:00Z");
+const DINNER = Date.parse("2026-10-29T13:00:00Z");
 const coin = (n: number): Address => getAddress(`0x${n.toString(16).padStart(40, "0")}`);
 const COINS = [coin(0xc0e1), coin(0xc0e2), coin(0xc0e3), coin(0xc0e4)];
 const OWN = coin(0xb0d1e);
@@ -175,7 +175,7 @@ describe("task 975, addendum 3: the machine slept", () => {
     const { lastSleep } = await import("./host.ts");
     expect(lastSleep(home, "demo")).toEqual({ at: T0 + 5 * MIN, minutes: 45 });
     const notes = readFileSync(agentPaths(home, "demo").notifications, "utf8");
-    expect(notes).toContain("slept 45 minutes at 2026-10-27 14:05 UTC+8: nothing traded while it slept. Keep this machine awake");
+    expect(notes).toContain("slept 45 minutes at 2026-10-29 14:05 UTC+8: nothing traded while it slept. Keep this machine awake");
   }, 60_000);
 
   it("an ordinary run logs no sleep", async () => {

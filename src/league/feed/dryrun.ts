@@ -27,7 +27,7 @@ import { agentPaths } from "../store.ts";
 import { seeded } from "./fakes.ts";
 import { drawStartJitter } from "./snapshot.ts";
 
-const T0 = Date.parse("2026-10-26T12:00:00Z");
+const T0 = Date.parse("2026-10-28T12:00:00Z");
 const S = 1_000;
 const PHASES = [
   { at: 0, name: "the start", what: "the snapshot, with its ETag; each agent waits its own start jitter before its first read" },

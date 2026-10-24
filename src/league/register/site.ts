@@ -1,6 +1,7 @@
 import { getAddress, isAddress, type Address } from "viem";
 
 import { failureOf, retrying, type Failure, type Retry } from "../feed/backoff.ts";
+import { withDoors } from "../doors.ts";
 import { withHostHeaders } from "../headers.ts";
 
 /**
@@ -148,9 +149,50 @@ export type LeagueRead = {
   counts: { earners: number; backed: number };
   /** `me`'s rows from the whole boards (API.md §3); undefined when the page sent none. */
   me?: { earners: EarnerRow | null; backed: BackedRow | null; eaten: { day: number; reason: string | null } | null } | null;
-  /** Task 975, addendum 5: the page's `arena.set`, every seated agent in BNB; undefined when the page sent none. */
+  /** Task 975, addendum 5: the page's `arena.set` (at most 40 on the server: never the whole field); undefined when none. */
   arena?: ArenaRow[];
+  /**
+   * Task 975, addendum 6 (lane 978): `field=1`, every seated agent in rank order, from the cached board with no `me=`;
+   * undefined when the page does not send it (an older site): then the `me=` read is the fallback.
+   */
+  field?: FieldRow[];
+  /** The page's body as it came (the field's read keeps it, for `FL data`'s window and dinner). */
+  raw?: unknown;
 };
+
+/** One seated agent of `field=1`: names are other players' words. `trades` only when the page gives it. */
+export type FieldRow = { rank: number | null; name: string; wallet: string | null; pnlBnb: number; danger: boolean; eaten: { day: number | null; reason: string | null } | null; bodyCoin: string | null; hp: number | null; trades: number | null };
+
+function fieldRow(raw: unknown): FieldRow | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  const pnl = num(r.pnlBnb);
+  if (typeof r.name !== "string" || pnl === null) return null;
+  const address = (v: unknown) => (typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) ? v.toLowerCase() : null);
+  const eaten = r.eaten && typeof r.eaten === "object" ? (r.eaten as Record<string, unknown>) : r.eaten === true ? {} : null;
+  return {
+    rank: num(r.rank),
+    name: r.name.slice(0, 64),
+    wallet: address(r.wallet),
+    pnlBnb: pnl,
+    danger: r.danger === true,
+    eaten: eaten ? { day: num(eaten.day), reason: typeof eaten.reason === "string" ? eaten.reason.slice(0, 40) : null } : null,
+    bodyCoin: address(r.bodyCoin),
+    hp: num(r.hp),
+    trades: num(r.trades),
+  };
+}
+
+/** The field's rows in a page: `field` as an array, or `field.rows`; null when the page sent no field. */
+export function fieldRowsOf(body: unknown): { rows: FieldRow[]; next: string | null } | null {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const f = b.field as unknown;
+  const list = Array.isArray(f) ? f : f && typeof f === "object" && Array.isArray((f as { rows?: unknown }).rows) ? (f as { rows: unknown[] }).rows : null;
+  if (!list) return null;
+  const nextRaw = (f && typeof f === "object" && !Array.isArray(f) ? (f as { next?: unknown; nextCursor?: unknown }).next ?? (f as { nextCursor?: unknown }).nextCursor : undefined) ?? b.nextCursor ?? b.next;
+  const next = typeof nextRaw === "string" && /^[A-Za-z0-9_=-]{1,200}$/.test(nextRaw) ? nextRaw : null;
+  return { rows: list.slice(0, 10_000).map(fieldRow).filter((r): r is FieldRow => r !== null), next };
+}
 
 /** One agent of the arena (`/api/league`'s `arena.set[]`): names and notes are other players' words. */
 export type ArenaRow = { name: string; wallet: string | null; pnlBnb: number; pnlUsd: number | null; seasonBnb: number | null; trades: number; model: string; note: string | null; bodyCoin: string | null; danger: boolean; eaten: boolean; viewer: boolean };
@@ -283,6 +325,8 @@ const isTransportError = (error: unknown) => !(error instanceof SyntaxError);
 export class LeagueSite {
   /** Every request to the site carries the host's and the release's headers (task 975). */
   private readonly fetchImpl: typeof fetch;
+  /** Why the last league read failed, for a line to the user (task 975, addendum 6). */
+  lastError: string | null = null;
 
   constructor(
     readonly base: string = siteFromEnv(),
@@ -290,8 +334,10 @@ export class LeagueSite {
     private readonly timeoutMs = 15_000,
     /** Task 967: the GETs back off on a 429, a 5xx or no answer (FL enter's: at most 3 asks, 2 minutes). Never a POST. */
     private readonly retry?: Retry,
+    /** Task 975, addendum 6: the write doors' identity cookie and their Retry-After waits, for this agent. */
+    doors?: { home: string; name: string; log?: (event: string, fields: Record<string, unknown>) => void },
   ) {
-    this.fetchImpl = withHostHeaders(fetchImpl, [base]);
+    this.fetchImpl = withHostHeaders(doors ? withDoors(fetchImpl, { site: base, ...doors }) : fetchImpl, [base]);
   }
 
   /** An answer's status as a failure to ask again after, under the retry policy; null to take it. */
@@ -460,9 +506,41 @@ export class LeagueSite {
   }
 
   /** The league for one view; `me` adds the wallet's own rows (uncached on the page's side). */
+  /**
+   * The whole field (task 975, addendum 6): `/api/league?view=today&field=1&limit=10000`, with no `me=`, so the CDN
+   * keeps one copy for every agent; its pages (at 1.5 MB) followed, at most 10. Null when the page cannot be read;
+   * a read without `field` when the site is older (the caller falls back to `league("today", me)`).
+   */
+  async field(timeoutMs = 8_000): Promise<LeagueRead | null> {
+    const first = await this.getJson(`/api/league?view=today&field=1&limit=10000`, timeoutMs);
+    if ("error" in first || first.status !== 200) {
+      this.lastError = "error" in first ? first.error : `HTTP ${first.status}`;
+      return null;
+    }
+    const read = parseLeague(first.body);
+    if (!read) return null;
+    const page = fieldRowsOf(first.body);
+    if (!page) return { ...read, raw: first.body };
+    const rows = [...page.rows];
+    let next = page.next;
+    for (let i = 0; next && i < 9; i += 1) {
+      const more = await this.getJson(`/api/league?view=today&field=1&limit=10000&cursor=${encodeURIComponent(next)}`, timeoutMs);
+      if ("error" in more || more.status !== 200) break;
+      const p = fieldRowsOf(more.body);
+      if (!p) break;
+      rows.push(...p.rows);
+      next = p.next;
+    }
+    return { ...read, field: rows, raw: first.body };
+  }
+
   async league(view: "today" | "season", me: Address | null, timeoutMs = 8_000): Promise<LeagueRead | null> {
     const got = await this.getJson(`/api/league?view=${view}&limit=100${me ? `&me=${me.toLowerCase()}` : ""}`, timeoutMs);
-    if ("error" in got || got.status !== 200) return null;
-    return parseLeague(got.body);
+    if ("error" in got || got.status !== 200) {
+      this.lastError = "error" in got ? got.error : `HTTP ${got.status}`;
+      return null;
+    }
+    const read = parseLeague(got.body);
+    return read ? { ...read, raw: got.body } : null;
   }
 }

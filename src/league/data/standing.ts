@@ -1,4 +1,4 @@
-import type { ArenaRow } from "../register/site.ts";
+import type { ArenaRow, FieldRow, LeagueRead, LeagueSite } from "../register/site.ts";
 import { untrusted, type Untrusted } from "./untrusted.ts";
 
 /**
@@ -40,23 +40,34 @@ export type Standing = {
     /** BNB more profit today that would take this agent out of the drop zone (to 0, or above the cutoff). */
     toSafetyBnb: number | null;
   };
-  danger: { name: Untrusted; pnlBnb: number; trades: number }[];
+  danger: { name: Untrusted; pnlBnb: number; trades: number | null }[];
+  /** Where it was computed from: the whole field (`field=1`), or the arena's 40 (an older site). */
+  from?: "field" | "arena";
 };
 
 const r6 = (x: number) => Number(x.toFixed(6));
 
-export function standing(rows: ArenaRow[], me: string | null): Standing {
+/** One agent as the standing reads it: from the field (addendum 6), or the arena (addendum 5). `trades` null: unknown. */
+export type StandingRow = { name: string; wallet: string | null; pnlBnb: number; trades: number | null; danger: boolean; eaten: boolean; viewer: boolean };
+
+export const fromField = (rows: FieldRow[]): StandingRow[] => rows.map((r) => ({ name: r.name, wallet: r.wallet, pnlBnb: r.pnlBnb, trades: r.trades, danger: r.danger, eaten: r.eaten !== null, viewer: false }));
+export const fromArena = (rows: ArenaRow[]): StandingRow[] => rows.map((r) => ({ name: r.name, wallet: r.wallet, pnlBnb: r.pnlBnb, trades: r.trades, danger: r.danger, eaten: r.eaten, viewer: r.viewer }));
+
+export function standing(input: StandingRow[] | ArenaRow[], me: string | null): Standing {
+  const rows: StandingRow[] = input as StandingRow[];
   const alive = rows.filter((r) => !r.eaten);
   const mine = alive.find((r) => r.viewer || (me !== null && r.wallet === me.toLowerCase())) ?? null;
+  // Without trades (the field may not carry them) every living agent is counted as over the floor: an estimate.
+  const tradesKnown = alive.some((r) => r.trades !== null && r.trades !== undefined);
   const best = [...alive].sort((a, b) => b.pnlBnb - a.pnlBnb);
   const rank = mine ? best.indexOf(mine) + 1 : null;
-  const passing = alive.filter((r) => r.trades >= FLOOR_TRADES).sort((a, b) => a.pnlBnb - b.pnlBnb);
+  const passing = alive.filter((r) => !tradesKnown || (r.trades ?? 0) >= FLOOR_TRADES).sort((a, b) => a.pnlBnb - b.pnlBnb);
   const bottom = Math.floor(passing.length * DROP_SHARE);
   const cutoffPnlBnb = bottom > 0 ? passing[bottom - 1]!.pnlBnb : null;
   let state: Standing["cutoff"]["me"] = "unknown";
   let toSafety: number | null = null;
   if (mine) {
-    if (mine.trades < FLOOR_TRADES) state = "under-floor";
+    if (tradesKnown && (mine.trades ?? 0) < FLOOR_TRADES) state = "under-floor";
     else {
       const inBottom = bottom > 0 && passing.indexOf(mine) < bottom;
       state = inBottom && mine.pnlBnb < 0 ? "drop-zone" : "safe";
@@ -74,6 +85,25 @@ export function standing(rows: ArenaRow[], me: string | null): Standing {
     gapUpBnb: mine && rank !== null && rank > 1 ? r6(best[rank - 2]!.pnlBnb - mine.pnlBnb) : null,
     gapDownBnb: mine && rank !== null && rank < best.length ? r6(mine.pnlBnb - best[rank]!.pnlBnb) : null,
     cutoff: { passing: passing.length, bottom, cutoffPnlBnb, me: state, toSafetyBnb: toSafety },
-    danger: alive.filter((r) => r.danger).slice(0, 10).map((r) => ({ name: untrusted(r.name), pnlBnb: r.pnlBnb, trades: r.trades })),
+    danger: alive.filter((r) => r.danger).slice(0, 10).map((r) => ({ name: untrusted(r.name), pnlBnb: r.pnlBnb, trades: r.trades ?? null })),
   };
+}
+
+/**
+ * The league's read for a standing (addendum 6): the cached `field=1` board with no `me=`, and this wallet's rows
+ * derived from it (its board rows when it is on the top-10 boards; its eaten day from the field). Only when the site
+ * sends no field (an older deploy) the uncached `me=` read is asked instead: the fallback, to be removed once the
+ * coordinator says every site has `field=1`.
+ */
+export async function readStanding(site: Pick<LeagueSite, "field" | "league">, wallet: string | null): Promise<{ read: LeagueRead | null; from: "field" | "me" | "arena" | null; standing: Standing | null }> {
+  const read = await site.field().catch(() => null);
+  if (read?.field) {
+    const me = wallet?.toLowerCase() ?? null;
+    const row = me ? read.field.find((r) => r.wallet === me) ?? null : null;
+    const derived: LeagueRead = read.me !== undefined || !me ? read : { ...read, me: { earners: read.earners.find((r) => r.wallet.toLowerCase() === me) ?? null, backed: read.backed.find((r) => r.wallet.toLowerCase() === me) ?? null, eaten: row?.eaten && row.eaten.day !== null ? { day: row.eaten.day, reason: row.eaten.reason } : null } };
+    return { read: derived, from: "field", standing: { ...standing(fromField(read.field), me), from: "field" } };
+  }
+  const fallback = wallet ? await site.league("today", wallet as `0x${string}`).catch(() => null) : null;
+  const best = fallback ?? read;
+  return { read: best, from: fallback ? "me" : best ? "arena" : null, standing: best?.arena ? { ...standing(fromArena(best.arena), wallet), from: "arena" } : null };
 }

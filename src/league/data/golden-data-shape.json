@@ -21,6 +21,7 @@
         "sells": "number"
       },
       "holders": "number",
+      "holdersLedger": "null",
       "impactPct": "null",
       "lastTradeAt": "string",
       "launchedAt": "string",
@@ -29,6 +30,7 @@
         "text": "string",
         "untrusted": "boolean"
       },
+      "openingCapBnb": "null",
       "own": "boolean",
       "picked": "boolean",
       "priceBnb": "number",
@@ -48,6 +50,7 @@
       "trades24h": "number",
       "type": "string",
       "underlying": "null",
+      "underlyingTicker": "null",
       "volume": {
         "h1": "number",
         "m15": "number",
@@ -85,6 +88,7 @@
       "earners": "number"
     },
     "dinner": "null",
+    "field": "null",
     "idleRule": {
       "asOf": "string",
       "floorBnb": "number",
@@ -104,6 +108,7 @@
       "day": "number",
       "number": "number"
     },
+    "source": "string",
     "standing": {
       "alive": "number",
       "cutoff": {
@@ -114,6 +119,7 @@
         "toSafetyBnb": "null"
       },
       "danger": [],
+      "from": "string",
       "gapDownBnb": "null",
       "gapUpBnb": "null",
       "pnlBnb": "number",
@@ -130,6 +136,7 @@
     "coinsListed": "number",
     "coinsOmitted": "number",
     "coinsTotal": "number",
+    "freshness": "null",
     "generatedAt": "string",
     "mostActive": [
       "string"
@@ -168,6 +175,11 @@
       "startsAt": "string",
       "trades": "number",
       "volumeBnb": "number"
+    },
+    "gasEstimate": {
+      "buyBnb": "number",
+      "from": "string",
+      "sellBnb": "null"
     },
     "headroom": {
       "cooldowns": [],

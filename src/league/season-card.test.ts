@@ -70,7 +70,7 @@ describe("the daily battle card (the owner's ruling, 2026-10-24)", () => {
   it("only in season, only for an Agent ID that is one; an entry by FL enter alone is enough", () => {
     expect(battleCardLines("https://feast.meme", "Maple Grin/../x", 3, "en")).toEqual([]);
     expect(battleCardLines("https://feast.meme", "maplegrin", 0, "en")).toEqual([]);
-    const warm = parseLeague(leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-26T12:00:00.000Z" } }));
+    const warm = parseLeague(leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-28T12:00:00.000Z" } }));
     expect(standingLines({ agentId: "maplegrin", seating: founding, today: warm, season: null, now, site: "https://feast.meme" }, "en").join("\n")).not.toContain("Battle card");
     const today = inSeason({ boards: { earners: [], backed: [] }, counts: { earners: 0, backed: 0 } });
     const entered = standingLines({ agentId: "maplegrin", seating: null, entered: true, today, season: null, now, site: "https://feast.meme" }, "en");
@@ -82,8 +82,8 @@ describe("the daily battle card (the owner's ruling, 2026-10-24)", () => {
 
 
 describe("task 975, addendum 2: what actually happens, for a prompt agent", () => {
-  const read = (state: "season" | "warm-up", day: number | null) => parseLeague(leagueWire({ state, season: { number: 1, day, countdownTo: "2026-10-27T13:00:00.000Z" } }))!;
-  const now = Date.parse("2026-10-27T06:00:00Z");
+  const read = (state: "season" | "warm-up", day: number | null) => parseLeague(leagueWire({ state, season: { number: 1, day, countdownTo: "2026-10-29T13:00:00.000Z" } }))!;
+  const now = Date.parse("2026-10-29T06:00:00Z");
   const steady = { track: "prompt" as const, autopilot: { preset: "steady", idleMinutes: 30 }, promptFile: "strategy.md" };
 
   it("in season it ends by telling the host to trade now; before it, the host decides and the backup covers silence", () => {

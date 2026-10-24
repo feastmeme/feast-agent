@@ -22,8 +22,8 @@ import { readAskState, readJournal } from "./journal.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
-const T0 = Date.parse("2026-10-27T06:00:00Z");
-const DINNER = Date.parse("2026-10-27T13:00:00Z");
+const T0 = Date.parse("2026-10-29T06:00:00Z");
+const DINNER = Date.parse("2026-10-29T13:00:00Z");
 const coin = (n: number): Address => getAddress(`0x${n.toString(16).padStart(40, "0")}`);
 const COINS = [coin(0xc0e1), coin(0xc0e2), coin(0xc0e3)];
 const SYMBOLS = ["NOODFEED", "KOIFEED", "MOTHFEED"];
@@ -183,5 +183,33 @@ describe("the ask loop", () => {
     expect(said.length).toBeGreaterThan(0);
     expect(lines(home).some((l) => l.event === "autopilot.on")).toBe(false);
     expect(dayCount(home, "demo", DINNER - 1, [OWN.toLowerCase(), FEAST.toLowerCase()]).passed).toBe(true);
+  }, 60_000);
+});
+
+describe("task 975, addendum 6: the snapshot by need", () => {
+  async function reads(holding: boolean) {
+    const { home } = setup(5);
+    const c = fakeClock(T0);
+    const { feed, w } = world(c);
+    recordHostAction(home, "demo", "buy", T0);
+    if (holding) {
+      // The host's own buy at the start: a position, so its stops are watched closely.
+      mkdirSync(agentPaths(home, "demo").inbox, { recursive: true });
+      writeJsonAtomic(join(agentPaths(home, "demo").inbox, "1-buy.json"), { type: "intent", requestId: "h", request: { kind: "buy", coin: COINS[0], bnb: 0.003, reason: "manual buy" } });
+    }
+    await runAgent({ home, name: "demo", signer: w.signer, chain: w.chain, fetch: feed.fetch, site: SITE, indexer: INDEXER, now: c.now, sleep: c.sleep, random: seeded(3), noJitter: true, loopMs: 1_000, pollMs: 5_000, maxRuntimeMs: 10 * MIN, out: () => {}, askHost: (async () => answer({ reason: "hold" })) as never });
+    const cadence = JSON.parse(readFileSync(join(agentPaths(home, "demo").dir, "cadence.json"), "utf8")) as { mode: string; why: string };
+    return { count: feed.snapshots().length, cadence };
+  }
+
+  it("flat: every 30–60 s (and once before each ask); holding: every 5–8 s", async () => {
+    const flat = await reads(false);
+    const held = await reads(true);
+    // 10 minutes at 30–60 s, plus a read before each of the two asks: at most about 22.
+    expect(flat.count).toBeLessThanOrEqual(25);
+    expect(flat.count).toBeGreaterThanOrEqual(10);
+    expect(flat.cadence).toMatchObject({ mode: "slow" });
+    expect(held.count).toBeGreaterThan(60);
+    expect(held.cadence).toMatchObject({ mode: "fast", why: "positions have stops" });
   }, 60_000);
 });

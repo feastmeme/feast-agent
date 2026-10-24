@@ -454,3 +454,21 @@ describe("task 975, addenda 4 and 5: the ask loop and the data it decides by", (
     for (const word of ["claude -p", "codex exec", "--every", "FL every", "FL ask <name> --print", "floor keeper", "exitImpactPct", "standing", "flow2m", "timeframe=minute&aggregate=5", "FL quote", "--bare"]) expect(v5, word).toContain(word);
   });
 });
+
+describe("task 975, addendum 6: at scale", () => {
+  const skill = read("skills/feast-league/SKILL.md");
+  it("SKILL has the cadence table, the doors and the field; FL data's paragraph names the server's fields and gas", () => {
+    for (const row of ["| it holds a position (its stops, take-profits and time stops are watched) | every 5–8 s (`--poll`) |", "| otherwise | every 30–60 s, jittered |", "| right before each ask | once |"]) expect(skill, row).toContain(row);
+    for (const word of ["field=1", "Retry-After", "`feast_rl` cookie", "`underlying`", "`holdersLedger`", "exitImpactPctEstimate", "self.gasEstimate"]) expect(skill, word).toContain(word);
+  });
+
+  it("no copy a player reads names the season's date", () => {
+    for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md", "docs/prompts/README.md"]) expect(read(file), file).not.toMatch(/Monday 20:00|Sunday 21:00|10\/26|10\/25/);
+  });
+
+  it("the CHANGELOG's league-v5 says it", () => {
+    const log = read("docs/CHANGELOG.md");
+    const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
+    for (const word of ["field=1", "features", "exitImpactPctEstimate", "Retry-After", "feast_rl", "30–60 s"]) expect(v5, word).toContain(word);
+  });
+});

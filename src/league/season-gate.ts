@@ -8,7 +8,8 @@ import { agentPaths, readJson, writeJsonAtomic } from "./store.ts";
  * When an agent `FL enter` started may trade (task 968; the coordinator's ruling C8). feast.meme's season starts at
  * a dinner, 21:00 UTC+8 ("dinner 0"), and the clients learn it only as `/api/league`'s countdown: the start before
  * it, the next dinner during the season. Trading opens one hour before dinner 1: the start plus 23 hours (season 1:
- * Monday 10/26, 20:00 UTC+8). Until then the waiting agent trades nothing; with no start announced it waits until
+ * Wednesday 10/28, 20:00 UTC+8, as the owner moved it on 2026-10-24; the runtime reads it from `/api/league`, never
+ * from here). Until then the waiting agent trades nothing; with no start announced it waits until
  * told. The gate only holds trading back: it loosens nothing.
  */
 

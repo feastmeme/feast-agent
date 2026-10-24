@@ -53,7 +53,7 @@ export type FakeSiteOptions = {
   creators?: { coin: string; creator: string; launchedAt?: string }[] | "down";
   /** `/api/pin` refuses the metadata document (after taking the picture), so a launch stops before any chain read. */
   pinMetadata?: "ok" | "refuse";
-  /** `GET /api/league`: the page's body (task 968: its clock gates the agent); default warm-up, the start Sunday 10/25 21:00 UTC+8. */
+  /** `GET /api/league`: the page's body (task 968: its clock gates the agent); default warm-up, the start Tuesday 10/27 21:00 UTC+8. */
   league?: Record<string, unknown> | Answer;
   /** `GET /api/league/register?wallet=`: the row the page keeps (null: none), or a raw answer. A seated POST keeps its own. */
   kept?: Record<string, unknown> | null | Answer;
@@ -117,7 +117,7 @@ export class FakeEnterSite {
       return new Response(status === 200 ? Buffer.from(a.bytes ?? AVATAR_PNG) : "<html>not found</html>", { status, headers: { "content-type": a.contentType ?? (status === 200 ? "image/png" : "text/html") } });
     }
     if (url.pathname === "/api/league") {
-      const l = o.league ?? leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-25T13:00:00.000Z" } });
+      const l = o.league ?? leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-27T13:00:00.000Z" } });
       if (l === "timeout" || l === "refused" || ("status" in l && typeof l.status === "number" && "body" in l)) return this.answer(l as Answer, signal);
       return Response.json(l);
     }

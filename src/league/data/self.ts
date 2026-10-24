@@ -39,8 +39,10 @@ export type PositionOut = {
   ageMinutes: number;
   /** The best mark the runtime has seen since the buy, against the cost, %. */
   peakPnlPct: number | null;
-  /** The price impact of selling all of it now, %; null when not quoted. */
+  /** The price impact of selling all of it now, %, from the chain's quoter; null when not quoted. */
   exitImpactPct: number | null;
+  /** Addendum 6: the same, estimated from the snapshot's sale-impact table between its two nearest sizes (no quote). */
+  exitImpactPctEstimate?: number | null;
 };
 
 /** Task 975, addendum 5: how much the hard limits leave right now, from the book and the limits (one source for FL data, FL status and the pack). */
@@ -91,7 +93,20 @@ export type SelfView = {
   /** The last 10 fills, with the slippage against the quote and the gas. */
   recentFills: FillOut[];
   avgGasBnb: number | null;
+  /** Addendum 6: the median gas of the last 10 fills of each kind, BNB; null where there is none yet. */
+  gasEstimate: { buyBnb: number | null; sellBnb: number | null; from: "recent fills" };
 };
+
+/** The median of the last 10 fills' gas, per side. */
+export function gasEstimateOf(fills: FillOut[]): SelfView["gasEstimate"] {
+  const median = (side: "buy" | "sell") => {
+    const g = fills.filter((f) => f.side === side && f.gasBnb !== null).slice(-10).map((f) => f.gasBnb!).sort((a, b) => a - b);
+    if (g.length === 0) return null;
+    const mid = Math.floor(g.length / 2);
+    return Number((g.length % 2 ? g[mid]! : (g[mid - 1]! + g[mid]!) / 2).toFixed(9));
+  };
+  return { buyBnb: median("buy"), sellBnb: median("sell"), from: "recent fills" };
+}
 
 const r = (x: number, d = 6) => Number(x.toFixed(d));
 
@@ -246,5 +261,6 @@ export async function selfView(
     headroom: headroomOf(book, agent.limits, spentWei, deps.now),
     recentFills: fills,
     avgGasBnb: gasFills.length > 0 ? r(gasFills.reduce((s, f) => s + f.gasBnb!, 0) / gasFills.length, 9) : null,
+    gasEstimate: gasEstimateOf(recentFillsOf(home, name, 40)),
   };
 }

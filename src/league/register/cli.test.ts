@@ -33,7 +33,7 @@ const ok = (data) => console.log(JSON.stringify({ success: true, data }));
 const command = args.slice(0, 2).join(" ");
 if (command === "wallet status") ok({ status: ${connected ? '"CONNECTED"' : '"DISCONNECTED"'} });
 else if (command === "wallet address") ok({ addresses: [{ binanceChainId: "56", address: "0x000000000000000000000000000000000000a11c" }] });
-else if (command === "wallet settings") ok({ devMode: { enabled: true, expiresAt: null, dailyLimit: 1000, balanceExceeded: false }, signInMaxTime: "2026-10-28T10:34:11+08:00", sessionExpireTime: "2099-01-01T00:00:00+08:00" });
+else if (command === "wallet settings") ok({ devMode: { enabled: true, expiresAt: null, dailyLimit: 1000, balanceExceeded: false }, signInMaxTime: "2026-10-30T10:34:11+08:00", sessionExpireTime: "2099-01-01T00:00:00+08:00" });
 else console.log(JSON.stringify({ success: false, error: { name: "NOT_IN_THIS_TEST" } }));
 `,
   );
@@ -100,7 +100,7 @@ describe("feast-league register and launch, through the binary", () => {
 
   it("status shows what is new once, in the user's language, and then only the latest", async () => {
     const { home, env } = setup();
-    appendJsonl(agentPaths(home, "maple").notifications, { at: "2026-10-28T02:00:00.000Z", kind: "session", code: "ended", text: "Your wallet's sign-in has ended.", endsAt: null });
+    appendJsonl(agentPaths(home, "maple").notifications, { at: "2026-10-30T02:00:00.000Z", kind: "session", code: "ended", text: "Your wallet's sign-in has ended.", endsAt: null });
     const first = await run(["status", "maple", "--no-league", "--lang", "zh"], env);
     expect(first.stdout).toContain("new since the last status:");
     expect(first.stdout).toContain("钱包登录已到期。");

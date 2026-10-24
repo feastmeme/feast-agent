@@ -13,8 +13,8 @@ import { buildPack, maxBuyBnb, PACK_MAX_CHARS, parseAnswerText, validateAnswer, 
  * addresses; one coin's symbol is an attempted instruction, and must stay inside an UNTRUSTED fence.
  */
 
-const NOW = Date.parse("2026-10-27T06:30:00Z");
-const DINNER = Date.parse("2026-10-27T13:00:00Z");
+const NOW = Date.parse("2026-10-29T06:30:00Z");
+const DINNER = Date.parse("2026-10-29T13:00:00Z");
 const WBNB = MAINNET.contracts.wrappedNative;
 const coin = (n: number): Address => getAddress(`0x${n.toString(16).padStart(40, "0")}`);
 const [A, B, EVIL] = [coin(0xc0e1), coin(0xc0e2), coin(0xc0e6)];
@@ -55,7 +55,7 @@ function input(over: Partial<PackInput> = {}): PackInput {
     now: NOW,
     limits: DEFAULT_LIMITS,
     prompt: { text: "Trade the busiest coins, small; keep the floor early.", sha256: "a".repeat(64), changed: false },
-    season: { opensAt: Date.parse("2026-10-26T12:00:00Z"), open: true, state: "season", day: 2 },
+    season: { opensAt: Date.parse("2026-10-28T12:00:00Z"), open: true, state: "season", day: 2 },
     day: { startsAt: new Date(DINNER - 86_400_000).toISOString(), endsAt: new Date(DINNER).toISOString(), trades: 1, volumeBnb: 0.006, floor: { trades: 3, volumeBnb: 0.02 }, passed: false },
     wallet: { balanceBnb: 0.05, gasReserveBnb: 0.003, spendableBnb: 0.047 },
     headroom: headroom(),

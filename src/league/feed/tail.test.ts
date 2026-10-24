@@ -13,7 +13,7 @@ import { parseSnapshot, parseTail, SnapshotClient, type FeastSnapshot } from "./
  * (`truncated`, `events_url`) read whole from the site instead of filled from the legacy route.
  */
 
-const T0 = Date.parse("2026-10-26T13:00:00Z");
+const T0 = Date.parse("2026-10-28T13:00:00Z");
 const S = 1_000;
 const EVENTS_URL = "/api/v1/snapshot/events";
 

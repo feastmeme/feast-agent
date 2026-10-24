@@ -18,7 +18,7 @@ import { agentPaths, writeJsonAtomic } from "./store.ts";
  * clock the loop's sleep moves, feast.meme's snapshot and its league page served in process.
  */
 
-const T0 = Date.parse("2026-10-26T10:00:00Z");
+const T0 = Date.parse("2026-10-28T10:00:00Z");
 const S = 1_000;
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -31,14 +31,14 @@ afterEach(() => {
 const read = (state: LeagueRead["state"], countdownTo: number | null, day: number | null = null): LeagueRead => parseLeague(leagueWire({ state, season: { number: 1, day, countdownTo: countdownTo === null ? null : new Date(countdownTo).toISOString() } }))!;
 
 describe("when trading opens, from /api/league", () => {
-  it("before the start: the start plus 23 hours (season 1: Monday 20:00 UTC+8)", () => {
-    const start = Date.parse("2026-10-25T13:00:00Z");
-    expect(tradingOpens(read("warm-up", start))).toEqual({ kind: "at", at: Date.parse("2026-10-26T12:00:00Z") });
+  it("before the start: the start plus 23 hours (season 1: Wednesday 20:00 UTC+8)", () => {
+    const start = Date.parse("2026-10-27T13:00:00Z");
+    expect(tradingOpens(read("warm-up", start))).toEqual({ kind: "at", at: Date.parse("2026-10-28T12:00:00Z") });
     expect(tradingOpens(read("coming-soon", start))).toEqual({ kind: "at", at: start + OPENS_AFTER_START_MS });
   });
   it("on day 1, an hour before dinner 1; from day 2, and when it is over: open", () => {
-    const dinner1 = Date.parse("2026-10-26T13:00:00Z");
-    expect(tradingOpens(read("season", dinner1, 1))).toEqual({ kind: "at", at: Date.parse("2026-10-26T12:00:00Z") });
+    const dinner1 = Date.parse("2026-10-28T13:00:00Z");
+    expect(tradingOpens(read("season", dinner1, 1))).toEqual({ kind: "at", at: Date.parse("2026-10-28T12:00:00Z") });
     expect(tradingOpens(read("season", dinner1 + 86_400_000, 2))).toEqual({ kind: "open" });
     expect(tradingOpens(read("over", null))).toEqual({ kind: "open" });
   });
@@ -103,7 +103,7 @@ describe("the waiting agent trades nothing", () => {
     expect(log.filter((l) => l.event.startsWith("autopilot.") || l.event.startsWith("strategy.") || l.event === "season.open")).toEqual([]);
     expect(w.calls.filter((call) => call === "preview" || call === "execute")).toEqual([]);
     const refused = log.find((l) => l.event === "request.outcome" && l.requestId === "req-1");
-    expect(refused).toMatchObject({ outcome: "refused", kind: "buy", message: "the season has not started; it opens at 2026-10-27 21:00 (UTC+8)" });
+    expect(refused).toMatchObject({ outcome: "refused", kind: "buy", message: "the season has not started; it opens at 2026-10-29 21:00 (UTC+8)" });
     expect(Date.parse(refused!.at) - T0).toBeLessThan(21 * MIN);
     // It read the league every 5 minutes, no more.
     expect(s.leagueReads().length).toBeGreaterThanOrEqual(12);

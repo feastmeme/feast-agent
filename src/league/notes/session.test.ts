@@ -19,7 +19,7 @@ afterEach(() => {
 
 const NONCE: Hex = `0x${"5e".repeat(32)}`;
 
-function world(answer: ConstructorParameters<typeof FakeFeast>[0] = { session: { status: 201, body: { token: "tok-1", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } } }, baw: Partial<Parameters<typeof fakeBaw>[0]> = {}) {
+function world(answer: ConstructorParameters<typeof FakeFeast>[0] = { session: { status: 201, body: { token: "tok-1", expiresAt: "2026-11-04T13:00:00.000Z", season: 1 } } }, baw: Partial<Parameters<typeof fakeBaw>[0]> = {}) {
   const home = mkdtempSync(join(tmpdir(), "feast-league-session-"));
   homes.push(home);
   const account = privateKeyToAccount(generatePrivateKey());
@@ -57,8 +57,8 @@ describe("the NoteSession message", () => {
 describe("opening a notes session", () => {
   it("signs once through the wallet's own preview, POSTs it, and keeps the token beside the notes, without the wallet's address", async () => {
     const w = world();
-    const out = await openSession({ home: w.home, signer: w.signer, site: w.site, agentId: "maplegrin", season: 1, nonce: NONCE, now: () => Date.parse("2026-10-26T13:00:00Z") });
-    expect(out).toMatchObject({ kind: "open", session: { agentId: "maplegrin", season: 1, token: "tok-1", expiresAt: "2026-11-02T13:00:00.000Z" } });
+    const out = await openSession({ home: w.home, signer: w.signer, site: w.site, agentId: "maplegrin", season: 1, nonce: NONCE, now: () => Date.parse("2026-10-28T13:00:00Z") });
+    expect(out).toMatchObject({ kind: "open", session: { agentId: "maplegrin", season: 1, token: "tok-1", expiresAt: "2026-11-04T13:00:00.000Z" } });
     expect(w.calls.map((c) => `${c[0]} ${c[1]}`)).toEqual(["wallet address", "wallet status", "wallet settings", "sign-message preview", "sign-message execute"]);
     const [body] = w.feast.sessions as { wallet: string; agentId: string; season: number; nonce: string; scheme: string; signature: string; signatureRecovery?: string }[];
     expect(body).toMatchObject({ wallet: w.account.address.toLowerCase(), agentId: "maplegrin", season: 1, nonce: NONCE, scheme: "eip712" });

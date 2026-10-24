@@ -10,7 +10,7 @@ import { MarketFeed } from "./feed.ts";
 import { BOB, C1, coinRow, FakeFeed, INDEXER, seeded, SITE, snapshotBody, tradeRow, WALLET } from "./fakes.ts";
 import { parsePoll, readSnapshotCache, snapshotCachePath, SnapshotClient } from "./snapshot.ts";
 
-const T0 = Date.parse("2026-10-26T13:00:00Z");
+const T0 = Date.parse("2026-10-28T13:00:00Z");
 let homes: string[] = [];
 afterEach(() => {
   for (const h of homes) rmSync(h, { recursive: true, force: true });

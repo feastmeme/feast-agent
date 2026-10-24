@@ -15,7 +15,7 @@ import { headroomOf, recentFillsOf, selfView } from "./self.ts";
  * spendable BNB, each position's pnl, age, peak and exit impact, the fills' slippage and gas. Made-up addresses.
  */
 
-const NOW = Date.parse("2026-10-27T06:00:00Z");
+const NOW = Date.parse("2026-10-29T06:00:00Z");
 const MIN = 60_000;
 const E18 = 10n ** 18n;
 const C1 = getAddress("0x00000000000000000000000000000000000c0e01");

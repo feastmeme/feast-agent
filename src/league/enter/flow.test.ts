@@ -33,7 +33,7 @@ const ID = "maplegrin";
 const BODY: Address = getAddress("0x00000000000000000000000000000000000b0d1e");
 const SOMEONE: Address = getAddress("0x000000000000000000000000000000000000b0b0");
 const DAY_ONE = Date.parse("2026-10-24T13:00:00Z");
-const OPENS = "2026-10-26 20:00 UTC+8";
+const OPENS = "2026-10-28 20:00 UTC+8";
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 let dirs: string[] = [];
@@ -60,7 +60,7 @@ function world(o: WorldOptions = {}) {
   const cwd = join(dir, "work");
   mkdirSync(cwd, { recursive: true });
   const { runner, calls } = fakeBaw({ account, connected: o.connected, devMode: o.devMode, confirm: o.confirm });
-  const site = new FakeEnterSite({ wallet, agentId: { agentId: ID }, avatar: { status: 200 }, creators: [], session: { status: 201, body: { token: "tok-1", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } }, ...o.page });
+  const site = new FakeEnterSite({ wallet, agentId: { agentId: ID }, avatar: { status: 200 }, creators: [], session: { status: 201, body: { token: "tok-1", expiresAt: "2026-11-04T13:00:00.000Z", season: 1 } }, ...o.page });
   const chain = fakeEnterChain({ agentId: ID, symbols: { [BODY.toLowerCase()]: "NOODFEED" }, ...o.chain });
   const shots = fakeOneShot({ home, launchCoin: BODY, ...o.shot });
   const clock = { now: o.now ?? DAY_ONE, slept: [] as number[] };
@@ -168,7 +168,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
     const out = await w.run({ lang: "zh" });
     expect(out.text).toContain("maplegrin.ai 报名第 1 季");
     expect(out.text).toContain("签一条消息报名本季：不是交易，不花 gas，不动资金");
-    expect(out.text).toContain("现在就启动，等待赛季开始：2026-10-26 20:00（UTC+8）之前它不做任何交易。");
+    expect(out.text).toContain("现在就启动，等待赛季开始：2026-10-28 20:00（UTC+8）之前它不做任何交易。");
   });
 
   it("--yes: one Register (empty manifesto, zero copies, the chain's id, a fresh issuedAt), one POST, one NoteSession, the agent started once; the done line", async () => {
@@ -749,7 +749,7 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
   it("zh: the entry card says it in Chinese, and so does the done line", async () => {
     const w = world();
     const card = await w.run({ lang: "zh" });
-    expect(card.text).toContain(`现在就启动，等待赛季开始：2026-10-26 20:00（UTC+8）之前它不做任何交易。\n${ON_ZH}`);
+    expect(card.text).toContain(`现在就启动，等待赛季开始：2026-10-28 20:00（UTC+8）之前它不做任何交易。\n${ON_ZH}`);
     const out = await w.run({ lang: "zh", yes: true });
     expect(lastLine(out.text)).toContain(ON_ZH);
   });
@@ -772,8 +772,8 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
 });
 
 describe("task 975, addendum 1: entering once the season is on, and the signing domain on the card", () => {
-  const ON = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-27T13:00:00.000Z" } });
-  const TUESDAY = Date.parse("2026-10-27T06:00:00Z");
+  const ON = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-29T13:00:00.000Z" } });
+  const TUESDAY = Date.parse("2026-10-29T06:00:00Z");
   const ON_EN = "Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off.";
 
   it("the season on: the card and the You're in line say it starts trading now, never that it waits (en)", async () => {
@@ -839,7 +839,7 @@ describe("task 975, addendum 1: entering once the season is on, and the signing 
 describe("task 975, addendum 1: the entry card's last row follows the gate", () => {
   it("before: starts and waits; on: starts and trades now", async () => {
     expect((await world().run()).text).toContain('your agent "maplegrin" starts and waits for the season (its card is below)');
-    const on = world({ page: { league: leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-27T13:00:00.000Z" } }) }, now: Date.parse("2026-10-27T06:00:00Z") });
+    const on = world({ page: { league: leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-29T13:00:00.000Z" } }) }, now: Date.parse("2026-10-29T06:00:00Z") });
     const text = (await on.run()).text;
     expect(text).toContain('your agent "maplegrin" starts and, the season being on, trades now (its card is below)');
     expect(text).not.toContain("waits for the season");
@@ -847,8 +847,8 @@ describe("task 975, addendum 1: the entry card's last row follows the gate", () 
 });
 
 describe("task 975, addendum 2: once the season is on, the You're in line tells the host to trade now", () => {
-  const ON = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-27T13:00:00.000Z" } });
-  const TUESDAY = Date.parse("2026-10-27T06:00:00Z");
+  const ON = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-29T13:00:00.000Z" } });
+  const TUESDAY = Date.parse("2026-10-29T06:00:00Z");
 
   it("it ends with the instruction, naming the prompt file it trades by and the preset; with --no-autopilot it says nothing covers silence", async () => {
     const w = world({ page: { league: ON }, now: TUESDAY });

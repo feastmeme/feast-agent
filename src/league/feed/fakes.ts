@@ -41,12 +41,12 @@ export function coinRow(address: Address, over: Record<string, unknown> = {}) {
     quote: WBNB.toLowerCase(),
     creator: BOB.toLowerCase(),
     metadataHash: META_HASH,
-    launchedAt: "2026-10-26T12:00:00.000Z",
+    launchedAt: "2026-10-28T12:00:00.000Z",
     priceQuote: 0.000001,
     priceBnb: 0.000001,
     volume24hBnb: 2.5,
     trades24h: 12,
-    lastTradeAt: "2026-10-26T12:59:00.000Z",
+    lastTradeAt: "2026-10-28T12:59:00.000Z",
     holders: 30,
     lastCursor: cursorAt(100, 0),
     ...over,
@@ -57,7 +57,7 @@ export function coinRow(address: Address, over: Record<string, unknown> = {}) {
 export function launchRow(block: number, logIndex: number, over: Record<string, unknown> = {}) {
   return {
     type: "launch",
-    at: new Date(Date.parse("2026-10-26T13:00:00Z") + block * 1_000).toISOString(),
+    at: new Date(Date.parse("2026-10-28T13:00:00Z") + block * 1_000).toISOString(),
     blockNumber: block,
     logIndex,
     cursor: cursorAt(block, logIndex),
@@ -79,7 +79,7 @@ export function launchRow(block: number, logIndex: number, over: Record<string, 
 export function tradeRow(block: number, logIndex: number, over: Record<string, unknown> = {}) {
   return {
     type: "trade",
-    at: new Date(Date.parse("2026-10-26T13:00:00Z") + block * 1_000).toISOString(),
+    at: new Date(Date.parse("2026-10-28T13:00:00Z") + block * 1_000).toISOString(),
     blockNumber: block,
     blockHash: hash(block),
     logIndex,
@@ -103,7 +103,7 @@ export type SnapshotBody = { generatedAt: string; block: number; coins: unknown[
 
 export function snapshotBody(over: Partial<SnapshotBody> & { block?: number } = {}): SnapshotBody {
   const block = over.block ?? 100;
-  return { generatedAt: new Date(Date.parse("2026-10-26T13:00:00Z") + block * 1_000).toISOString(), block, coins: [coinRow(C1), coinRow(C2, { creator: CAROL.toLowerCase(), holders: 7 })], events: [], cursor: cursorAt(block, 0), ...over };
+  return { generatedAt: new Date(Date.parse("2026-10-28T13:00:00Z") + block * 1_000).toISOString(), block, coins: [coinRow(C1), coinRow(C2, { creator: CAROL.toLowerCase(), holders: 7 })], events: [], cursor: cursorAt(block, 0), ...over };
 }
 
 export type Answer = { status: number; body?: unknown; etag?: string; headers?: Record<string, string> } | "refused";

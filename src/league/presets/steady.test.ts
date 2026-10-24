@@ -14,7 +14,7 @@ import { PRESETS, resolveParams } from "./specs.ts";
  */
 
 const MIN = 60_000;
-const DINNER = Date.parse("2026-10-27T13:00:00Z");
+const DINNER = Date.parse("2026-10-29T13:00:00Z");
 const WBNB = MAINNET.contracts.wrappedNative;
 const FEAST = MAINNET.platformCoin!.address;
 const STOCK = MAINNET.stocks[0]!.address;

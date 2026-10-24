@@ -15,12 +15,12 @@ const H = 3_600_000;
 
 describe("the sign-in's end (measured 2026-10-22)", () => {
   it("is signInMaxTime when the 48 h inactivity window, pushed ahead by every read, is later", () => {
-    expect(sessionView({ sessionExpireTime: "2026-10-24T00:26:09+08:00", inactiveSignOutTime: "2026-10-24T00:26:09+08:00", signInMaxTime: "2026-10-28T10:34:11+08:00" })).toEqual({
-      key: "2026-10-28T10:34:11+08:00",
+    expect(sessionView({ sessionExpireTime: "2026-10-24T00:26:09+08:00", inactiveSignOutTime: "2026-10-24T00:26:09+08:00", signInMaxTime: "2026-10-30T10:34:11+08:00" })).toEqual({
+      key: "2026-10-30T10:34:11+08:00",
       end: Date.parse("2026-10-24T00:26:09+08:00"),
       source: "inactivity",
     });
-    expect(sessionView({ sessionExpireTime: "2026-10-29T00:00:00+08:00", inactiveSignOutTime: "2026-10-29T00:00:00+08:00", signInMaxTime: "2026-10-28T10:34:11+08:00" })).toMatchObject({ end: Date.parse("2026-10-28T10:34:11+08:00"), source: "sign-in limit" });
+    expect(sessionView({ sessionExpireTime: "2026-10-31T00:00:00+08:00", inactiveSignOutTime: "2026-10-31T00:00:00+08:00", signInMaxTime: "2026-10-30T10:34:11+08:00" })).toMatchObject({ end: Date.parse("2026-10-30T10:34:11+08:00"), source: "sign-in limit" });
     expect(sessionView({ sessionExpireTime: "2026-10-24T00:26:09+08:00", inactiveSignOutTime: null })).toMatchObject({ key: null, source: "inactivity" });
     expect(sessionView({ sessionExpireTime: null, inactiveSignOutTime: null, signInMaxTime: null })).toEqual({ key: null, end: null, source: null });
   });
@@ -126,7 +126,7 @@ const notices = (home: string) =>
 
 describe("the runtime, when the sign-in ends", () => {
   it("knows before a trade fails: asks the wallet nothing, says it once, and holds through a restart", async () => {
-    const clock = { now: Date.parse("2026-10-28T02:00:00Z") };
+    const clock = { now: Date.parse("2026-10-30T02:00:00Z") };
     // The sign-in ends 30 s into the run, between two 5-minute wallet reads; from then on the wallet says it is signed out.
     const end = new Date(clock.now + 30_000).toISOString();
     const s = setup(clock, { signInMaxTime: end, sessionExpireTime: new Date(clock.now + 48 * H).toISOString() }, () => clock.now < Date.parse(end));
@@ -160,12 +160,12 @@ describe("the runtime, when the sign-in ends", () => {
   });
 
   it("never holds a wallet that still says CONNECTED past its sign-in time (a wrong field, or a fast clock)", async () => {
-    const clock = { now: Date.parse("2026-10-28T02:00:00Z") };
+    const clock = { now: Date.parse("2026-10-30T02:00:00Z") };
     const s = setup(clock, { signInMaxTime: new Date(clock.now - H).toISOString(), sessionExpireTime: new Date(clock.now + 48 * H).toISOString() });
     let sent = false;
     const sleep = async (ms: number) => {
       clock.now += ms;
-      if (!sent && clock.now > Date.parse("2026-10-28T02:01:00Z")) {
+      if (!sent && clock.now > Date.parse("2026-10-30T02:01:00Z")) {
         sent = true;
         mkdirSync(agentPaths(s.home, "dca").inbox, { recursive: true });
         writeFileSync(join(agentPaths(s.home, "dca").inbox, "1-buy.json"), JSON.stringify({ type: "intent", request: { kind: "buy", coin: "FEAST", bnb: 0.002, reason: "manual buy" } }));
@@ -181,7 +181,7 @@ describe("the runtime, when the sign-in ends", () => {
   });
 
   it("says 'back' once after a new scan, and trades again", async () => {
-    const clock = { now: Date.parse("2026-10-28T02:00:00Z") };
+    const clock = { now: Date.parse("2026-10-30T02:00:00Z") };
     let signedIn = false;
     const s = setup(clock, {}, () => signedIn);
     const sleep = async (ms: number) => void (clock.now += ms);

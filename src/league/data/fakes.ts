@@ -58,7 +58,7 @@ export function pool(coin: Address, over: { name?: string; symbol?: string; quot
     createdAt: over.createdAt ?? "2026-10-24T02:00:00.000Z",
     market: {
       lastPriceSqrtX96: over.sqrt === null ? null : String(over.sqrt ?? (over.currency1 ? SQRT_HIGH : SQRT_LOW)),
-      lastTradeAt: over.lastTradeAt === undefined ? "2026-10-26T12:30:00.000Z" : over.lastTradeAt,
+      lastTradeAt: over.lastTradeAt === undefined ? "2026-10-28T12:30:00.000Z" : over.lastTradeAt,
       volume24h: over.volume24h ?? "2000000000000000000",
       trades24h: over.trades24h ?? 12,
       volumeTotal: "9000000000000000000",
@@ -78,8 +78,8 @@ export function defaultPools() {
 export function defaultLeague() {
   return leagueWire({
     state: "season",
-    season: { number: 1, day: 2, countdownTo: "2026-10-27T13:00:00.000Z" },
-    window: { from: "2026-10-26T13:00:00.000Z", to: "2026-10-27T13:00:00.000Z" },
+    season: { number: 1, day: 2, countdownTo: "2026-10-29T13:00:00.000Z" },
+    window: { from: "2026-10-28T13:00:00.000Z", to: "2026-10-29T13:00:00.000Z" },
     boards: {
       earners: [
         { rank: 1, wallet: BOB.toLowerCase(), name: EVIL, pnlUsd: 12.3, trades: 9, hp: 40, eatenDay: null },
@@ -155,7 +155,7 @@ export class FakeFeast {
       const raw = o.poolsAnswer?.[index];
       if (raw) return this.reply(raw, init?.signal);
       const next = index + 1 < pages.length ? String(index + 1) : null;
-      return this.reply({ status: 200, body: { chainId: 56, source: "indexer", asOf: { block: 1, blockTime: "2026-10-26T13:00:00Z" }, pools: pages[index] ?? [], nextCursor: next } }, init?.signal);
+      return this.reply({ status: 200, body: { chainId: 56, source: "indexer", asOf: { block: 1, blockTime: "2026-10-28T13:00:00Z" }, pools: pages[index] ?? [], nextCursor: next } }, init?.signal);
     }
     if (url.origin === SITE && url.pathname === "/api/v1/ohlcv") {
       if (o.ohlcvAnswer) return this.reply(o.ohlcvAnswer, init?.signal);

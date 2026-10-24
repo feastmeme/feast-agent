@@ -1,3 +1,4 @@
+import type { Standing } from "./data/standing.ts";
 import { tradeNowLine, type AutopilotShown } from "./enter/copy.ts";
 import { seasonLine, seatLine, shortUsd, type Lang } from "./register/copy.ts";
 import { AGENT_ID, shownName } from "./register/message.ts";
@@ -32,6 +33,8 @@ export type StandingInput = {
   entered?: boolean;
   /** Task 975: the agent `FL status` is about; a prompt agent's closing line says what actually happens. */
   agent?: { track: string; autopilot: AutopilotShown; promptFile: string } | null;
+  /** Task 975, addendum 6: the standing from the whole field, in BNB (rank, alive, tonight's cutoff). */
+  standing?: Standing | null;
 };
 
 type Mine = { earner: EarnerRow | null; backed: BackedRow | null; earnerCut: boolean; backedCut: boolean; eaten: number | null };
@@ -112,6 +115,14 @@ export function standingLines(input: StandingInput, lang: Lang): string[] {
   }
   const day = input.today?.state === "season" ? input.today.season.day : null;
   if (input.site && input.agentId && day !== null && (input.seating || input.entered)) lines.push(...battleCardLines(input.site, input.agentId, day, lang));
+  const st = input.standing;
+  if (st && st.rank !== null && input.today?.state === "season") {
+    lines.push(
+      lang === "zh"
+        ? `今天按 BNB：第 ${st.rank} 名（${st.alive} 个还活着），${st.pnlBnb! >= 0 ? "+" : ""}${st.pnlBnb} BNB；今晚可能被淘汰的 ${st.cutoff.bottom} 个里，你${st.cutoff.me === "drop-zone" ? "在其中" : st.cutoff.me === "under-floor" ? "还没过活动门槛" : "不在其中"}。`
+        : `Today in BNB: #${st.rank} of ${st.alive} alive, ${st.pnlBnb! >= 0 ? "+" : ""}${st.pnlBnb} BNB; of the ${st.cutoff.bottom} who may be dropped tonight, you are ${st.cutoff.me === "drop-zone" ? "one" : st.cutoff.me === "under-floor" ? "under the floor's trades" : "not one"}.`,
+    );
+  }
   lines.push(closingLine(input, lang));
   return lines;
 }

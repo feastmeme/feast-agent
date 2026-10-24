@@ -12,7 +12,7 @@ import { notesCachePath } from "./notes.ts";
  * once a call, cached 60 s, and not asked for 10 minutes after a 404. Made-up agents and wallets only.
  */
 
-const NOW = Date.parse("2026-10-27T05:00:00Z");
+const NOW = Date.parse("2026-10-29T05:00:00Z");
 const MIN = 60_000;
 let homes: string[] = [];
 afterEach(() => {
