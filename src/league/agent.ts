@@ -260,6 +260,11 @@ const LOOSER: Record<string, "higher" | "lower" | "neutral"> = {
   maxChasePct: "higher",
   buybackPct: "higher",
   topN: "higher",
+  // steady (task 975): its day's targets and its rush make it trade more; its spacing, less.
+  minDailyTrades: "higher",
+  minDailyVolumeBnb: "higher",
+  maxEntriesPerDay: "higher",
+  rushMinutes: "higher",
   // Entry thresholds and spacing: lower is looser.
   minVolumeBnb: "lower",
   minNewHolders: "lower",
@@ -272,6 +277,7 @@ const LOOSER: Record<string, "higher" | "lower" | "neutral"> = {
   dipPct: "lower",
   exhaustionRatio: "lower",
   minClaimBnb: "lower",
+  spacingMinutes: "lower",
   // Shapes of a signal, not its strength.
   lookbackMinutes: "neutral",
   exhaustionWindowMinutes: "neutral",

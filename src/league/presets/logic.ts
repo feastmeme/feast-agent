@@ -1,11 +1,12 @@
 import type { Address } from "viem";
 
 import { MAINNET } from "../../sdk/networks.ts";
-import type { PositionRow, Strategy, StrategyApi, StrategyEvent } from "../strategy.ts";
+import { nextDinner } from "../prompt/floor.ts";
+import type { PositionRow, PresetExtras, Strategy, StrategyApi, StrategyEvent } from "../strategy.ts";
 import { PRESETS, type PresetId } from "./specs.ts";
 
 /**
- * The five presets (PLAN.md §4), each a trusted strategy on the shared
+ * The six presets (PLAN.md §4; `steady`, task 975), each a trusted strategy on the shared
  * interface. Their parameters were validated by `resolveParams`; every intent
  * they enqueue still goes through the guard like anyone's.
  *
@@ -45,6 +46,33 @@ function mineHeld(api: StrategyApi, state: State): { mine: Record<string, number
   return { mine, held };
 }
 
+/**
+ * The stop-loss, the take-profit and the time stop on one position the preset opened, in that order (the sniper's
+ * exits, shared with `steady`). True when it asked for a sale.
+ */
+function bracket(
+  api: StrategyApi,
+  state: State,
+  position: PositionRow,
+  o: { label: string; stopLossPct: number; takeProfitPct: number; takeProfitFraction: number; timeStop: { due: boolean; text: string } },
+): boolean {
+  const tookProfit = bag<Record<string, boolean>>(state, "tookProfit", {});
+  if (position.pnlPct !== null && position.pnlPct <= -o.stopLossPct) {
+    exit(api, state, position.coin, 1, `${o.label}: stop-loss at ${position.pnlPct.toFixed(1)}%`);
+    return true;
+  }
+  if (position.pnlPct !== null && position.pnlPct >= o.takeProfitPct && !tookProfit[lc(position.coin)]) {
+    tookProfit[lc(position.coin)] = true;
+    exit(api, state, position.coin, o.takeProfitFraction, `${o.label}: take-profit at +${position.pnlPct.toFixed(1)}%`);
+    return true;
+  }
+  if (o.timeStop.due) {
+    exit(api, state, position.coin, 1, `${o.label}: ${o.timeStop.text}`);
+    return true;
+  }
+  return false;
+}
+
 const quoteSymbol = (quote: Address): string =>
   quote.toLowerCase() === MAINNET.contracts.wrappedNative.toLowerCase() ? "WBNB" : MAINNET.stocks.find((s) => s.address.toLowerCase() === quote.toLowerCase())?.symbol ?? "?";
 
@@ -54,13 +82,14 @@ function sniper(): Strategy {
   const exits = (api: StrategyApi) => {
     const p = api.params as { stopLossPct: number; takeProfitPct: number; takeProfitSellPct: number; timeStopMinutes: number };
     const state = api.state;
-    const tookProfit = bag<Record<string, boolean>>(state, "tookProfit", {});
     for (const position of mineHeld(api, state).held) {
-      if (position.pnlPct !== null && position.pnlPct <= -p.stopLossPct) exit(api, state, position.coin, 1, `sniper: stop-loss at ${position.pnlPct.toFixed(1)}%`);
-      else if (position.pnlPct !== null && position.pnlPct >= p.takeProfitPct && !tookProfit[lc(position.coin)]) {
-        tookProfit[lc(position.coin)] = true;
-        exit(api, state, position.coin, p.takeProfitSellPct / 100, `sniper: take-profit at +${position.pnlPct.toFixed(1)}%`);
-      } else if (position.ageSeconds >= p.timeStopMinutes * 60) exit(api, state, position.coin, 1, `sniper: time stop after ${p.timeStopMinutes} min`);
+      bracket(api, state, position, {
+        label: "sniper",
+        stopLossPct: p.stopLossPct,
+        takeProfitPct: p.takeProfitPct,
+        takeProfitFraction: p.takeProfitSellPct / 100,
+        timeStop: { due: position.ageSeconds >= p.timeStopMinutes * 60, text: `time stop after ${p.timeStopMinutes} min` },
+      });
     }
   };
   return {
@@ -300,7 +329,126 @@ function dca(): Strategy {
   };
 }
 
-const FACTORIES: Record<PresetId, () => Strategy> = { sniper, momentum, copy, launch, dca };
+// --- ⑥ steady (task 975) --------------------------------------------------------------------
+
+/**
+ * The floor keeper, a prompt agent's default autopilot: it keeps the league's daily activity floor (3 trades and 0.02
+ * BNB of volume, own coin left out, dinner to dinner) for an agent whose host has gone quiet. Built from the other
+ * presets' parts: momentum's ranking by 24 h volume, dca's per-day bookkeeping in its own state, the sniper's exits,
+ * and the runtime's day's count (`extras.day()`, `prompt/floor.ts`); no engine of its own.
+ *
+ * Each tick, exits first, for the positions it opened only: the stop-loss, the take-profit, the time stop set when it
+ * bought, and a sale of everything it opened by dinner − 5 min, so that sale counts the same day. Then at most one
+ * buy, when the day's count is known (unknown: no buy, said once), the projected day (its trades plus one sale for
+ * each position it holds; its volume plus their marks) misses its targets, it has bought fewer than
+ * `maxEntriesPerDay` today, `spacingMinutes` have passed since its last buy, fewer than `maxPositions` of its own are
+ * open, and at least 15 minutes are left before the dinner. In the last `rushMinutes`, with the day's floor not met,
+ * buys and sales come 3 minutes apart. The coin: a WBNB pair, never the agent's own coin, FEAST or a coin the wallet
+ * holds, at least `minAgeMinutes` old, with at least `minVolumeBnb` of 24 h volume: the busiest of the first `topN`
+ * it has not bought today (ties: more trades); none clears the volume, the busiest with any (said once that day).
+ *
+ * At the defaults that is two buys of 0.006 BNB, 15 minutes apart, each sold about 30 minutes later: 4 trades and
+ * about 0.0238 BNB, the floor about 45 minutes after it takes over; then exits only, until the next day at 21:00.
+ * While its host trades it stands by (`extras.standingBy()`): no buy, its own exits only (ruling C7). It never
+ * launches, and its intents take the guard like any preset's.
+ */
+function steady(): Strategy {
+  return {
+    meta: { name: "steady", tickSeconds: PRESETS.steady.tickSeconds, events: [], watch: [] },
+    onTick(api, extras?: PresetExtras) {
+      const p = api.params as {
+        buyBnb: number;
+        topN: number;
+        minVolumeBnb: number;
+        minAgeMinutes: number;
+        minDailyTrades: number;
+        minDailyVolumeBnb: number;
+        maxEntriesPerDay: number;
+        spacingMinutes: number;
+        rushMinutes: number;
+        takeProfitPct: number;
+        stopLossPct: number;
+        timeStopMinutes: number;
+        maxPositions: number;
+      };
+      const now = api.read.now();
+      const state = api.state;
+      const dinner = nextDinner(now);
+      const day = extras?.day?.() ?? null;
+      const rush = p.rushMinutes > 0 && dinner - now <= p.rushMinutes * MINUTE && day !== null && !day.passed;
+      const { mine, held } = mineHeld(api, state);
+      const stops = bag<Record<string, number>>(state, "stops", {});
+      for (const k of Object.keys(stops)) if (mine[k] === undefined) delete stops[k];
+      /** Said once a day (a dinner-to-dinner day), so a quiet board does not fill the log. */
+      const once = (key: string, text: string) => {
+        const said = bag<Record<string, number>>(state, "said", {});
+        if (said[key] === dinner) return;
+        said[key] = dinner;
+        api.log(text);
+      };
+
+      // --- exits: its own positions only ---------------------------------------------------------
+      for (const position of held) {
+        const k = lc(position.coin);
+        const boughtAt = mine[k]!;
+        const stopAt = Math.min(stops[k] ?? boughtAt + p.timeStopMinutes * MINUTE, rush ? boughtAt + 3 * MINUTE : Number.POSITIVE_INFINITY);
+        const sold = bracket(api, state, position, {
+          label: "steady",
+          stopLossPct: p.stopLossPct,
+          takeProfitPct: p.takeProfitPct,
+          takeProfitFraction: 1,
+          timeStop: { due: now >= stopAt, text: `time stop after ${Math.round((stopAt - boughtAt) / MINUTE)} min` },
+        });
+        if (!sold && now >= dinner - 5 * MINUTE) exit(api, state, position.coin, 1, "steady: sold before the dinner, so the sale counts today");
+      }
+
+      // --- at most one buy --------------------------------------------------------------------------
+      if (extras?.standingBy?.()) return;
+      if (!day) return once("no-count", "steady: the day's count is not known, so no buy (it fails closed)");
+      const buys = bag<number[]>(state, "buys", []).filter((t) => t >= day.startsAt && t < day.endsAt);
+      state.buys = buys;
+      const projectedTrades = day.trades + held.length;
+      const projectedVolume = day.volumeBnb + held.reduce((sum, h) => sum + (h.markBnb ?? h.costBnb), 0);
+      if (projectedTrades >= p.minDailyTrades && projectedVolume >= p.minDailyVolumeBnb) return;
+      if (buys.length >= p.maxEntriesPerDay || held.length >= p.maxPositions || dinner - now < 15 * MINUTE) return;
+      const last = typeof state.lastBuy === "number" ? state.lastBuy : 0;
+      if (now - last < (rush ? 3 : p.spacingMinutes) * MINUTE) return;
+
+      const own = api.read.launched()?.coin.toLowerCase() ?? null;
+      const feast = api.read.coin("FEAST")?.coin.toLowerCase() ?? null;
+      const today = bag<Record<string, number>>(state, "boughtToday", {});
+      for (const k of Object.keys(today)) if (today[k]! < day.startsAt) delete today[k];
+      const eligible = api.read
+        .coins({ sort: "volume", limit: 200 })
+        .filter((row) => {
+          const k = lc(row.coin);
+          return quoteSymbol(row.quote) === "WBNB" && k !== own && k !== feast && mine[k] === undefined && !api.read.position(row.coin) && row.ageSeconds >= p.minAgeMinutes * 60 && row.volume24hBnb > 0;
+        })
+        .sort((a, b) => b.volume24hBnb - a.volume24hBnb || b.trades24h - a.trades24h);
+      const busy = eligible.filter((row) => row.volume24hBnb >= p.minVolumeBnb).slice(0, p.topN);
+      let pick = busy.find((row) => today[lc(row.coin)] === undefined) ?? busy[0] ?? null;
+      let why = `${pick?.volume24hBnb.toFixed(2)} BNB of 24 h volume`;
+      if (!pick && eligible.length > 0) {
+        pick = eligible[0]!;
+        why = `the busiest with any volume (${pick.volume24hBnb.toFixed(3)} BNB in 24 h), for the floor`;
+        once("thin", `steady: no coin has ${p.minVolumeBnb} BNB of 24 h volume; it buys the busiest with any, for the floor`);
+      }
+      if (!pick) return once("none", "steady: no coin it may buy (a WBNB pair, not your own coin, FEAST or one held, old enough, with volume): no buy");
+      const reason = `steady: for the day's floor (${day.trades} trades, ${day.volumeBnb.toFixed(4)} BNB so far), ${why}`;
+      if (api.buy({ coin: pick.coin, bnb: p.buyBnb, reason })) {
+        const k = lc(pick.coin);
+        mine[k] = now;
+        stops[k] = now + (rush ? 3 : p.timeStopMinutes) * MINUTE;
+        today[k] = now;
+        delete bag<Record<string, boolean>>(state, "tookProfit", {})[k];
+        buys.push(now);
+        state.lastBuy = now;
+      }
+    },
+  };
+}
+
+const FACTORIES: Record<PresetId, () => Strategy> = { sniper, momentum, copy, launch, dca, steady };
 
 export function presetStrategy(id: PresetId): Strategy {
   return FACTORIES[id]();

@@ -11,9 +11,10 @@ import { PROMPT_MAX_BYTES } from "./constants.ts";
  * Prompt mode on disk (task 963): the prompt file the user confirmed, and the
  * host's last action. The prompt is the player's text for their own agent; the
  * runtime hashes it and shows its first lines, and never reads it as
- * instructions. The host acts through `FL buy`, `FL sell` and `FL note`; each
- * writes `agents/<name>/host.json`, which the loop reads to know how long the
- * host has been silent. `FL data` is reading, not acting.
+ * instructions. The host acts through `FL buy` and `FL sell`: each one the guard
+ * lets through writes `agents/<name>/host.json` (task 975, the coordinator's
+ * ruling C6), which the loop reads to know how long the host has gone without a
+ * trade. `FL note`, `FL status` and `FL data` are not trades: they do not count.
  */
 
 export type HostAction = { at: string; what: "buy" | "sell" | "note" };
@@ -115,11 +116,19 @@ type Callable<S, I> = {
  * The autopilot's gate: the preset is asked, on a tick or an event, only while
  * the host has been silent long enough; otherwise it is not called at all and
  * answers nothing. Its intents then take the same road as any other: the guard.
+ *
+ * With `standby` (a preset that keeps its exits, `steady`; the coordinator's
+ * ruling C7, task 975), it is asked while the host trades too, and only the
+ * intents `standby` lets through (its sales) leave the gate: it opens nothing.
  */
-export function autopilotGate<T extends Callable<S, I>, S, I>(loaded: T, silent: () => boolean): T {
+export function autopilotGate<T extends Callable<S, I>, S, I>(loaded: T, silent: () => boolean, standby?: (intent: I) => boolean): T {
   return {
     ...loaded,
-    call: (fn: "onTick" | "onEvent", snapshot: S, state: Record<string, unknown>, event?: unknown) =>
-      silent() ? loaded.call(fn, snapshot, state, event) : Promise.resolve({ intents: [], problems: [], logs: [], state }),
+    call: async (fn: "onTick" | "onEvent", snapshot: S, state: Record<string, unknown>, event?: unknown) => {
+      if (silent()) return loaded.call(fn, snapshot, state, event);
+      if (!standby) return { intents: [], problems: [], logs: [], state };
+      const out = await loaded.call(fn, snapshot, state, event);
+      return { ...out, intents: out.intents.filter(standby) };
+    },
   };
 }

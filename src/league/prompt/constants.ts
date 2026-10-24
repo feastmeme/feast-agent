@@ -15,8 +15,17 @@ export const LEAGUE_CAP_BNB = 0.15;
 /** What `plan` and `set` say to a budget above the cap. */
 export const CAP_REFUSAL = `the league caps capital at ${LEAGUE_CAP_BNB} BNB`;
 
-/** How long the user's own agent may be silent before an autopilot preset trades, by default. */
-export const DEFAULT_IDLE_MINUTES = 60;
+/**
+ * How long the user's own agent may go without a trade before an autopilot preset trades, by default (task 975, the
+ * coordinator's ruling C2: 30 minutes, for every autopilot planned from league-v5 on).
+ */
+export const DEFAULT_IDLE_MINUTES = 30;
+
+/**
+ * The autopilot backup a prompt agent gets when neither `--autopilot <preset>` nor `--no-autopilot` is given (task
+ * 975, the owner's ruling A): the floor keeper. `FL enter`, `FL start --prompt` and `FL plan --prompt` plan it.
+ */
+export const DEFAULT_AUTOPILOT = "steady";
 
 /** The idle threshold's range, in whole minutes. */
 export const IDLE_MINUTES_MIN = 1;
@@ -34,9 +43,16 @@ export const SAFETY_PASS_SECONDS = 60;
 export const PROMPT_MAX_BYTES = 64 * 1024;
 
 /**
- * The league page's idle rule as it stood on 2026-10-24: feast-app score.ts
- * IDLE_MS at 2026-10-24 (24 hours). The page decides; 962 may change it, so the
- * runtime only quotes it, and never acts on it.
+ * The league's daily activity floor as the page scores it (feast-app score.ts ACTIVITY_FLOOR_TRADES and
+ * ACTIVITY_FLOOR_BNB as of 2026-10-24): every buy and every sale is one trade, the volume is the BNB paid on buys
+ * and received on sales, and the agent's own coin is left out. At a dinner, an agent under it is eaten ("idle").
+ * The page decides; the runtime counts the same way from its own fills (`floor.ts`) so `steady` can keep it.
  */
-export const PAGE_IDLE_MS = 24 * 3_600_000;
-export const PAGE_IDLE_RULE = `an agent whose newest trade is more than ${PAGE_IDLE_MS / 3_600_000} hours before the dinner, or that has none, is eaten (the league page's rule as of 2026-10-24)`;
+export const ACTIVITY_FLOOR_TRADES = 3;
+export const ACTIVITY_FLOOR_BNB = 0.02;
+
+/** Each league day ends at a dinner: 21:00 UTC+8, 13:00 UTC (feast-app season.ts DINNER_HOUR_UTC). */
+export const DINNER_HOUR_UTC = 13;
+
+/** The league page's rule, quoted on the card, in `FL status` and in `FL data`; the runtime never acts on the page's behalf. */
+export const PAGE_IDLE_RULE = `an agent under the day's activity floor (at least ${ACTIVITY_FLOOR_TRADES} trades and ${ACTIVITY_FLOOR_BNB} BNB of volume, its own coin left out) is eaten at the dinner (the league page's rule as of 2026-10-24)`;

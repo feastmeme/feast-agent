@@ -19,6 +19,18 @@ const shown = (value: unknown, unit?: string) => {
 
 const short = (hex: string) => `${hex.slice(0, 6)}…${hex.slice(-4)}`;
 
+/** The season's trading days the floor is kept on: the opening hour's day and the six after dinner 1 (task 975, C9). */
+const SEASON_DAYS = 7;
+
+/** What `steady` spends, from its parameters: a floor day's buys, the most in a day, the season's most; all inside L3's cap. */
+function steadySpend(params: Record<string, unknown>): string {
+  const buy = Number(params.buyBnb);
+  const entries = Number(params.maxEntriesPerDay);
+  const typical = Math.min(entries, Math.ceil(Number(params.minDailyTrades) / 2)) * buy;
+  const bnb = (x: number) => Number(x.toFixed(6));
+  return `Its spend: about ${bnb(typical)} BNB of buys on a day it trades for the floor, at most ${bnb(entries * buy)} BNB (${entries} × ${buy} BNB); at most ${bnb(SEASON_DAYS * entries * buy)} BNB over the season's seven trading days, from the same ${LEAGUE_CAP_BNB} BNB cap as your agent's own buys.`;
+}
+
 /** `warmupPassed`: a passing `FL script check` is on record for the script's sha256 (task 963). */
 export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null, options: { warmupPassed?: boolean } = {}): string {
   const lines: string[] = [];
@@ -31,9 +43,14 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
     for (const line of promptHead(agent.prompt!.path)) lines.push(`  > ${line}`);
     if (agent.preset && agent.autopilot) {
       const spec = PRESETS[agent.preset];
-      lines.push(`Autopilot: preset ${agent.preset} (${spec.title}), only after ${agent.autopilot.idleMinutes} min with no FL buy, FL sell or FL note from your agent; it steps back as soon as your agent acts. It ${spec.does}.`);
+      // Task 975: the backup, on by default; ruling C6 (only a trade holds it back) and C7 (steady keeps its exits).
+      const back = spec.keepsExits
+        ? "Once your agent trades, it opens nothing new; the take-profit, stop-loss and time stop of the positions it opened stay armed (your agent may sell them sooner with FL sell)."
+        : "It steps back as soon as your agent trades; positions it opened are then your agent's to manage.";
+      lines.push(`Autopilot backup: on. If your agent makes no FL buy or FL sell for ${agent.autopilot.idleMinutes} min, the ${agent.preset} preset (${spec.title}) trades until your agent trades again: it ${spec.does}. A note or a read does not hold it back. ${back} --no-autopilot turns it off.`);
+      if (agent.preset === "steady") lines.push(steadySpend(agent.params));
     } else {
-      lines.push(`Autopilot: none. Nothing trades on its own except the runtime's hard stop-loss (L6), which never sells your own coin. The league page's rule: ${PAGE_IDLE_RULE}.`);
+      lines.push(`Autopilot backup: off (--no-autopilot). Nothing trades on its own except the hard stop-loss (L6), which never sells your own coin. The league page's rule: ${PAGE_IDLE_RULE}.`);
     }
   } else if (agent.preset) {
     const spec = PRESETS[agent.preset];
@@ -69,7 +86,7 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
   const events = agent.preset && PRESETS[agent.preset].events.length > 0 ? `, and on ${PRESETS[agent.preset].events.join(", ")} events from the Feast indexer` : "";
   if (agent.track === "prompt") {
     lines.push("Watching: the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call.");
-    if (agent.preset) lines.push(`Autopilot cadence: only while it trades, a tick every ${agent.tickSeconds} s${events}.`);
+    if (agent.preset) lines.push(`Autopilot cadence: only while it trades, a tick every ${agent.tickSeconds} s${events}${agent.preset && PRESETS[agent.preset].keepsExits ? "; while your agent trades, the same tick for its own exits only" : ""}.`);
   } else lines.push(`Cadence: a tick every ${agent.tickSeconds} s${events}.`);
   lines.push("Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview, then execute — one transaction at a time.");
   lines.push(`Worst case: at most ${l.maxTradesPerHour} trades an hour, at most ${l.maxDailySpendBnb} BNB of buys in any 24 h, at most ${l.budgetBnb} BNB in all.`);

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import type { Address } from "viem";
 
 import { normalizeManifesto } from "../register/message.ts";
-import { recordHostAction, within } from "../prompt/host.ts";
+import { checkModel, modelHint, withHostHeaders, type Model } from "../headers.ts";
+import { within } from "../prompt/host.ts";
 import { agentPaths, appendJsonl } from "../store.ts";
 import { invalidateSession, liveToken, notesDev } from "./session.ts";
 
@@ -30,27 +31,8 @@ export const KEPT_NO_SESSION = "kept on this machine; sent once your notes sessi
 const TX = /^0x[0-9a-f]{64}$/;
 const ADDRESS = /(?:0x)?[0-9a-f]{40}/gi;
 
-/** The AI a note says wrote it (the owner's ruling, 2026-10-24): declared by the agent, never checked. */
-export const MODELS = ["grok", "codex", "claude", "other"] as const;
-export type Model = (typeof MODELS)[number];
-
-export function checkModel(raw: string): { ok: true; model: Model } | { ok: false; reason: string } {
-  const model = raw.trim().toLowerCase();
-  return (MODELS as readonly string[]).includes(model) ? { ok: true, model: model as Model } : { ok: false, reason: `--model is one of ${MODELS.join(", ")}` };
-}
-
-/**
- * The model a note declares when `--model` is not given: `FEAST_LEAGUE_MODEL` when it names one of the four,
- * else what the host's own environment says of it (Claude Code sets `CLAUDECODE=1`; the Codex CLI's sandbox
- * sets `CODEX_SANDBOX`), else "other". A hint only: the declaration is the agent's.
- */
-export function modelHint(env: Record<string, string | undefined> = process.env): Model {
-  const given = checkModel(env.FEAST_LEAGUE_MODEL ?? "");
-  if (given.ok) return given.model;
-  if (env.CLAUDECODE === "1") return "claude";
-  if (env.CODEX_SANDBOX || env.CODEX_SANDBOX_NETWORK_DISABLED) return "codex";
-  return "other";
-}
+/** The AI a note says wrote it, and the host's hint: one source with the `x-feast-host` header (task 975). */
+export { checkModel, MODELS, modelHint, type Model } from "../headers.ts";
 
 export type NoteState = { id: string; ts: string; text: string; tx: string | null; model: Model; state: "queued" | "sent" | "refused" | "dropped"; status?: number; at?: string };
 
@@ -130,7 +112,7 @@ export async function flushNotes(home: string, name: string, wallet: Address, de
     const note = queued[i]!;
     let status: number;
     try {
-      const response = await deps.fetch(`${deps.site.replace(/\/+$/, "")}/api/league/notes`, {
+      const response = await withHostHeaders(deps.fetch, [deps.site])(`${deps.site.replace(/\/+$/, "")}/api/league/notes`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ id: note.id, wallet, ts: note.ts, text: note.text, model: note.model, ...(note.tx ? { tx: note.tx } : {}) }),
@@ -194,7 +176,7 @@ export async function noteCommand(deps: NoteDeps, input: { text: string; tx?: st
   if (!wallet && [...checked.text.matchAll(ADDRESS)].length > 0) {
     return { code: 1, text: "the wallet could not be read to check this note's address; nothing was kept: try again in a minute", data: { ok: false, problem: "wallet-unread" } };
   }
-  recordHostAction(deps.home, deps.name, "note", now());
+  // A note is not a trade: it does not hold the autopilot back (task 975, the coordinator's ruling C6).
   const id = randomUUID();
   appendJsonl(notesPath(deps.home, deps.name), { id, ts: new Date(now()).toISOString(), text: checked.text, tx, model: declared.model, sent: false });
   if (!wallet) return { code: 0, text: KEPT, data: { ok: true, id, model: declared.model, state: "queued" } };

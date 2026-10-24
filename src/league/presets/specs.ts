@@ -4,12 +4,12 @@ import { MAINNET } from "../../sdk/networks.ts";
 import type { Limits } from "../limits.ts";
 
 /**
- * The five presets' parameters (PLAN.md §4): every default and range, and the
- * hard limit a parameter is bounded by — a size by L1, a stop-loss by L6, a
- * slippage by L9, a position count by L5.
+ * The six presets' parameters (PLAN.md §4; `steady`, task 975): every default and
+ * range, and the hard limit a parameter is bounded by — a size by L1, a
+ * stop-loss by L6, a slippage by L9, a position count by L5.
  */
 
-export type PresetId = "sniper" | "momentum" | "copy" | "launch" | "dca";
+export type PresetId = "sniper" | "momentum" | "copy" | "launch" | "dca" | "steady";
 
 type Bound = number | "L1" | "L5" | "L6" | "L9";
 
@@ -30,6 +30,11 @@ export type PresetSpec = {
   tickSeconds: number;
   events: ("coin.created" | "trade" | "price.move")[];
   params: readonly ParamSpec[];
+  /**
+   * As a prompt agent's autopilot: when the host trades and the preset steps back, its own exits stay armed (the
+   * coordinator's ruling C7, task 975): it opens nothing new, and still sells what it opened by its own rules.
+   */
+  keepsExits?: boolean;
 };
 
 const QUOTE_SYMBOLS = ["WBNB", ...MAINNET.stocks.map((s) => s.symbol)] as const;
@@ -139,6 +144,30 @@ export const PRESETS: Record<PresetId, PresetSpec> = {
       { key: "slippagePct", kind: "number", default: 1, min: 0.1, max: "L9", unit: "%", meaning: "slippage bound" },
     ],
   },
+  steady: {
+    id: "steady",
+    title: "Steady floor keeper",
+    does: "keeps the league's daily activity floor with small buys of the busiest Feast coins (never your own coin), spaced out and done early in the day, each sold by a take-profit, a stop-loss or a time stop",
+    tickSeconds: 60,
+    events: [],
+    keepsExits: true,
+    params: [
+      { key: "buyBnb", kind: "number", default: 0.006, min: 0.001, max: "L1", unit: "BNB", meaning: "size of each buy" },
+      { key: "topN", kind: "number", default: 5, min: 1, max: 20, integer: true, meaning: "choose among the N busiest coins by 24 h volume" },
+      { key: "minVolumeBnb", kind: "number", default: 0.5, min: 0.01, max: 100, unit: "BNB", meaning: "a coin's 24 h volume at least this (none does: the busiest with any)" },
+      { key: "minAgeMinutes", kind: "number", default: 60, min: 0, max: 10080, integer: true, unit: "min", meaning: "skip a coin's first minutes" },
+      { key: "minDailyTrades", kind: "number", default: 4, min: 3, max: 20, integer: true, meaning: "the day's trades it makes sure of, buys and sales, own coin left out" },
+      { key: "minDailyVolumeBnb", kind: "number", default: 0.022, min: 0.02, max: 0.15, unit: "BNB", meaning: "the day's volume it makes sure of" },
+      { key: "maxEntriesPerDay", kind: "number", default: 3, min: 1, max: 12, integer: true, meaning: "at most this many buys a day (dinner to dinner)" },
+      { key: "spacingMinutes", kind: "number", default: 15, min: 3, max: 240, integer: true, unit: "min", meaning: "at least this long between two of its buys" },
+      { key: "rushMinutes", kind: "number", default: 60, min: 0, max: 180, integer: true, unit: "min", meaning: "in this last stretch before dinner, with the floor not met, buys and sales 3 min apart (0: off)" },
+      { key: "takeProfitPct", kind: "number", default: 15, min: 5, max: 1000, unit: "%", meaning: "sell all this far above entry" },
+      { key: "stopLossPct", kind: "number", default: 10, min: 5, max: "L6", unit: "%", meaning: "sell all this far below entry" },
+      { key: "timeStopMinutes", kind: "number", default: 30, min: 5, max: 720, integer: true, unit: "min", meaning: "sell what is left after this long" },
+      { key: "maxPositions", kind: "number", default: 2, min: 1, max: "L5", integer: true, meaning: "its positions at once" },
+      { key: "slippagePct", kind: "number", default: 5, min: 0.1, max: "L9", unit: "%", meaning: "slippage bound" },
+    ],
+  },
 };
 
 export const PRESET_IDS = Object.keys(PRESETS) as PresetId[];
@@ -238,6 +267,15 @@ export function resolveParams(preset: PresetId, given: Record<string, unknown>, 
   }
   if (preset === "momentum" && typeof params.maxPositions === "number" && params.maxPositions > limits.maxOpenPositions) {
     errors.push(`maxPositions is bounded by L5 (${limits.maxOpenPositions})`);
+  }
+  if (preset === "steady" && errors.length === 0) {
+    const buy = params.buyBnb as number;
+    const entries = params.maxEntriesPerDay as number;
+    const bnb = (x: number) => Number(x.toFixed(9));
+    if (entries * buy > limits.maxDailySpendBnb) errors.push(`maxEntriesPerDay × buyBnb (${bnb(entries * buy)} BNB) is above L2's ${limits.maxDailySpendBnb} BNB of buys a day`);
+    // A round trip is about twice its size in volume: its own target must be reachable inside its own counts.
+    if (2 * entries * buy < (params.minDailyVolumeBnb as number)) errors.push(`2 × maxEntriesPerDay × buyBnb (${bnb(2 * entries * buy)} BNB) cannot reach minDailyVolumeBnb (${params.minDailyVolumeBnb} BNB)`);
+    if (2 * entries < (params.minDailyTrades as number)) errors.push(`minDailyTrades ${params.minDailyTrades} needs at least ${Math.ceil((params.minDailyTrades as number) / 2)} buys a day (a buy and its sale are two trades); maxEntriesPerDay is ${entries}`);
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, params };
 }

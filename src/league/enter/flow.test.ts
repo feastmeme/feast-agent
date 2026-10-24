@@ -184,7 +184,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
       "Registered: seat 7 of 1,000, and a founding seat (#7 of 100). maplegrin.ai is in Season 1.",
       "Notes session open for maplegrin.ai, season 1: your agent's notes reach feast.meme.",
       'started "maplegrin" in the background (pid 4242); FL status maplegrin',
-      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
     ]);
     expect(readSession(w.home)).toMatchObject({ token: "tok-1", season: 1, agentId: ID });
   });
@@ -463,7 +463,7 @@ describe("FL enter: the agent's name, the strategy, the start", () => {
     const w = world();
     writeFileSync(join(w.cwd, "mine.md"), "Momentum, small.\n");
     const out = await w.run({ prompt: join(w.cwd, "mine.md"), autopilot: "momentum" });
-    expect(out.text).toContain("Autopilot: preset momentum");
+    expect(out.text).toContain("Autopilot backup: on. If your agent makes no FL buy or FL sell for 30 min, the momentum preset (Momentum)");
     expect(existsSync(join(w.cwd, "strategy.md"))).toBe(false);
   });
 
@@ -718,5 +718,48 @@ describe("FL enter's GETs back off (task 967); its POSTs are never sent twice", 
     expect(out.stage).toBe("eligibility");
     expect(out.text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/);
     expect(w.calls.some((c) => c.includes("send"))).toBe(false);
+  });
+});
+
+describe("task 975: FL enter plans the autopilot backup by default", () => {
+  const ON_EN = "Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off.";
+  const ON_ZH = "autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。";
+
+  it("no flag: steady with idle 30 under the entry card; the agent section and the You're in line say so (en)", async () => {
+    const w = world();
+    const card = await w.run();
+    expect(loadAgent(w.home, ID)).toMatchObject({ track: "prompt", preset: "steady", autopilot: { idleMinutes: 30 } });
+    expect(card.text).toContain("Autopilot backup: on. If your agent makes no FL buy or FL sell for 30 min, the steady preset (Steady floor keeper)");
+    expect(card.text).toContain(`Starts now and waits for the season: it trades nothing before ${OPENS}.\n${ON_EN}`);
+    expect(card.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30 });
+    const out = await w.run({ yes: true });
+    expect(lastLine(out.text)).toBe(
+      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. ${ON_EN} If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+    );
+    expect(out.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30 });
+  });
+
+  it("zh: the entry card says it in Chinese, and so does the done line", async () => {
+    const w = world();
+    const card = await w.run({ lang: "zh" });
+    expect(card.text).toContain(`现在就启动，等待赛季开始：2026-10-26 20:00（UTC+8）之前它不做任何交易。\n${ON_ZH}`);
+    const out = await w.run({ lang: "zh", yes: true });
+    expect(lastLine(out.text)).toContain(ON_ZH);
+  });
+
+  it("--no-autopilot and --autopilot momentum --idle-minutes 45 change it; both flags are refused; --no-start plans nothing", async () => {
+    const off = world();
+    const card = await off.run({ noAutopilot: true });
+    expect(loadAgent(off.home, ID)).toMatchObject({ preset: null, autopilot: null });
+    expect(card.text).toContain("Autopilot backup is off: only your agent trades, besides the hard stop-loss; plan again without `--no-autopilot` to turn it back on.");
+    expect(card.data.autopilot).toBeNull();
+    const mo = world();
+    expect((await mo.run({ autopilot: "momentum", idleMinutes: 45 })).text).toContain("Autopilot backup is on: if you make no trade for 45 minutes, it trades by the momentum preset; `--no-autopilot` turns it off.");
+    const both = world();
+    expect(await both.run({ autopilot: "momentum", noAutopilot: true })).toMatchObject({ code: 2, ok: false, stage: "plan", text: "choose --autopilot <preset> or --no-autopilot" });
+    expect(loadAgent(both.home, ID)).toBeNull();
+    const none = world();
+    await none.run({ noStart: true });
+    expect(loadAgent(none.home, ID)).toBeNull();
   });
 });

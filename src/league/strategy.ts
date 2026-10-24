@@ -3,9 +3,10 @@ import { getAddress, isAddress, type Address } from "viem";
 
 import type { Intent } from "./guard.ts";
 import type { Limits } from "./limits.ts";
+import type { DayCount } from "./prompt/floor.ts";
 
 /**
- * The one interface every strategy has — the five presets and any user script
+ * The one interface every strategy has — the six presets and any user script
  * (PLAN.md §2.4). A strategy reads a snapshot the runtime prepared and enqueues
  * intents; nothing is ever sent from inside it, and every intent goes through
  * the same guard and executor.
@@ -104,8 +105,16 @@ export type StrategyApi = {
   log(text: string): void;
 };
 
-/** What only a trusted preset may ask of the runtime, never a script: a creator claim spent on a buyback. */
-export type PresetExtras = { claimAndBuyBack(coin: Address, options: { buybackPct: number; minClaimBnb: number; reason: string }): string | null };
+/**
+ * What only a trusted preset may ask of the runtime, never a script: a creator claim spent on a buyback; the day's
+ * count (task 975: this agent's trades and volume since the last dinner, own coin left out; null when it cannot be
+ * read); and whether it stands by as an autopilot whose host has just traded (its own exits only).
+ */
+export type PresetExtras = {
+  claimAndBuyBack(coin: Address, options: { buybackPct: number; minClaimBnb: number; reason: string }): string | null;
+  day?(): DayCount | null;
+  standingBy?(): boolean;
+};
 
 export type Strategy = {
   meta: Meta;

@@ -11,6 +11,7 @@ import { quoteBuy, quoteBuyInQuote, quoteSell } from "../sdk/quoter.ts";
 import { creationsOf, hookFillsOf, nativeLegsOf } from "../sdk/receipts.ts";
 import { BawError, redactAddresses, type Signer } from "./baw.ts";
 import type { CoinInfo, LeagueChain } from "./chain.ts";
+import { withHostHeaders } from "./headers.ts";
 import { callRefusal, gatePreview, summarizePreview, type Targets } from "./gate.ts";
 
 /**
@@ -357,7 +358,8 @@ export class Executor {
         if (createHash("sha256").update(bytes).digest("hex") !== launch.image.sha256) return { ok: false, reason: "the launch picture is not the one the card showed (its sha256 differs): nothing was pinned" };
         image = bytes;
       }
-      const feast = new FeastClient({ network: { ...this.deps.network, rpcUrl: this.deps.rpcUrl }, fetch: this.deps.fetch });
+      // The SDK pins at the network's site: that request carries the host's and the release's headers (task 975).
+      const feast = new FeastClient({ network: { ...this.deps.network, rpcUrl: this.deps.rpcUrl }, fetch: withHostHeaders(this.deps.fetch ?? fetch, [this.deps.network.siteUrl]) });
       const prepared = await feast.prepareLaunch(
         { name: launch.name, symbol: launch.symbol, quote: launch.quote, description: launch.description, burn: launch.burn, referrer: launch.referrer, metadataHash: launch.metadataHash, image },
         this.deps.wallet,

@@ -1,4 +1,5 @@
 import { confirmAgent, loadAgent, planAgent, saveAgent, type AgentConfig, type PlanInput } from "./agent.ts";
+import { DEFAULT_AUTOPILOT } from "./prompt/constants.ts";
 import { auditRefusal } from "./audit/verdict.ts";
 import { renderCard } from "./card.ts";
 import { promptChanged } from "./prompt/host.ts";
@@ -11,6 +12,17 @@ import { scriptCheckPassed } from "./script/check.ts";
  * changed; an agent never confirmed needs the user's yes; a prompt changed since the yes, or a script whose audit
  * refuses, does not start.
  */
+
+/**
+ * A prompt agent's autopilot from the two flags (task 975), for `FL plan`, `FL start --prompt` and `FL enter` alike:
+ * neither is the default backup (`steady`), `--autopilot <preset>` names another, `--no-autopilot` is none, and both
+ * are refused. `planAgent` keeps no default of its own: a preset or a script agent never gets an autopilot.
+ */
+export function autopilotChoice(flags: { autopilot?: string; noAutopilot?: boolean }): { ok: true; preset: string | undefined } | { ok: false; error: string } {
+  if (flags.autopilot !== undefined && flags.noAutopilot) return { ok: false, error: "choose --autopilot <preset> or --no-autopilot" };
+  if (flags.noAutopilot) return { ok: true, preset: undefined };
+  return { ok: true, preset: flags.autopilot ?? DEFAULT_AUTOPILOT };
+}
 
 /** What makes a new card: the track, the prompt, the preset, the autopilot, the parameters, the limits, the tick. */
 export const shapeOf = (a: AgentConfig) => JSON.stringify([a.track, a.prompt ?? null, a.preset, a.autopilot ?? null, a.params, a.limits, a.tickSeconds]);

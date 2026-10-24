@@ -99,10 +99,10 @@ describe("FL note: kept, sent, refused", () => {
     expect(w.feast.posts).toEqual([]);
   });
 
-  it("is an action by the host: it writes host.json", async () => {
+  it("is not a trade: it does not hold the autopilot back, and writes no host.json (task 975, ruling C6)", async () => {
     const w = world();
     await w.note("watching C01");
-    expect(JSON.parse(readFileSync(hostPath(w.home, "demo"), "utf8"))).toEqual({ at: new Date(NOW).toISOString(), what: "note" });
+    expect(existsSync(hostPath(w.home, "demo"))).toBe(false);
   });
 
   it("the wallet unreadable: a note with no full address is kept for later; one with an address waits", async () => {

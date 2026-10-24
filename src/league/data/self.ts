@@ -5,7 +5,9 @@ import type { Address } from "viem";
 import type { Book, Position } from "../book.ts";
 import { readEntry } from "../enter/flow.ts";
 import { weiToBnb } from "../limits.ts";
+import { MAINNET } from "../../sdk/networks.ts";
 import { LEAGUE_CAP_BNB } from "../prompt/constants.ts";
+import { dayCount, dayView, leftOut, type DayView } from "../prompt/floor.ts";
 import { lastHostAction, lastTradeAt, promptChanged, within } from "../prompt/host.ts";
 import { statusOf } from "../runtime.ts";
 import { readLedger } from "../store.ts";
@@ -15,7 +17,7 @@ import { untrusted, type Untrusted } from "./untrusted.ts";
  * An agent's own figures, in BNB (task 963): what `FL data` and `FL status`
  * show of it. Its open positions, marked at spot on the chain; realized and
  * unrealized PnL and gas; the wallet-wide spend against the league's cap; the
- * last trade and the host's last action. The wallet's own coin is not this
+ * last trade and the host's last action; the day's count (task 975). The wallet's own coin is not this
  * agent's PnL, nor are other agents' positions on this machine: both are
  * listed apart. A USDT figure is never kept here: a display may
  * add one from `usdRef`.
@@ -42,6 +44,8 @@ export type SelfView = {
   lastTradeAt: string | null;
   lastActionAt: string | null;
   lastAction: string | null;
+  /** Task 975: the day's trades and volume, dinner to dinner, as the page counts its floor (own coin and FEAST left out). */
+  day: DayView;
 };
 
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
@@ -110,5 +114,6 @@ export async function selfView(home: string, name: string, deps: { chain: SelfCh
     lastTradeAt: iso(lastTrade),
     lastActionAt: iso(host?.at ?? null),
     lastAction: host?.what ?? null,
+    day: dayView(dayCount(home, name, deps.now, leftOut(home, book?.launched?.coin, MAINNET.platformCoin?.address))),
   };
 }

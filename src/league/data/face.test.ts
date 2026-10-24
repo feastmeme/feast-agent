@@ -147,7 +147,9 @@ describe("FL data: the JSON", () => {
       me: { earners: { rank: 2, pnlUsd: 1.5, hp: 12, trades: 2 }, backed: null, eaten: null },
     });
     expect(data.league.me.earners.wallet).toBeUndefined();
-    expect(data.league.idleRule.text).toMatch(/newest trade is more than 24 hours before the dinner, or that has none, is eaten/);
+    // Task 975: the page's rule is the activity floor (since 962), not the newest trade's age.
+    expect(data.league.idleRule).toMatchObject({ text: expect.stringMatching(/under the day's activity floor \(at least 3 trades and 0\.02 BNB of volume, its own coin left out\) is eaten at the dinner/), floorTrades: 3, floorBnb: 0.02 });
+    expect(data.self.day).toMatchObject({ trades: 0, volumeBnb: 0, floor: { trades: 3, volumeBnb: 0.02 }, passed: false });
   });
 
   it("--since 24h: the hourly rows at or after it, in BNB; --coin: that coin only, validated", async () => {

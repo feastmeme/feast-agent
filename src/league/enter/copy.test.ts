@@ -35,6 +35,12 @@ describe("the entry's copy promises no reward", () => {
     }
   });
 
+  it("the autopilot backup's sentence, word for word, in Chinese and English (task 975, the owner's ruling A)", () => {
+    expect(copy.autopilotLine({ preset: "steady", idleMinutes: 30 }, "zh")).toBe("autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。");
+    expect(copy.autopilotLine({ preset: "steady", idleMinutes: 30 }, "en")).toBe("Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off.");
+    for (const lang of ["en", "zh"] as const) for (const pattern of REWARD) expect(copy.autopilotLine(null, lang)).not.toMatch(pattern);
+  });
+
   it("the entry no longer buys: no buy card, no today's coin, in either language", () => {
     expect(SOURCE).not.toMatch(/buyCard|today's coin|今天的币|assignment/);
   });

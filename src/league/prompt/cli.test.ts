@@ -152,3 +152,60 @@ describe("FL buy into a running agent waits for the outcome", () => {
     }
   }, 60_000);
 });
+
+describe("task 975: the autopilot backup by default, through the binary", () => {
+  it("start --prompt and plan --prompt with no flag: steady after 30 min, on the card and in agent.json", async () => {
+    const { env, prompt, home } = setup();
+    const { loadAgent } = await import("../agent.ts");
+    for (const command of ["start", "plan"]) {
+      const out = await run([command, `${command}-demo`, "--prompt", prompt], env);
+      expect(out.stdout, command).toContain("Autopilot backup: on. If your agent makes no FL buy or FL sell for 30 min, the steady preset (Steady floor keeper)");
+      expect(out.stdout, command).toContain("--no-autopilot turns it off.");
+      expect(loadAgent(home, `${command}-demo`), command).toMatchObject({ track: "prompt", preset: "steady", autopilot: { idleMinutes: 30 } });
+    }
+  }, 60_000);
+
+  it("--no-autopilot: off, no preset; --autopilot momentum: momentum; both: exit 2, one line, nothing saved; --no-autopilot --idle-minutes 5: refused", async () => {
+    const { env, prompt, home } = setup();
+    const { loadAgent } = await import("../agent.ts");
+    const off = await run(["plan", "off", "--prompt", prompt, "--no-autopilot"], env);
+    expect(off.code).toBe(0);
+    expect(off.stdout).toContain("Autopilot backup: off (--no-autopilot).");
+    expect(loadAgent(home, "off")).toMatchObject({ preset: null, autopilot: null });
+    const momentum = await run(["plan", "mo", "--prompt", prompt, "--autopilot", "momentum"], env);
+    expect(momentum.stdout).toContain("the momentum preset (Momentum)");
+    const both = await run(["start", "both", "--prompt", prompt, "--autopilot", "momentum", "--no-autopilot"], env);
+    expect(both.code).toBe(2);
+    expect(both.stdout.trim()).toBe("choose --autopilot <preset> or --no-autopilot");
+    expect(loadAgent(home, "both")).toBeNull();
+    const idle = await run(["plan", "idle", "--prompt", prompt, "--no-autopilot", "--idle-minutes", "5"], env);
+    expect(idle.code).toBe(2);
+    expect(idle.stdout).toContain("--idle-minutes needs --autopilot <preset>");
+    expect(loadAgent(home, "idle")).toBeNull();
+    expect((await run(["plan", "x", "--preset", "dca", "--no-autopilot"], env)).code).not.toBe(0);
+  }, 60_000);
+
+  it("--help names --no-autopilot, the default steady and 30 min", async () => {
+    const { env } = setup();
+    const out = await run(["--help"], env);
+    for (const word of ["--no-autopilot", "default steady, after 30 min", "enter --name <id>.ai", "--host <claude|codex|grok|other>"]) expect(out.stdout, word).toContain(word);
+    expect(out.stdout).not.toContain("default 60");
+  }, 60_000);
+});
+
+describe("task 975: FL status shows the day's count", () => {
+  it("--json carries day; the human line says it, and that the floor is the host's while it trades", async () => {
+    const { env, prompt, home } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady" });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const { appendJsonl } = await import("../store.ts");
+    appendJsonl(agentPaths(home, "demo").log, { at: new Date().toISOString(), event: "buy.filled", coin: "0x00000000000000000000000000000000000c0e01", bnbInWei: "6000000000000000" });
+    const out = await run(["status", "demo", "--json", "--no-league"], env);
+    const data = JSON.parse(out.stdout) as { day: Record<string, unknown> };
+    expect(data.day).toMatchObject({ trades: 1, volumeBnb: 0.006, floor: { trades: 3, volumeBnb: 0.02 }, passed: false, startsAt: expect.any(String), endsAt: expect.stringMatching(/T13:00:00\.000Z$/) });
+    const human = await run(["status", "demo", "--no-league"], env);
+    expect(human.stdout).toMatch(/today: 1 trade, 0\.006 BNB of volume \(the floor: 3 and 0\.02 BNB, own coin left out\): not yet; dinner at 21:00 UTC\+8, in /);
+    expect(human.stdout).toContain("autopilot: steady, after 30 min with no trade from your agent");
+  }, 60_000);
+});

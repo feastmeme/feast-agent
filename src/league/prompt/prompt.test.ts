@@ -116,12 +116,12 @@ describe("the card of a prompt agent", () => {
     expect(card).not.toContain("Line four");
     expect(card).not.toMatch(/[\u001b‮]/);
     expect(card).toContain("Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts.");
-    expect(card).toContain("Autopilot: none.");
+    expect(card).toContain("Autopilot backup: off (--no-autopilot).");
     expect(card).toContain("the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call");
     expect(card).not.toMatch(/Cadence: a tick every/);
     expect(card).toContain("This trades real BNB from your wallet as soon as you say yes. There is no practice mode.");
     const auto = renderCard(planned({ name: "demo", promptPath: path, preset: "momentum", idleMinutes: 45 }));
-    expect(auto).toContain("Autopilot: preset momentum (Momentum), only after 45 min with no FL buy, FL sell or FL note from your agent");
+    expect(auto).toContain("Autopilot backup: on. If your agent makes no FL buy or FL sell for 45 min, the momentum preset (Momentum)");
     expect(auto).toContain("| buyBnb | 0.01 BNB | default |");
   });
 
@@ -149,5 +149,20 @@ describe("the autopilot's gate", () => {
     expect((await gated.call("onTick", {} as never, {})).intents).toHaveLength(1);
     expect((await gated.call("onEvent", {} as never, {})).intents).toHaveLength(1);
     expect(asked).toEqual(["onTick", "onEvent"]);
+  });
+
+  it("a preset that keeps its exits (steady, ruling C7): asked while the host trades too, and only its sales pass", async () => {
+    let silent = false;
+    const inner = {
+      meta: { name: "steady", tickSeconds: 60, events: [], watch: [] },
+      params: {},
+      wants: () => [],
+      call: async (_fn: "onTick" | "onEvent", _s: never, state: Record<string, unknown>) => ({ intents: [{ id: "b", kind: "buy" }, { id: "s", kind: "sell" }] as { id: string; kind: string }[], problems: [], logs: [], state }),
+      stop: () => {},
+    };
+    const gated = autopilotGate(inner, () => silent, (intent: { kind: string }) => intent.kind === "sell");
+    expect((await gated.call("onTick", {} as never, {})).intents.map((i) => i.id)).toEqual(["s"]);
+    silent = true;
+    expect((await gated.call("onTick", {} as never, {})).intents.map((i) => i.id)).toEqual(["b", "s"]);
   });
 });

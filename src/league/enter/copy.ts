@@ -170,6 +170,19 @@ export function waitingLine(opens: OpensShown, lang: Lang): string {
   return zh ? "现在就启动，等待赛季开始：在 feast.meme 宣布开赛之前，它不做任何交易。" : "Starts now and waits for the season: it trades nothing until feast.meme announces the start.";
 }
 
+/** A prompt agent's autopilot backup as the entry shows it (task 975): its preset and minutes, or none. */
+export type AutopilotShown = { preset: string; idleMinutes: number } | null;
+
+/** The backup in one sentence, under the agent's card and after "You're in" (the owner's ruling A, 2026-10-24). */
+export function autopilotLine(autopilot: AutopilotShown, lang: Lang): string {
+  const zh = lang === "zh";
+  if (autopilot)
+    return zh
+      ? `autopilot 兜底已开：你 ${autopilot.idleMinutes} 分钟不动，它就按 ${autopilot.preset} 预设交易；\`--no-autopilot\` 可关。`
+      : `Autopilot backup is on: if you make no trade for ${autopilot.idleMinutes} minutes, it trades by the ${autopilot.preset} preset; \`--no-autopilot\` turns it off.`;
+  return zh ? "autopilot 兜底已关：除了硬止损，只有你的 agent 自己交易；去掉 `--no-autopilot` 重新规划即可再开。" : "Autopilot backup is off: only your agent trades, besides the hard stop-loss; plan again without `--no-autopilot` to turn it back on.";
+}
+
 export type StrategyShown = { kind: "default"; path: string } | { kind: "existing"; path: string } | { kind: "given"; path: string };
 
 export function strategyLine(view: StrategyShown, name: string, lang: Lang): string {
@@ -205,9 +218,9 @@ export function entryCard(view: { agentId: string; season: number; notes: boolea
   ].join("\n");
 }
 
-/** The agent's part of a card: the strategy, its card, and when it trades. */
-export function agentSection(view: { strategy: StrategyShown; name: string; card: string; opens: OpensShown }, lang: Lang): string {
-  return [strategyLine(view.strategy, view.name, lang), "", view.card, "", waitingLine(view.opens, lang)].join("\n");
+/** The agent's part of a card: the strategy, its card, when it trades, and its autopilot backup. */
+export function agentSection(view: { strategy: StrategyShown; name: string; card: string; opens: OpensShown; autopilot?: AutopilotShown }, lang: Lang): string {
+  return [strategyLine(view.strategy, view.name, lang), "", view.card, "", waitingLine(view.opens, lang), ...(view.autopilot !== undefined ? [autopilotLine(view.autopilot, lang)] : [])].join("\n");
 }
 
 export function keptUnreadable(reason: string, lang: Lang): string {
@@ -385,14 +398,15 @@ export function doneLine(lang: Lang): string {
   return lang === "zh" ? "你已报名。写好你的 strategy.md，然后运行 `FL start <name> --prompt strategy.md`" : "You're in. Write your strategy.md and run `FL start <name> --prompt strategy.md`";
 }
 
-/** After the entry that started the agent (task 968). */
-export function doneRunning(name: string, opens: OpensShown, lang: Lang): string {
+/** After the entry that started the agent (task 968), with its autopilot backup (task 975). */
+export function doneRunning(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown): string {
   const zh = lang === "zh";
   const when =
     opens.kind === "open" ? (zh ? "赛季已经开始，它现在就交易" : "the season is open, so it trades now") : opens.kind === "at" ? (zh ? `它等待赛季开始，从 ${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
+  const backup = autopilot !== undefined ? `${autopilotLine(autopilot, lang)}${zh ? "" : " "}` : "";
   return zh
-    ? `你已报名，「${name}」正在运行：${when}。如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`
-    : `You're in, and ${name} is running: ${when}. If it stops, run \`FL start ${name}\`. A changed strategy.md needs \`FL start ${name} --prompt strategy.md\`, its new card and your yes.`;
+    ? `你已报名，「${name}」正在运行：${when}。${backup}如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`
+    : `You're in, and ${name} is running: ${when}. ${backup}If it stops, run \`FL start ${name}\`. A changed strategy.md needs \`FL start ${name} --prompt strategy.md\`, its new card and your yes.`;
 }
 
 export function alreadyEntered(view: { agentId: string; coin: string | null; notes: string | null; season?: number | null; seat?: number | null }, lang: Lang): string {

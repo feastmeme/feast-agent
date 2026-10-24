@@ -21,8 +21,10 @@ import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type
 import { Market } from "./market.ts";
 import { flushNotes, readNotes } from "./notes/queue.ts";
 import { presetStrategy } from "./presets/logic.ts";
+import { PRESETS } from "./presets/specs.ts";
 import { SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
-import { autopilotGate, lastHostAction, promptChanged } from "./prompt/host.ts";
+import { dayCount, leftOut } from "./prompt/floor.ts";
+import { autopilotGate, lastHostAction, promptChanged, recordHostAction } from "./prompt/host.ts";
 import { sessionNotice, utc8 } from "./register/copy.ts";
 import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { GATE_READ_MS, seasonClosedLine, tradingOpens, writeGate } from "./season-gate.ts";
@@ -57,7 +59,9 @@ import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExt
  * A prompt agent (task 963) has no strategy of its own: the user's agent decides
  * and acts through `FL buy` and `FL sell`, which reach this loop as inbox
  * requests. The loop's tick is then only its safety pass. With an autopilot, the
- * preset is asked only after the host has been silent for its idle threshold.
+ * preset is asked only after the host has made no trade for its idle threshold
+ * (task 975: a note no longer counts); one that keeps its exits (`steady`) is
+ * still asked while the host trades, for the sales of its own positions only.
  */
 
 export type RunOutcome = { exit: "stopped" | "halted" | "refused" | "finished" | "error"; reason: string };
@@ -308,12 +312,23 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       queue.sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || a.createdAt - b.createdAt);
     };
 
+    // A prompt agent's autopilot stands by while its host trades (set below, with the strategy).
+    let standingBy = () => false;
     const extras: PresetExtras = {
       claimAndBuyBack: (coin: Address, options) => {
         const intent: Intent = { id: `claim-${clock()}`, kind: "claim", coin, reason: options.reason, source: "preset", createdAt: clock(), claim: { buybackPct: options.buybackPct, minClaimBnb: options.minClaimBnb } };
         enqueue([intent]);
         return intent.id;
       },
+      // Task 975: the day's trades and volume from this agent's log, as the page counts them; null when unreadable.
+      day: () => {
+        try {
+          return dayCount(deps.home, deps.name, clock(), leftOut(deps.home, book.launched?.coin, feast));
+        } catch {
+          return null;
+        }
+      },
+      standingBy: () => standingBy(),
     };
 
     const warmup = () =>
@@ -454,13 +469,13 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const bookLateBuy = (item: (typeof book.unresolved)[number], coinsOut: bigint, bnbIn: bigint, gasWei: bigint) => {
       book = recordBuy(book, { coin: item.coin, symbol: item.symbol, quote: item.quote, coinsOut, bnbInWei: bnbIn, gasWei, at: clock(), fundedBy: item.fundedBy, ownLaunch: book.launched?.coin.toLowerCase() === item.coin.toLowerCase(), source: item.source });
       if (item.fundedBy === "wallet" && bnbIn > 0n) addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: item.txHash ?? "unknown" });
-      log("buy.filled", { id: item.intentId, txHash: item.txHash, late: true, coinsOut, bnbInWei: bnbIn, payerIsWallet: item.txHash !== null });
+      log("buy.filled", { id: item.intentId, txHash: item.txHash, late: true, coin: item.coin, coinsOut, bnbInWei: bnbIn, payerIsWallet: item.txHash !== null });
       notify("trade", `a late outcome: bought ${item.symbol} for ${weiToBnb(bnbIn)} BNB (${item.txHash ?? "read from the balance"})`);
       enqueue([{ id: `arm-${clock()}`, kind: "arm", coin: item.coin, reason: "arm the exit", source: "runtime", createdAt: clock() }]);
     };
     const bookLateSell = (item: (typeof book.unresolved)[number], coinsIn: bigint, bnbOut: bigint, gasWei: bigint) => {
       book = recordSell(book, { coin: item.coin, coinsIn, bnbOutWei: bnbOut, gasWei, at: clock() });
-      log("sell.filled", { id: item.intentId, txHash: item.txHash, late: true, coinsIn, bnbOutWei: bnbOut, estimated: item.txHash === null });
+      log("sell.filled", { id: item.intentId, txHash: item.txHash, late: true, coin: item.coin, coinsIn, bnbOutWei: bnbOut, estimated: item.txHash === null });
       notify("trade", `a late outcome: sold ${item.symbol} (${item.txHash ?? "read from the balance; the BNB out is the floor it was sent with"})`);
     };
     /** Keep a transaction whose outcome is not known. It never touches the L14 pause; `pauseReason` reads both. */
@@ -574,6 +589,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (!verdict.ok) return refused(intent, verdict);
       if (verdict.forced) log("warmup.forced", { id: intent.id, forced: verdict.forced });
       const approved = verdict.intent;
+      // Task 975 (the coordinator's ruling C6): only the host's trade holds the autopilot back, an FL buy or FL sell the guard let through.
+      if (agent!.track === "prompt" && approved.source === "manual" && (approved.kind === "buy" || approved.kind === "sell")) recordHostAction(deps.home, deps.name, approved.kind, clock());
 
       if (approved.kind === "buy") {
         const coin = approved.coin!;
@@ -796,10 +813,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     }
 
     // --- the strategy, for the loop only -------------------------------------------------
-    // Prompt mode: the host's silence, from its last FL buy, FL sell or FL note (or the user's yes, if it has not acted).
+    // Prompt mode: the host's silence, from its last FL buy or FL sell (or the user's yes, if it has not traded).
     const silentFor = () => clock() - Math.max(lastHostAction(deps.home, deps.name)?.at ?? 0, Date.parse(agent!.confirmed?.at ?? "") || 0);
     const idleMs = () => (agent!.autopilot?.idleMinutes ?? 0) * 60_000;
     const silent = () => agent!.track === "prompt" && agent!.autopilot !== null && agent!.autopilot !== undefined && agent!.preset !== null && silentFor() >= idleMs();
+    const keepsExits = agent.track === "prompt" && agent.preset !== null && Boolean(agent.autopilot) && PRESETS[agent.preset]?.keepsExits === true;
     if (agent.track === "prompt" && !agent.preset) {
       // No autopilot: no strategy. The loop only enforces: the inbox, the preflight, L6, L8, the unresolved check, the notes.
       loaded = {
@@ -828,7 +846,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         stop() {},
       };
       // An autopilot is the same preset, asked only while the host is silent; its intents keep the source "preset".
-      if (agent.track === "prompt") loaded = autopilotGate(loaded, silent);
+      // One that keeps its exits (steady, ruling C7) is asked while the host trades too, and only its sales pass.
+      if (agent.track === "prompt") {
+        loaded = autopilotGate(loaded, silent, keepsExits ? (intent: Intent) => intent.kind === "sell" : undefined);
+        standingBy = () => !silent();
+      }
     } else {
       const sandbox = await ScriptSandbox.start(scriptSource!);
       const params = { ...sandbox.params, ...agent.params };
@@ -857,7 +879,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
 
     const listens = (loaded.meta.events ?? []).length > 0;
     // The board (every coin's market row) only for the strategies that read it: a DCA on FEAST alone does not.
-    const needBoard = () => agent!.track === "script" || agent!.preset === "momentum" || (agent!.preset === "dca" && agent!.params.targets === "topHolders");
+    const needBoard = () => agent!.track === "script" || agent!.preset === "momentum" || agent!.preset === "steady" || (agent!.preset === "dca" && agent!.params.targets === "topHolders");
     // The market feed (task 967), only for a strategy that listens or reads the board: a prompt agent without an
     // autopilot, and the launch preset, read nothing; an autopilot reads only while it is on.
     const feed =
@@ -955,7 +977,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           if (on) nextStrategyTick = 0;
           const minutes = agent.autopilot.idleMinutes;
           log(on ? "autopilot.on" : "autopilot.off", { preset: agent.preset, idleMinutes: minutes, silentMs: silentFor() });
-          notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : `your agent acted: autopilot ${agent.preset} steps back`);
+          notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : keepsExits ? `your agent traded: autopilot ${agent.preset} opens nothing new; its own positions keep their exits` : `your agent acted: autopilot ${agent.preset} steps back`);
         }
       }
       // Notes are not trades: the gate lets them through.
@@ -1013,12 +1035,14 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
               now,
             ),
           );
-          // The strategy on its own tick: a prompt agent's autopilot only while it is on, a preset's or a script's every tick.
-          const asks = !warming && (agent.track !== "prompt" || (autopilotOn && now >= nextStrategyTick));
+          // The strategy on its own tick: a prompt agent's autopilot only while it is on (one that keeps its exits, standing
+          // by too, with no board), a preset's or a script's every tick.
+          const asks = !warming && (agent.track !== "prompt" || ((autopilotOn || keepsExits) && now >= nextStrategyTick));
           if (asks) {
             if (agent.track === "prompt") nextStrategyTick = now + agent.tickSeconds * 1_000;
-            if (feed && needBoard()) await feed.prepareBoard(now);
-            const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: needBoard(), stale: feed?.stale() ?? null });
+            const board = needBoard() && (agent.track !== "prompt" || autopilotOn);
+            if (feed && board) await feed.prepareBoard(now);
+            const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: board, stale: feed?.stale() ?? null });
             await runStrategy("onTick", snapshot);
           } else save();
         } catch (error) {

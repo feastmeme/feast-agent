@@ -9,8 +9,10 @@ import { clean } from "../enter/copy.ts";
 import { readEntry } from "../enter/flow.ts";
 import { INDEXER_URL } from "../events.ts";
 import { CACHE_FRESH_MS, readSnapshotCache, RECHECK_MS, snapshotCoins, SnapshotClient, snapshotUnavailableAt, type FeastSnapshot } from "../feed/snapshot.ts";
+import { withHostHeaders } from "../headers.ts";
 import { flushNotes } from "../notes/queue.ts";
-import { PAGE_IDLE_MS, PAGE_IDLE_RULE } from "../prompt/constants.ts";
+import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES, PAGE_IDLE_RULE } from "../prompt/constants.ts";
+import { dayLine } from "../prompt/floor.ts";
 import { within } from "../prompt/host.ts";
 import { duration, short, utc8 } from "../register/copy.ts";
 import { parseLeague, type LeagueRead } from "../register/site.ts";
@@ -141,6 +143,8 @@ const iso = (t: number | null) => (t === null ? null : new Date(t).toISOString()
 const sqrtOf = (v: unknown) => (typeof v === "string" && /^\d{1,80}$/.test(v) && v !== "0" ? BigInt(v) : null);
 
 export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceResult> {
+  // Every request to feast.meme carries the host's and the release's headers; the indexer's never (task 975).
+  deps = { ...deps, fetch: withHostHeaders(deps.fetch, [deps.site]) };
   const now = (deps.now ?? Date.now)();
   const home = deps.home;
   const cacheDir = join(home, "cache");
@@ -602,7 +606,7 @@ function leagueOut(read: LeagueRead, got: { body: unknown }, now: number, self: 
           eaten: read.me.eaten ? { day: read.me.eaten.day, reason: untrusted(read.me.eaten.reason ?? "") } : null,
         }
       : null,
-    idleRule: { text: PAGE_IDLE_RULE, hours: PAGE_IDLE_MS / 3_600_000, asOf: "2026-10-24" },
+    idleRule: { text: PAGE_IDLE_RULE, floorTrades: ACTIVITY_FLOOR_TRADES, floorBnb: ACTIVITY_FLOOR_BNB, asOf: "2026-10-24" },
   };
 }
 
@@ -634,6 +638,7 @@ function human(view: { coins: CoinOut[]; self: SelfView | null; selfNote: string
     if (s.ownCoin.length > 0) lines.push(`  your own coin (not counted): ${s.ownCoin.map(position).join("; ")}`);
     if (s.otherBooks.length > 0) lines.push(`  other agents on this machine (not counted): ${s.otherBooks.map((b) => `${b.agent}: ${b.positions.map(position).join("; ")}`).join(" | ")}`);
     lines.push(`  last trade ${ago(s.lastTradeAt, view.now)}; last action by your agent ${ago(s.lastActionAt, view.now)}`);
+    if (s.day) lines.push(`  ${dayLine(s.day, view.now)}`);
   } else if (view.selfNote) lines.push(`No agent's book: ${view.selfNote}.`);
   const league = view.league as null | { state: string; season: { number: number; day: number | null }; nextDinnerAt: string | null; timeLeft: string | null; startsAt: string | null; dinner: { day: number; eaten: unknown } | null; boards: { earners: { rank: number | null; name: Untrusted; wallet: string; pnlUsd: number; hp: number; trades: number }[]; backed: { rank: number | null; name: Untrusted; wallet: string; hp: number }[] }; me: { earners: { rank: number | null } | null; backed: { rank: number | null } | null; eaten: { day: number } | null } | null; idleRule: { text: string } };
   if (league) {

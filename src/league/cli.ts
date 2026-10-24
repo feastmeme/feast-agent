@@ -25,8 +25,10 @@ import { Executor } from "./executor.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
 import { noteCommand } from "./notes/queue.ts";
 import { notesLogin, recordedAgentId } from "./notes/session.ts";
+import { checkModel, declareHost, readDeclaredHost } from "./headers.ts";
 import { PAGE_IDLE_RULE } from "./prompt/constants.ts";
-import { promptChanged, recordHostAction, within } from "./prompt/host.ts";
+import { dayLine } from "./prompt/floor.ts";
+import { promptChanged, within } from "./prompt/host.ts";
 import { outcomeLine, sendRequest, waitForOutcome } from "./prompt/inbox.ts";
 import { PRESETS, PRESET_IDS } from "./presets/specs.ts";
 import { BODY_COIN_QUOTE, BODY_COIN_SPLIT, bodyCoinNames } from "./register/claims.ts";
@@ -70,17 +72,18 @@ import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./
 import { standingLines } from "./season-card.ts";
 import { readGate } from "./season-gate.ts";
 import { sessionView } from "./session.ts";
-import { prepareStart } from "./start.ts";
+import { autopilotChoice, prepareStart } from "./start.ts";
 import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
 import type { IntentRequest } from "./strategy.ts";
 
 const HELP = `feast-league — run a Feast agent with your Binance Agentic Wallet
 
-  plan <name> --prompt <strategy.md> [--autopilot <${PRESET_IDS.join("|")}>] [--idle-minutes N] [--set key=value]… [--limit key=value]…
-  start <name> --prompt <strategy.md> [--autopilot <preset>] [--idle-minutes N] [--yes] [--detach]
+  plan <name> --prompt <strategy.md> [--autopilot <${PRESET_IDS.join("|")}> | --no-autopilot] [--idle-minutes N] [--set key=value]… [--limit key=value]…
+  start <name> --prompt <strategy.md> [--autopilot <preset> | --no-autopilot] [--idle-minutes N] [--yes] [--detach]
                                   prompt mode: your own agent decides by your prompt, with data, buy, sell and note; the
-                                  runtime keeps the limits, and an --autopilot preset trades only after N minutes (default 60)
-                                  with no buy, sell or note from your agent. Without --yes: the card, and nothing starts
+                                  runtime keeps the limits, and the autopilot backup (default steady, after 30 min) trades
+                                  only after N minutes with no buy or sell from your agent (a note does not count);
+                                  --no-autopilot turns it off. Without --yes: the card, and nothing starts
   plan <name> --preset <${PRESET_IDS.join("|")}> [--set key=value]… [--limit key=value]… [--tick s] [--sentence "…"]
   plan <name> --script <file.mjs> [--limit key=value]… [--tick s] [--sentence "…"]
                                   validate and save an agent, and print its confirmation card
@@ -115,13 +118,16 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   for the outcome (filled: exit 0; refused: exit 2)
   sell <name> <coin|FEAST> <fraction|all> [--no-wait]
   enter --name <id>.ai [--prompt <strategy.md>] [--meme "<concept>"] [--image <path>] [--no-start] [--yes] [--lang en|zh] [--json]
-        [--coin-name "<…feed>" --symbol T --description "…"] [--autopilot <preset>] [--agent <name>] [--no-jitter]
+        [--coin-name "<…feed>" --symbol T --description "…"] [--autopilot <preset> | --no-autopilot] [--idle-minutes N]
+        [--agent <name>] [--host <claude|codex|grok|other>] [--no-jitter]
                                   one command enters the league and runs your AI: one card and one yes sign the league's
                                   Register (no coin needed, no gas) and the notes session, then start the agent detached,
                                   waiting for the season: it trades nothing before. Without --prompt, the season-1 default
                                   is copied to ./strategy.md (never over one that is there). --no-start registers only.
                                   --meme launches one coin, composed by your agent, on its own card and its own yes
-                                  (--name is the wallet's Agent ID here; FL start <name> restarts the agent)
+                                  (--name is the wallet's Agent ID here; FL start <name> restarts the agent). The agent's
+                                  autopilot backup is on (default steady, after 30 min); --no-autopilot turns it off.
+                                  --host names the AI that runs it, for feast.meme (kept here; default: the host's hint)
   meme "<concept>" [--coin-name "<…feed>"] [--symbol T] [--description "…"] [--image <file.png>] [--yes]
                                   after the entry: the meme's compose card, then its preview card; one coin per agent
   register <name> --check [--body-coin 0x…] [--lang en|zh]
@@ -220,6 +226,8 @@ async function main(argv: string[]): Promise<number> {
       "no-league": { type: "boolean", default: false },
       prompt: { type: "string" },
       autopilot: { type: "string" },
+      "no-autopilot": { type: "boolean", default: false },
+      host: { type: "string" },
       "idle-minutes": { type: "string" },
       since: { type: "string" },
       tx: { type: "string" },
@@ -248,6 +256,19 @@ async function main(argv: string[]): Promise<number> {
   }
   const home = values.home ?? leagueHome();
   const json = values.json;
+  // Task 975 (the coordinator's ruling C8): the AI this home's agent runs on, declared once by FL enter --host; every
+  // request to feast.meme names it (x-feast-host), and FL note's --model defaults to it.
+  if (values.host !== undefined) {
+    const host = checkModel(values.host);
+    if (command !== "enter" || !host.ok) {
+      const line = command !== "enter" ? "--host goes with enter" : host.ok ? "" : host.reason.replace("--model", "--host");
+      print(json, { ok: false, error: line }, () => line);
+      return 2;
+    }
+    declareHost(home, host.model);
+  }
+  const declared = readDeclaredHost(home);
+  if (declared) process.env.FEAST_LEAGUE_HOST = declared;
   const need = (value: string | undefined, what: string) => {
     if (!value) throw new Error(`missing ${what}; see feast-league --help`);
     return value;
@@ -260,11 +281,14 @@ async function main(argv: string[]): Promise<number> {
   /** What plan and start --prompt plan from: a prompt with at most one preset as its autopilot, or a preset, or a script. */
   const planInput = (name: string): PlanInput => {
     if (values.autopilot !== undefined && values.prompt === undefined) throw new Error("--autopilot is a prompt agent's fallback: give the prompt with --prompt <strategy.md>");
+    if (values["no-autopilot"] && values.prompt === undefined) throw new Error("--no-autopilot is a prompt agent's: give the prompt with --prompt <strategy.md>");
     if (values["idle-minutes"] !== undefined && values.prompt === undefined) throw new Error("--idle-minutes goes with --prompt and --autopilot");
     if (values.prompt !== undefined && values.preset !== undefined) throw new Error("with --prompt, name the fallback preset with --autopilot, not --preset");
+    // Task 975: a prompt agent's autopilot backup is steady unless --autopilot names another or --no-autopilot.
+    const choice = autopilotChoice({ autopilot: values.autopilot, noAutopilot: values["no-autopilot"] });
     return {
       name,
-      preset: values.prompt !== undefined ? values.autopilot : values.preset,
+      preset: values.prompt !== undefined ? (choice.ok ? choice.preset : undefined) : values.preset,
       scriptPath: values.script,
       promptPath: values.prompt,
       idleMinutes: values["idle-minutes"] !== undefined ? Number(values["idle-minutes"]) : undefined,
@@ -274,6 +298,13 @@ async function main(argv: string[]): Promise<number> {
       sentence: values.sentence,
     };
   };
+
+  /** Both --autopilot and --no-autopilot: one line, exit 2, nothing saved (task 975). */
+  const conflict = autopilotChoice({ autopilot: values.autopilot, noAutopilot: values["no-autopilot"] });
+  if (!conflict.ok && (command === "plan" || command === "start" || command === "enter")) {
+    print(json, { ok: false, error: conflict.error }, () => conflict.error);
+    return 2;
+  }
 
   switch (command) {
     case "plan": {
@@ -424,6 +455,8 @@ async function main(argv: string[]): Promise<number> {
         autopilot: mine?.autopilot ?? null,
         lastTradeAt: mine?.lastTradeAt ?? null,
         lastActionAt: mine?.lastActionAt ?? null,
+        // Task 975: the day's trades and volume, dinner to dinner, as the page counts its floor.
+        day: mine?.day ?? null,
         notifications: s.notifications,
         unread,
         league: league?.data ?? null,
@@ -440,8 +473,12 @@ async function main(argv: string[]): Promise<number> {
             ...(mine.prompt
               ? [
                   `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: feast-league start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
-                  mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no action from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss",
+                  mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no trade from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss",
                   `last trade ${ago(mine.lastTradeAt)}; last action by your agent ${ago(mine.lastActionAt)}`,
+                  ...(mine.day ? [dayLine(mine.day, Date.now())] : []),
+                  ...(mine.day && !mine.day.passed && !mine.autopilot?.active
+                    ? [mine.autopilot ? `while your agent trades, the day's floor is its to keep; the backup takes over after ${mine.autopilot.idleMinutes} min without a trade` : "no backup: the day's floor is your agent's to keep"]
+                    : []),
                   `the league page's rule: ${PAGE_IDLE_RULE}`,
                 ]
               : []),
@@ -540,8 +577,8 @@ async function main(argv: string[]): Promise<number> {
         command === "buy"
           ? { kind: "buy" as const, coin, bnb: Number(amount), reason: "manual buy" }
           : { kind: "sell" as const, coin, fraction: amount === "all" ? 1 : Number(amount), reason: "manual sale" };
-      // An action by the user's own agent: in prompt mode it holds back the autopilot (task 963).
-      recordHostAction(home, name, command);
+      // A trade by the user's own agent holds back the autopilot (task 963): the runtime writes it down when the guard
+      // lets it through (task 975, ruling C6), so a refused one does not count.
       // The limits that need no wallet are checked before anything is asked of the wallet.
       const early = refuseEarly(home, agent, request);
       if (early) {
@@ -704,6 +741,7 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       noStart: values["no-start"] === true,
       agent: str(values.agent),
       autopilot: str(values.autopilot),
+      noAutopilot: values["no-autopilot"] === true,
       idleMinutes: idle !== undefined ? Number(idle) : undefined,
       noJitter: values["no-jitter"] === true,
       meme: concept !== undefined ? { concept, name: str(values["coin-name"]), symbol: str(values.symbol), description: str(values.description), image: str(values.image) } : undefined,

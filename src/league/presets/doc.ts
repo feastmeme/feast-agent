@@ -31,7 +31,7 @@ const def = (p: ParamSpec): string => (p.default === null ? (p.kind === "optiona
 
 export function presetsMarkdown(): string {
   const out: string[] = [
-    "# The five presets",
+    "# The six presets",
     "",
     "Generated from the runtime's own specs (`src/league/presets/specs.ts`); a test holds this file to them.",
     "Every size is bounded by L1, every stop-loss by L6, every slippage by L9, every position count by L5.",

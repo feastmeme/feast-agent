@@ -1,6 +1,7 @@
 import { getAddress, isAddress, type Address } from "viem";
 
 import { failureOf, retrying, type Failure, type Retry } from "../feed/backoff.ts";
+import { withHostHeaders } from "../headers.ts";
 
 /**
  * The league page's API, as an agent's runtime reads it (docs/PLAN-941.md §4).
@@ -251,13 +252,18 @@ const isTransportError = (error: unknown) => !(error instanceof SyntaxError);
 // --- the client ----------------------------------------------------------------------------
 
 export class LeagueSite {
+  /** Every request to the site carries the host's and the release's headers (task 975). */
+  private readonly fetchImpl: typeof fetch;
+
   constructor(
     readonly base: string = siteFromEnv(),
-    private readonly fetchImpl: typeof fetch = fetch,
+    fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = 15_000,
     /** Task 967: the GETs back off on a 429, a 5xx or no answer (FL enter's: at most 3 asks, 2 minutes). Never a POST. */
     private readonly retry?: Retry,
-  ) {}
+  ) {
+    this.fetchImpl = withHostHeaders(fetchImpl, [base]);
+  }
 
   /** An answer's status as a failure to ask again after, under the retry policy; null to take it. */
   private failed(status: number, retryAfter: string | null): Failure | null {

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAddress, isAddress, type Address } from "viem";
 
+import { withHostHeaders } from "../headers.ts";
 import { writeFileAtomic } from "../store.ts";
 import { Backoff, failureOf, type Failure, type FeedLog } from "./backoff.ts";
 import { comparePosition, CURSOR_RE, decodeCursor } from "./events.ts";
@@ -14,7 +15,9 @@ import { comparePosition, CURSOR_RE, decodeCursor } from "./events.ts";
  * less than 3 s apart, and never two at once.
  *
  * The request carries no wallet header, no token and no cookie (the coordinator's ruling C4): the CDN keeps one
- * copy for everyone. Everything in the snapshot is data: its events go through `normalizeEvent`, its coins through
+ * copy for everyone. What it does carry, besides `accept` and `If-None-Match`, are the two headers every request to
+ * feast.meme carries (task 975, `headers.ts`): `x-feast-host` and `x-feast-runtime`, the same for every player on a
+ * host and a release, never a wallet or a token; the site's snapshot route must not `Vary` on them. Everything in the snapshot is data: its events go through `normalizeEvent`, its coins through
  * `snapshotCoins`, and no field of it is put in a URL but a validated cursor.
  *
  * The newest good snapshot's coins and its ETag are kept in `<home>/cache/snapshot.json`, shared by the runtime
@@ -288,7 +291,11 @@ export class SnapshotClient {
   private readonly startedAt: number;
   private servedStale = false;
 
+  /** The options' fetch, with the host's and the release's headers on feast.meme (task 975). */
+  private readonly fetchImpl: typeof fetch;
+
   constructor(private readonly o: SnapshotOptions) {
+    this.fetchImpl = withHostHeaders(o.fetch, [o.site]);
     this.backoff = new Backoff({ now: o.now, random: o.random, log: o.log, onStale: o.onStale });
     this.pacer = new Pacer({ now: o.now, random: o.random, pollMs: (o.pollSeconds ?? DEFAULT_POLL_SECONDS) * 1_000 }, this.backoff);
     this.etag = o.seed?.etag ?? null;
@@ -326,7 +333,7 @@ export class SnapshotClient {
       const headers: Record<string, string> = { accept: "application/json" };
       if (this.etag && this.snapshot) headers["if-none-match"] = this.etag;
       const timeout = this.o.timeoutMs ?? 10_000;
-      const response = await this.o.fetch(`${this.o.site.replace(/\/+$/, "")}${SNAPSHOT_PATH}`, { headers, ...(timeout > 0 ? { signal: AbortSignal.timeout(timeout) } : {}) });
+      const response = await this.fetchImpl(`${this.o.site.replace(/\/+$/, "")}${SNAPSHOT_PATH}`, { headers, ...(timeout > 0 ? { signal: AbortSignal.timeout(timeout) } : {}) });
       const now = this.o.now();
       const flagged = (response.headers.get("x-snapshot-stale") ?? "").trim();
       if (response.status === 304 && this.snapshot) {
@@ -379,7 +386,7 @@ export class SnapshotClient {
       const headers: Record<string, string> = { accept: "application/json" };
       if (this.tailEtag && this.tail) headers["if-none-match"] = this.tailEtag;
       const timeout = this.o.timeoutMs ?? 10_000;
-      const response = await this.o.fetch(`${this.o.site.replace(/\/+$/, "")}${path}`, { headers, ...(timeout > 0 ? { signal: AbortSignal.timeout(timeout) } : {}) });
+      const response = await this.fetchImpl(`${this.o.site.replace(/\/+$/, "")}${path}`, { headers, ...(timeout > 0 ? { signal: AbortSignal.timeout(timeout) } : {}) });
       const now = this.o.now();
       if (response.status === 304 && this.tail) tail = this.tail;
       else if (response.status === 200) {

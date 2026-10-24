@@ -83,11 +83,12 @@ describe("the snapshot client", () => {
     expect(client.held?.block).toBe(105);
   });
 
-  it("asks nothing with a wallet header, a token or a cookie: the CDN keeps one copy (ruling C4)", async () => {
+  it("asks nothing with a wallet header, a token or a cookie: the CDN keeps one copy (ruling C4); only the host's and the release's headers besides (task 975)", async () => {
     const { now } = clock();
     const feed = new FakeFeed(now);
     await new SnapshotClient({ site: SITE, fetch: feed.fetch, now, random: seeded(3) }).read();
-    expect(Object.keys(feed.snapshots()[0]!.headers).sort()).toEqual(["accept"]);
+    expect(Object.keys(feed.snapshots()[0]!.headers).sort()).toEqual(["accept", "x-feast-host", "x-feast-runtime"]);
+    expect(feed.snapshots()[0]!.headers["x-feast-runtime"]).toBe("league-v5");
   });
 
   it("the interval is poll × 1000 + U(0, 3000), drawn afresh: within [5 s, 8 s] by default and [3 s, 6 s] at --poll 3", async () => {

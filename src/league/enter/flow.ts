@@ -19,7 +19,7 @@ import { AGENT_ID, nextIssuedAt } from "../register/message.ts";
 import type { KeptAgent, LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { tradingOpens } from "../season-gate.ts";
-import { prepareStart, shapeOf } from "../start.ts";
+import { autopilotChoice, prepareStart, shapeOf } from "../start.ts";
 import { agentPaths, appendJsonl, readJson, removeStop, walletLockHolder, writeJsonAtomic, writeStop } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
 import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.ts";
@@ -102,6 +102,8 @@ export type EnterInput = {
   /** The trading agent's name; default the bare Agent ID when it fits. */
   agent?: string;
   autopilot?: string;
+  /** Task 975: no autopilot backup (by default the agent gets `steady`). */
+  noAutopilot?: boolean;
   idleMinutes?: number;
   noJitter?: boolean;
   meme?: MemeInput;
@@ -164,7 +166,9 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const now = deps.now ?? Date.now;
   const lang = input.lang;
   const lines: string[] = [];
-  const end = (code: 0 | 1 | 2, ok: boolean, stage: string, text: string | string[], data: Record<string, unknown> = {}): EnterResult => ({ code, ok, stage, data, text: [...lines, ...(Array.isArray(text) ? text : [text])].join("\n") });
+  /** Task 975: the planned agent's autopilot backup, in the JSON of every answer once it is planned. */
+  let autopilotData: { autopilot: copy.AutopilotShown } | Record<string, never> = {};
+  const end = (code: 0 | 1 | 2, ok: boolean, stage: string, text: string | string[], data: Record<string, unknown> = {}): EnterResult => ({ code, ok, stage, data: { ...autopilotData, ...data }, text: [...lines, ...(Array.isArray(text) ? text : [text])].join("\n") });
   const paths = entryPaths(deps.home);
 
   // --- the name, the meme's composition, the agent's name: no call to anyone ----------------------
@@ -194,6 +198,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   }
 
   const startWanted = !input.noStart && !input.memeOnly;
+  const choice = autopilotChoice({ autopilot: input.autopilot, noAutopilot: input.noAutopilot });
+  if (!choice.ok) return end(2, false, "plan", choice.error);
   let agentName: string | null = null;
   if (startWanted) {
     if (input.agent !== undefined) {
@@ -239,7 +245,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   };
 
   // --- the trading agent: planned now, so its card is under the entry's ---------------------------------
-  type Planned = { name: string; agent: AgentConfig; card: string; shape: string; needsYes: boolean; strategy: copy.StrategyShown };
+  type Planned = { name: string; agent: AgentConfig; card: string; shape: string; needsYes: boolean; strategy: copy.StrategyShown; autopilot: copy.AutopilotShown };
   let planned = null as Planned | null;
   const plan = (): Planned | EnterResult => {
     const name = agentName!;
@@ -254,14 +260,15 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
       promptPath = file.path;
       strategy = { kind: file.copied ? "default" : "existing", path: file.path };
     }
-    const planInput: PlanInput = { name, promptPath, preset: input.autopilot, idleMinutes: input.idleMinutes, params: {}, limits: {} };
+    const planInput: PlanInput = { name, promptPath, preset: choice.preset, idleMinutes: input.idleMinutes, params: {}, limits: {} };
     const checked = prepareStart(deps.home, name, { plan: planInput, yes: false, confirm: true, now: new Date(now()) });
     if (checked.kind === "not-planned") return end(2, false, "plan", copy.notPlanned(checked.errors, lang), { errors: checked.errors });
     if (checked.kind === "running") return end(2, false, "running", copy.runningOtherCard(name, lang), { agent: name });
     if (checked.kind === "refused") return end(2, false, "start", copy.startRefused(checked.why, lang), { agent: name });
     if (checked.kind === "no-agent") return end(2, false, "plan", copy.notPlanned(["no agent was planned"], lang));
     const agent = checked.agent;
-    return { name, agent, card: checked.kind === "needs-yes" ? checked.card : renderCard(agent), shape: shapeOf(agent), needsYes: checked.kind === "needs-yes", strategy };
+    const autopilot = agent.preset && agent.autopilot ? { preset: agent.preset, idleMinutes: agent.autopilot.idleMinutes } : null;
+    return { name, agent, card: checked.kind === "needs-yes" ? checked.card : renderCard(agent), shape: shapeOf(agent), needsYes: checked.kind === "needs-yes", strategy, autopilot };
   };
   /** Planned once, where its card is needed: after the wallet is read on a first entry, at once on a rerun. */
   const planOnce = (): EnterResult | null => {
@@ -269,6 +276,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const p = plan();
     if ("code" in p) return p;
     planned = p;
+    autopilotData = { autopilot: p.autopilot };
     return null;
   };
 
@@ -300,11 +308,11 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
       const digest = sha256(JSON.stringify({ stage: "start", agentId: given, start: planned.shape }));
       if (!yesFor("start", digest)) {
         lines.push(head);
-        return ask("start", digest, [copy.startCard(lang), "", copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens }, lang)].join("\n"), { agent: planned.name });
+        return ask("start", digest, [copy.startCard(lang), "", copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot }, lang)].join("\n"), { agent: planned.name });
       }
     }
     lines.push(head, ...(await startStep()));
-    return end(0, true, "done", copy.doneRunning(planned.name, opens, lang), { agent: planned.name });
+    return end(0, true, "done", copy.doneRunning(planned.name, opens, lang, planned.autopilot), { agent: planned.name });
   }
 
   // --- the wallet and its Agent ID ------------------------------------------------------------
@@ -371,10 +379,10 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     return sessionSaid(outcome, { agentId, season }, lang, "entry");
   };
   const registeredFrom = (kept: KeptAgent): NonNullable<EntryRecord["registered"]> => ({ season: kept.season ?? season, issuedAt: kept.issuedAt, seat: kept.seatNo, founding: kept.foundingNo, at: new Date(now()).toISOString() });
-  const agentSection = () => (planned ? copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens }, lang) : null);
+  const agentSection = () => (planned ? copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot }, lang) : null);
   const finish = async (): Promise<EnterResult> => {
     if (planned) lines.push(...(await startStep()));
-    lines.push(planned ? copy.doneRunning(planned.name, opens, lang) : copy.doneLine(lang));
+    lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot) : copy.doneLine(lang));
     if (composed) return memeStep(composed);
     // Signed in, and the site has not given the seat yet: "registered", not done; a rerun picks it up.
     return end(0, true, record?.registered && record.registered.seat === null ? "registered" : "done", [], { agentId, season, registered: record?.registered ?? null, notes: record?.notes ?? null, agent: planned?.name ?? null });
