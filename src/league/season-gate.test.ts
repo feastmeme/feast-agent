@@ -93,7 +93,7 @@ describe("the waiting agent trades nothing", () => {
     const { home } = agent({ promptPath: join(dir, "strategy.md"), preset: "sniper", idleMinutes: 1 });
     const c = fakeClock(T0);
     const w = tradeWorld({ now: c.now });
-    // The start is tomorrow's dinner 0, so trading opens 23 hours after it: far past this hour.
+    // The start is tomorrow at 21:00 UTC+8 (not a dinner), so trading opens 23 hours after it: far past this hour.
     const start = T0 + 4 * HOUR;
     const s = site(c, () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(start).toISOString() } }));
     c.at(T0 + 20 * MIN, () => inbox(home, "1-buy.json", { type: "intent", requestId: "req-1", request: { kind: "buy", coin: FEAST, bnb: 0.002, reason: "manual buy" } }));

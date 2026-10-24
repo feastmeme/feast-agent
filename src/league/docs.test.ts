@@ -536,3 +536,11 @@ describe("task 975, addendum 8: ready for the season", () => {
     expect(read("skills/feast-league/references/register.md")).toContain("| `24h` | Your wallet's sign-in ends in under 24 hours");
   });
 });
+
+describe("task 975, addendum 9: the season's start is not a dinner", () => {
+  it("no copy, doc or comment calls the start a dinner; the first dinner is the warm-up", () => {
+    const files = ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "skills/feast-league/references/register.md", "README.md", "docs/CHANGELOG.md", "docs/league/PLAN.md", "src/league/season-gate.ts", "src/league/season-gate.test.ts", "src/league/enter/copy.ts", "src/league/ask/pack.ts"];
+    for (const file of files) expect(read(file), file).not.toMatch(/dinner 0|dinner zero|first dinner is (Tue|10\/27)|10\/27[^,.\n]{0,20}\bis (a |the )?(dinner|warm-up)|warm-up[^.\n]{0,30}10\/27/i);
+    expect(read("docs/CHANGELOG.md")).toContain("the first dinner, Wednesday 10/28 21:00, is the warm-up (no floor, eats nobody)");
+  });
+});

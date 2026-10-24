@@ -6,10 +6,10 @@ import { agentPaths, readJson, writeJsonAtomic } from "./store.ts";
 
 /**
  * When an agent `FL enter` started may trade (task 968; the coordinator's ruling C8). feast.meme's season starts at
- * a dinner, 21:00 UTC+8 ("dinner 0"), and the clients learn it only as `/api/league`'s countdown: the start before
- * it, the next dinner during the season. Trading opens one hour before dinner 1: the start plus 23 hours (season 1:
- * Wednesday 10/28, 20:00 UTC+8, as the owner moved it on 2026-10-24; the runtime reads it from `/api/league`, never
- * from here). Until then the waiting agent trades nothing; with no start announced it waits until
+ * 21:00 UTC+8 (the start, not a dinner: addendum 9), and the clients learn it only as `/api/league`'s countdown: the
+ * start before it, the next dinner during the season. The first dinner, dinner 1, is a day after the start and is the
+ * warm-up (no floor, eats nobody). Trading opens one hour before it: the start plus 23 hours (season 1: Wednesday
+ * 10/28, 20:00 UTC+8, as the owner moved it on 2026-10-24; the runtime reads it from `/api/league`, never from here). Until then the waiting agent trades nothing; with no start announced it waits until
  * told. The gate only holds trading back: it loosens nothing.
  */
 
@@ -44,7 +44,8 @@ export const seasonOver = (read: LeagueRead | null) => read?.state === "over";
 /**
  * The dinner that asks no floor (addendum 8): the site's warm-up dinner, dinner 1 (`WARM_UP_DINNER = 1` in the site's
  * season.ts), the one that ends the season's day 1. Read from the league's clock, never from a date: on day 1 it is
- * the countdown; before the start (the countdown is the start, dinner 0) it is a day after it. Null otherwise.
+ * the countdown; before the start (the countdown is the season's start, which is not a dinner) it is a day after it.
+ * Null otherwise.
  */
 export const WARM_UP_DINNER_DAY = 1;
 const DAY_MS = 24 * 3_600_000;
