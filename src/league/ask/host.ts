@@ -55,13 +55,23 @@ export function askArgv(w: "claude" | "codex", o: { cwd: string; schemaPath: str
 /**
  * The child's environment: the parent's, without the runtime's own settings (`FEAST_*`, `LEAGUE_*`, `BAW*`: an RPC URL
  * may carry a key, and the child needs none of them) and without the session of whatever started the runtime
- * (addendum 7): `CLAUDECODE`, every `CLAUDE_CODE_*`, `CODEX_*`, anything naming a `_CHILD_`, `_BRIDGE_` or `_MESSAGING_`
- * channel, and the hook variables a Claude Code session sets (`CLAUDE_PID`, `CLAUDE_PROJECT_DIR`, …): the child is a
- * new session of its own, not a part of that one. PATH, HOME, the locale and the rest stay: the player's login may live
- * in any of it, and so the few session-looking names that are a login, not a session, stay too (`LOGIN_KEPT`).
+ * (addenda 7 and 10): `CLAUDECODE`, every `CLAUDE_*` (the session's `CLAUDE_CODE_*`, its hook variables
+ * `CLAUDE_PID`, `CLAUDE_PROJECT_DIR`, …, and its settings such as `CLAUDE_EFFORT`), `CODEX_*`, and anything naming a
+ * `_CHILD_`, `_BRIDGE_` or `_MESSAGING_` channel: the child is a new session of its own, on its own defaults. PATH,
+ * HOME, the locale and the rest stay: the player's login may live in any of it.
+ *
+ * `LOGIN_KEPT` is the login, not a session, and is why five such names stay (not verified by a real `claude -p` call
+ * here: the tests make none; each is a documented way the player's own login is found):
+ * - `CLAUDE_CONFIG_DIR`: where Claude Code keeps its settings and credentials when the player moved them; without it a
+ *   child reads `~/.claude` and is "Not logged in".
+ * - `CLAUDE_CODE_OAUTH_TOKEN`: the long-lived token `claude setup-token` makes; for a player who uses it, it is the login.
+ * - `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`: the player's provider; without them a child asks Anthropic's
+ *   API with no key and fails.
+ * - `CODEX_HOME`: where Codex keeps `auth.json` when the player moved it.
+ * The session itself never sets any of these.
  */
-export const LOGIN_KEPT = ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CODEX_HOME"] as const;
-const SESSION = /^(CLAUDECODE$|CLAUDE_CODE_|CODEX_|CLAUDE_(PID|PROJECT_DIR|PLUGIN_ROOT|PLUGIN_DATA|ENV_FILE)$)|(^|_)(CHILD|BRIDGE|MESSAGING)_/;
+export const LOGIN_KEPT = ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CODEX_HOME"] as const;
+const SESSION = /^(CLAUDECODE$|CLAUDE_|CODEX_)|(^|_)(CHILD|BRIDGE|MESSAGING)_/;
 
 export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out = { ...env };

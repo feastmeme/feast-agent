@@ -99,7 +99,8 @@ export function leftOut(home: string, launched: string | null | undefined): Set<
   return new Set([launched, typeof body === "string" ? body : null].filter((c): c is string => typeof c === "string" && c.length > 0).map((c) => c.toLowerCase()));
 }
 
-export type DayView = { startsAt: string; endsAt: string; trades: number; volumeBnb: number; floor: { trades: number; volumeBnb: number }; passed: boolean };
+/** `noFloor`: tonight's dinner is the warm-up's, which asks no floor (addendum 10: only then is it there). */
+export type DayView = { startsAt: string; endsAt: string; trades: number; volumeBnb: number; floor: { trades: number; volumeBnb: number }; passed: boolean; noFloor?: true };
 
 export function dayView(count: DayCount): DayView {
   return {
@@ -120,5 +121,6 @@ const until = (ms: number) => {
 
 /** What `FL status` and `FL data` say of the day. */
 export function dayLine(view: DayView, now: number): string {
+  if (view.noFloor) return `today: ${view.trades} trade${view.trades === 1 ? "" : "s"}, ${view.volumeBnb} BNB of volume; warm-up: no floor tonight (the warm-up dinner eats nobody); dinner at 21:00 UTC+8, in ${until(Date.parse(view.endsAt) - now)}`;
   return `today: ${view.trades} trade${view.trades === 1 ? "" : "s"}, ${view.volumeBnb} BNB of volume (the floor: ${view.floor.trades} and ${view.floor.volumeBnb} BNB, own coin left out): ${view.passed ? "passed" : "not yet"}; dinner at 21:00 UTC+8, in ${until(Date.parse(view.endsAt) - now)}`;
 }

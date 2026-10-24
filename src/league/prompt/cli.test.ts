@@ -332,6 +332,19 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
     expect(quote.stdout.trim()).toMatch(/^no quote: /);
   }, 90_000);
 
+  it("addendum 10: on the warm-up dinner's day FL status says no floor tonight, never that the floor is not yet met", async () => {
+    const { env, prompt, home } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "claude", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const { nextDinner } = await import("./floor.ts");
+    writeJsonAtomic(join(agentPaths(home, "demo").dir, "season.json"), { state: "open", opensAt: null, at: new Date().toISOString(), warmUpDinnerAt: new Date(nextDinner(Date.now())).toISOString(), day: 1 });
+    const human = await run(["status", "demo", "--no-league"], env);
+    expect(human.stdout).toContain("warm-up: no floor tonight (the warm-up dinner eats nobody)");
+    expect(human.stdout).not.toMatch(/\): not yet;|Every 5 minutes it asks your Claude Code what to do/);
+    expect(human.stdout).toContain("asking Claude Code every 5 min");
+  }, 60_000);
+
   it("addendum 8: FL status names the newer release and its upgrade command, the sign-in's end, the season over; FL daemon refuses a missing action", async () => {
     const { env, prompt, home } = setup();
     const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "claude", model: null } });
@@ -351,6 +364,8 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
     expect(data.runtime).toMatchObject({ behind: true, latest: "league-v6" });
     expect(data.signInEndsAt).toBe(new Date(end).toISOString());
     expect(data.season).toMatchObject({ state: "over" });
+    // Addendum 10: after the season, nothing about asking or the floor keeper.
+    expect(human.stdout).not.toMatch(/asking Claude Code|floor keeper: steady|backup takes over|Every 5 minutes it asks/);
     const bare = await run(["daemon", "demo"], env);
     expect(bare.code).not.toBe(0);
     expect(bare.stderr).toContain("FL daemon <name> takes one of --install, --uninstall, --status");

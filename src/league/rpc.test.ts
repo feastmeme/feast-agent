@@ -67,6 +67,16 @@ describe("the fallback", () => {
     expect(switches.at(-1)).toMatchObject({ from: "bsc-dataseed1.binance.org", to: "primary", reason: "back" });
   });
 
+  it("addendum 10: the switch's reason is the short message only: no request body, no URL, no address", async () => {
+    const body = { method: "eth_call", params: [{ from: "0x000000000000000000000000000000000000a11c" }] };
+    const e = endpoints({ [PRIMARY]: () => new HttpRequestError({ url: PRIMARY, status: 503, body }), [FALLBACK_RPCS[0]]: () => "0x1" });
+    const switches: unknown[] = [];
+    const rpc = fallbackRpc(rpcEndpoints(PRIMARY, {}), { now: () => 0, make: e.make, onSwitch: (c) => switches.push(c) });
+    await rpc.request({ method: "eth_call" });
+    expect(switches).toEqual([{ from: "primary", to: "bsc-dataseed1.binance.org", reason: "HTTP request failed." }]);
+    expect(JSON.stringify(switches)).not.toMatch(/Request body|with-a-key|a11c/);
+  });
+
   it("the node's own answer (a revert) is the answer: no other endpoint is asked", async () => {
     const reverted = Object.assign(new Error("execution reverted"), { code: 3 });
     const e = endpoints({ [PRIMARY]: () => reverted, [FALLBACK_RPCS[0]]: () => "0x1" });

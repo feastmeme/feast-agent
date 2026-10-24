@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { askArgv, askDirs, callHost, childEnv } from "./host.ts";
+import { askArgv, askDirs, callHost, childEnv, LOGIN_KEPT } from "./host.ts";
 import { ANSWER_SCHEMA } from "./pack.ts";
 
 /**
@@ -109,6 +109,10 @@ describe("the adapters' argv", () => {
       CODEX_SANDBOX: "seatbelt",
       CLAUDE_PID: "1",
       CLAUDE_PROJECT_DIR: "/proj",
+      // Addendum 10: every CLAUDE_*, the session's settings too.
+      CLAUDE_EFFORT: "high",
+      CLAUDE_PLUGIN_DATA: "/p",
+      CLAUDE_ANYTHING_NEW: "x",
     };
     const kept = { PATH: "/p", HOME: "/h", LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8", TERM: "xterm", USER: "u", ANTHROPIC_API_KEY: "k", OPENAI_API_KEY: "o", CLAUDE_CONFIG_DIR: "/c", CLAUDE_CODE_OAUTH_TOKEN: "tok", CLAUDE_CODE_USE_BEDROCK: "1", CODEX_HOME: "/ch", __CF_USER_TEXT_ENCODING: "0x0" };
     const env = childEnv({ ...session, ...kept });
@@ -138,12 +142,13 @@ describe("callHost, against the stub CLIs", () => {
 
   it("addendum 7: the argv and the environment the child actually got: no session variable of the parent's", async () => {
     const s = stubs("answer");
-    const env = { ...s.env, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_CODE_CHILD_SESSION: "1", _CHILD_SESSION: "1", _BRIDGE_TOKEN: "t", _MESSAGING_SOCKET: "/sock", _MESSAGING_TOKEN: "t", CODEX_COMPANION_SESSION_ID: "c", LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "k" };
+    const env = { ...s.env, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_CODE_CHILD_SESSION: "1", _CHILD_SESSION: "1", _BRIDGE_TOKEN: "t", _MESSAGING_SOCKET: "/sock", _MESSAGING_TOKEN: "t", CODEX_COMPANION_SESSION_ID: "c", CLAUDE_EFFORT: "high", CLAUDE_PID: "1", CLAUDE_CONFIG_DIR: "/cfg", LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "k" };
     expect(await callHost({ with: "claude", pack: "p", home: s.home, name: "demo", env })).toEqual({ ok: true, answer: ANSWER });
     const seen = s.read("claude");
     expect(seen.args).toEqual(askArgv("claude", { cwd: "", schemaPath: "", lastMessagePath: "" }).args);
-    expect(Object.keys(seen.env).filter((k) => /^(CLAUDECODE|CLAUDE_CODE_|CODEX_|_CHILD_|_BRIDGE_|_MESSAGING_|FEAST_|LEAGUE_|BAW)/.test(k) || /_(CHILD|BRIDGE|MESSAGING)_/.test(k))).toEqual([]);
-    expect(seen.env).toMatchObject({ LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "k", HOME: process.env.HOME, PATH: env.PATH });
+    // Addendum 10: no CLAUDE_* at all but the login's own (`LOGIN_KEPT`).
+    expect(Object.keys(seen.env).filter((k) => (/^(CLAUDECODE|CLAUDE_|CODEX_|_CHILD_|_BRIDGE_|_MESSAGING_|FEAST_|LEAGUE_|BAW)/.test(k) || /_(CHILD|BRIDGE|MESSAGING)_/.test(k)) && !(LOGIN_KEPT as readonly string[]).includes(k))).toEqual([]);
+    expect(seen.env).toMatchObject({ CLAUDE_CONFIG_DIR: "/cfg", LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "k", HOME: process.env.HOME, PATH: env.PATH });
   });
 
   it("codex: the pack on stdin, no positional prompt, the answer from the last-message file", async () => {

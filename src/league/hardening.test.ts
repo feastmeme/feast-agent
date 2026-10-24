@@ -239,6 +239,9 @@ describe("4. loud failures (G5)", () => {
     const failed = notices(home).filter((n) => n.kind === "failure" && n.text.startsWith("the loop's pass"));
     expect(failed).toHaveLength(1);
     expect(failed[0]!.text).not.toContain("rpc.example");
+    // Addendum 10: nor the log: the keyed URL never reaches a line on disk.
+    expect(readFileSync(agentPaths(home, "demo").log, "utf8")).not.toMatch(/rpc\.example|with-a-key/);
+    expect(lines(home).find((l) => l.event === "tick.failed")!.reason).toBe("HTTP request failed.");
     expect(lines(home).filter((l) => l.event === "tick.failed").length).toBeGreaterThan(3);
     expect(s.healths[0]!.health).toBe("ok");
     expect(s.healths.at(-1)!.health).toBe("failing");
@@ -349,3 +352,35 @@ describe("7. the health flag (G7)", () => {
     expect(feed.snapshots().every((a) => a.headers[HEALTH_HEADER] === undefined)).toBe(true);
   }, 60_000);
 });
+
+// --- addendum 10 ----------------------------------------------------------------------------------------------
+
+describe("addendum 10: the rehearsal's last six", () => {
+  it("errorLine: viem's short message, no request body, no URL, no address", async () => {
+    const { HttpRequestError } = await import("viem");
+    const { errorLine } = await import("./rpc.ts");
+    const e = new HttpRequestError({ url: "https://rpc.example/v1/with-a-key", status: 503, body: { method: "eth_call", params: [{ from: "0x000000000000000000000000000000000000a11c", data: "0x70a08231" }] } });
+    const line = errorLine(e);
+    expect(line).toBe("HTTP request failed.");
+    expect(errorLine(new Error("fetch failed at https://rpc.example/with-a-key for 0x000000000000000000000000000000000000a11c\nRequest body: {}"))).toBe("fetch failed at <url> for 0x…");
+  });
+
+  it("FL start says it waits for the season only while the gate is not open", async () => {
+    const { startSaysWaiting } = await import("./season-gate.ts");
+    const at = new Date(T0).toISOString();
+    expect(startSaysWaiting(true, null)).toBe(true);
+    expect(startSaysWaiting(true, { state: "waiting", opensAt: null, at })).toBe(true);
+    expect(startSaysWaiting(true, { state: "open", opensAt: at, at })).toBe(false);
+    expect(startSaysWaiting(true, { state: "over", opensAt: at, at })).toBe(false);
+    expect(startSaysWaiting(false, null)).toBe(false);
+  });
+
+  it("the warm-up day's line: no floor tonight, never \"not yet\"", async () => {
+    const { dayLine } = await import("./prompt/floor.ts");
+    const view = { startsAt: "2026-10-27T13:00:00.000Z", endsAt: "2026-10-28T13:00:00.000Z", trades: 0, volumeBnb: 0, floor: { trades: 3, volumeBnb: 0.02 }, passed: false };
+    const line = dayLine({ ...view, noFloor: true }, Date.parse("2026-10-28T12:30:00Z"));
+    expect(line).toBe("today: 0 trades, 0 BNB of volume; warm-up: no floor tonight (the warm-up dinner eats nobody); dinner at 21:00 UTC+8, in 30 min");
+    expect(dayLine(view, Date.parse("2026-10-28T12:30:00Z"))).toContain("not yet");
+  });
+});
+

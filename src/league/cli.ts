@@ -82,7 +82,7 @@ import { LeagueSite, seatingOfKept, siteFromEnv, type LeagueRead } from "./regis
 import { runAgent, statusOf } from "./runtime.ts";
 import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./script/check.ts";
 import { standingLines, type StandingInput } from "./season-card.ts";
-import { noFloorTonight, readGate, SEASON_OVER_LINE, type GateState } from "./season-gate.ts";
+import { noFloorTonight, readGate, SEASON_OVER_LINE, startSaysWaiting, type GateState } from "./season-gate.ts";
 import { sessionView, signInEndOf, signInLine } from "./session.ts";
 import { readVersion, versionLine, versionView } from "./version.ts";
 import { askChoice, autopilotChoice, prepareStart } from "./start.ts";
@@ -434,7 +434,8 @@ async function main(argv: string[]): Promise<number> {
         const pid = detach(home, name, [...extra, ...(command === "resume" ? ["--clear-pause"] : []), ...(jitterMs > 0 ? ["--start-jitter", String(Math.ceil(jitterMs / 1_000))] : [])]);
         console.log(`started "${name}" in the background (pid ${pid}); feast-league status ${name}`);
         if (jitterLine) console.log(jitterLine);
-        if (agent.league?.waitForSeason) console.log(waitingLine(name));
+        // Addendum 10: only while the gate is not open (a restart in the season, or after it, waits for nothing).
+        if (startSaysWaiting(agent.league?.waitForSeason === true, readGate(home, name))) console.log(waitingLine(name));
         return 0;
       }
       if (jitterLine && command !== "run") console.log(jitterLine);
@@ -537,6 +538,7 @@ async function main(argv: string[]): Promise<number> {
         signInEndsAt: signInEnd === null ? null : new Date(signInEnd).toISOString(),
       };
       const gate = data.season;
+      const seasonOverNow = gate?.state === "over";
       const waiting = gate && gate.state === "waiting" ? [`waiting for the season (${gate.opensAt ? `opens ${utc8(Date.parse(gate.opensAt))} UTC+8` : "opens when feast.meme announces the start"}): it trades nothing before`] : [];
       const ago = (at: string | null) => (at ? `${duration(Date.now() - Date.parse(at), "en")} ago` : "never");
       const signed = (n: number) => `${n >= 0 ? "+" : ""}${Number(n.toPrecision(6))} BNB`;
@@ -546,7 +548,10 @@ async function main(argv: string[]): Promise<number> {
             ...(mine.prompt
               ? [
                   `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: feast-league start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
-                  ...(s.agent!.ask && s.agent!.ask.with !== "none"
+                  // Addendum 10: after the season, nothing about asking or the floor keeper: the season-over line says it all.
+                  ...(seasonOverNow
+                    ? []
+                    : s.agent!.ask && s.agent!.ask.with !== "none"
                     ? [
                         `asking ${hostShown(s.agent!.ask.with)} every ${s.agent!.ask.every} min · last ask ${askState.last ? `${utc8(askState.last.at)} UTC+8 → ${askState.last.action}${askState.last.reason ? ` (${clean(askState.last.reason, 80)})` : ""}: ${clean(askState.last.result, 80)}` : "none yet"} · failures in a row ${askState.streak}${askState.floorKeeperSince !== null ? ` · on floor keeper since ${utc8(askState.floorKeeperSince)} UTC+8` : ""}`,
                         mine.autopilot ? `floor keeper: ${mine.autopilot.preset}, when ${hostShown(s.agent!.ask.with)} fails twice in a row, and 20 min before dinner with the floor unmet` : "floor keeper: none",
@@ -557,7 +562,7 @@ async function main(argv: string[]): Promise<number> {
                   ...(mine.wallet ? [`wallet: ${mine.wallet.balanceBnb} BNB, ${mine.wallet.spendableBnb} spendable (${mine.wallet.gasReserveBnb} kept for gas); left today ${mine.headroom.leftTodayBnb} BNB, this season ${mine.headroom.leftSeasonBnb} BNB`] : []),
                   `last trade ${ago(mine.lastTradeAt)}; last action by your agent ${ago(mine.lastActionAt)}`,
                   ...(mine.day ? [dayLine(mine.day, Date.now())] : []),
-                  ...(mine.day && !mine.day.passed && !mine.autopilot?.active
+                  ...(mine.day && !mine.day.passed && !mine.day.noFloor && !seasonOverNow && !mine.autopilot?.active
                     ? [
                         // Addendum 7: in ask mode the unified line (the asks, then the floor keeper), not league-v5's first cut.
                         s.agent!.ask && s.agent!.ask.with !== "none" && mine.autopilot
@@ -580,7 +585,7 @@ async function main(argv: string[]): Promise<number> {
           ...waiting,
           // Task 975, addendum 8: the season's end, the warm-up dinner, the release, the sign-in.
           ...(gate?.state === "over" ? [SEASON_OVER_LINE] : []),
-          ...(s.agent!.track === "prompt" && noFloorTonight(gate?.at ? (gate as GateState) : null, Date.now()) ? ["warm-up tonight: no floor (the warm-up dinner eats nobody); the floor counts from tomorrow"] : []),
+          ...(s.agent!.track === "prompt" && !mine?.day && noFloorTonight(gate?.at ? (gate as GateState) : null, Date.now()) ? ["warm-up tonight: no floor (the warm-up dinner eats nobody); the floor counts from tomorrow"] : []),
           ...(versionLine(release) ? [versionLine(release)!] : []),
           ...(s.agent!.track !== "entry" && signInLine(signInEnd, utc8) ? [signInLine(signInEnd, utc8)!] : []),
           // It runs on this machine: say so, and when it last slept (task 975, addendum 3).

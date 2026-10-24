@@ -36,6 +36,7 @@ import { nextDinner } from "./prompt/floor.ts";
 import { nextSlowRead, pollCadence, writeCadence, type Cadence } from "./feed/cadence.ts";
 import { sessionNotice, utc8 } from "./register/copy.ts";
 import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
+import { errorLine } from "./rpc.ts";
 import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, warmUpDinner, writeGate } from "./season-gate.ts";
 import { leagueDayKey, readVersion, versionNotice, versionPath, versionView, writeVersion } from "./version.ts";
 import { healthFlag, withHealth, type Health } from "./headers.ts";
@@ -1360,11 +1361,12 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           } else save();
           tickFails = 0;
         } catch (error) {
-          const reason = String((error as Error).message).slice(0, 300);
+          // Redacted before it is written (addendum 10): no URL (a keyed primary's), no request body, no address.
+          const reason = errorLine(error, 300);
           tickFails += 1;
           log("tick.failed", { reason, inARow: tickFails });
           // Three in a row is told, once a streak (addendum 8): until then a passing RPC hiccup is the log's.
-          if (tickFails === 3) notify("failure", `the loop's pass (balance, marks, exits) failed 3 times in a row: ${reason.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>").slice(0, 160)}; it keeps trying, and its exits wait for a pass that works`);
+          if (tickFails === 3) notify("failure", `the loop's pass (balance, marks, exits) failed 3 times in a row: ${reason.slice(0, 160)}; it keeps trying, and its exits wait for a pass that works`);
         }
       }
       if (!signedOut && pastEnd(session, now)) {

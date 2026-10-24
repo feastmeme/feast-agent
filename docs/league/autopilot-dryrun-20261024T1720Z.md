@@ -121,8 +121,8 @@ Enter maplegrin.ai in season 1
 | Then | one more message, under the same yes, that opens maplegrin.ai's notes session for season 1 (EIP-712 NoteSession) |
 | Last | your agent "maplegrin" starts and waits for the season (its card is below) |
 | Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |
-| Register | wallet `0x543D…bff0`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
-| NoteSession | wallet `0x543D…bff0`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
+| Register | wallet `0x9289…1341`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
+| NoteSession | wallet `0x9289…1341`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
 ```
 ### `FL enter --name maplegrin.ai --lang en`, before the season (Saturday): the agent section under the entry card
 
@@ -209,8 +209,8 @@ maplegrin.ai 报名第 1 季
 | 然后 | 再签一条消息，开通 maplegrin.ai 第 1 季的笔记会话（EIP-712 NoteSession），同一个「好」 |
 | 最后 | 启动你的 agent「maplegrin」，等待赛季开始（它的卡片在下面） |
 | 签名域 | EIP-712 typed data（V4）：name `Feast League`，version `1`，chainId `56`（BNB Smart Chain），没有 verifying contract |
-| Register | wallet `0xF9eD…0eac`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
-| NoteSession | wallet `0xF9eD…0eac`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
+| Register | wallet `0xE45f…4803`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
+| NoteSession | wallet `0xE45f…4803`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
 ```
 ### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the agent section under the entry card
 

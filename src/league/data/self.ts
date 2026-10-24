@@ -9,6 +9,7 @@ import { LEAGUE_CAP_BNB } from "../prompt/constants.ts";
 import { dayCount, dayView, leftOut, tailLines, type DayView } from "../prompt/floor.ts";
 import { lastHostAction, lastTradeAt, promptChanged, within } from "../prompt/host.ts";
 import { statusOf } from "../runtime.ts";
+import { noFloorTonight, readGate } from "../season-gate.ts";
 import { agentPaths, readLedger } from "../store.ts";
 import { untrusted, type Untrusted } from "./untrusted.ts";
 
@@ -255,7 +256,11 @@ export async function selfView(
     lastTradeAt: iso(lastTrade),
     lastActionAt: iso(host?.at ?? null),
     lastAction: host?.what ?? null,
-    day: dayView(dayCount(home, name, deps.now, leftOut(home, book?.launched?.coin))),
+    // Addendum 10: on the warm-up dinner's day the view says there is no floor, so no line reads "not yet".
+    day: (() => {
+      const view = dayView(dayCount(home, name, deps.now, leftOut(home, book?.launched?.coin)));
+      return noFloorTonight(readGate(home, name), deps.now) ? { ...view, noFloor: true } : view;
+    })(),
     wallet: balanceWei === null ? null : { balanceBnb: weiToBnb(balanceWei), gasReserveBnb: agent.limits.gasReserveBnb, spendableBnb: r(Math.max(0, weiToBnb(balanceWei) - agent.limits.gasReserveBnb)) },
     headroom: headroomOf(book, agent.limits, spentWei, deps.now),
     recentFills: fills,

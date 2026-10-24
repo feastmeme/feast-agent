@@ -76,6 +76,9 @@ export function noFloorTonight(g: GateState | null, now: number): boolean {
   return (today > now ? today : today + DAY_MS) === at;
 }
 
+/** Does `FL start` say "waits for the season" (addendum 10)? Only for an agent that waits, and only while its gate is not open. */
+export const startSaysWaiting = (waitForSeason: boolean, g: GateState | null) => waitForSeason && g?.state !== "open" && g?.state !== "over";
+
 /** The line a refused request and `FL status` say while the gate is closed. */
 export function seasonClosedLine(opensAt: number | null): string {
   return opensAt === null ? "the season has not started; it opens when feast.meme announces the start" : `the season has not started; it opens at ${utc8(opensAt)} (UTC+8)`;

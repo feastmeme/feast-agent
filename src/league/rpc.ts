@@ -34,6 +34,22 @@ const isLocal = (url: string) => {
 /** How an endpoint is named in a log line: the primary as such, a fallback by its host. */
 export const endpointLabel = (urls: readonly string[], i: number) => (i === 0 ? "primary" : (() => { try { return new URL(urls[i]!).host; } catch { return `fallback ${i}`; } })());
 
+/**
+ * An error, fit for a log line or a notice (addendum 10): viem's `shortMessage` when it has one (never the
+ * "Request body:", the "URL:" or the "Details:" its long message adds), no URL (a primary's may carry a key), no
+ * address (a request body may name the wallet), one line.
+ */
+export function errorLine(error: unknown, max = 200): string {
+  const e = error as { shortMessage?: unknown; message?: unknown } | null;
+  const raw = typeof e?.shortMessage === "string" && e.shortMessage ? e.shortMessage : String(e?.message ?? error);
+  return raw
+    .split(/\n|\s(?:Request body|URL|Details|Version|Raw Call Arguments|Contract Call):/)[0]!
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>")
+    .replace(/0x[0-9a-fA-F]{40,}/g, "0x…")
+    .trim()
+    .slice(0, max);
+}
+
 /** A failure of the way to the node, not an answer from it. */
 export function transportFailure(error: unknown): boolean {
   const e = error as { name?: unknown; code?: unknown; status?: unknown; cause?: unknown; message?: unknown } | null;
@@ -73,7 +89,7 @@ export function fallbackRpc(urls: readonly string[], o: FallbackOptions = {}): {
       try {
         const answer = await requests[i]!(args);
         if (i !== current) {
-          o.onSwitch?.({ from: endpointLabel(urls, current), to: endpointLabel(urls, i), reason: last ? String((last as Error).message ?? last).slice(0, 120).replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>") : "back" });
+          o.onSwitch?.({ from: endpointLabel(urls, current), to: endpointLabel(urls, i), reason: last ? errorLine(last, 120) : "back" });
           current = i;
         }
         return answer;
