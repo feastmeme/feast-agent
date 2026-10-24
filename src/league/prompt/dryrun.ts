@@ -210,7 +210,7 @@ process.stdin.on("end", () => {
 }
 
 /** Run a scene with the stub on PATH; the virtual clock waits for an ask in flight (a child takes real milliseconds). */
-async function runAsking(s: Scene, until: number, mode: string): Promise<{ packs: string }> {
+async function runAsking(s: Scene, until: number, mode: string, extra: Partial<Parameters<typeof runAgent>[0]> = {}): Promise<{ packs: string }> {
   const stub = stubClaude();
   const saved = { PATH: process.env.PATH, DRYRUN_CLI_MODE: process.env.DRYRUN_CLI_MODE };
   process.env.PATH = `${stub.bin}:${process.env.PATH ?? ""}`;
@@ -218,6 +218,7 @@ async function runAsking(s: Scene, until: number, mode: string): Promise<{ packs
   let inflight: Promise<unknown> | null = null;
   try {
     await run(s, until, {
+      ...extra,
       askHost: (o) => {
         const p = callHost(o);
         inflight = p;
@@ -296,6 +297,47 @@ async function askFailing(): Promise<void> {
   const notices = existsSync(agentPaths(s.home, "maplegrin").notifications) ? readFileSync(agentPaths(s.home, "maplegrin").notifications, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { at: string; kind: string; text: string }).filter((n) => n.kind === "ask" || n.kind === "autopilot") : [];
   say(`\nThe notifications:\n${notices.map((n) => `- ${hm(Date.parse(n.at))} ${n.kind}: ${n.text}`).join("\n")}\n`);
   fillTable(fills(s.home));
+}
+
+/** The snapshot as lane 976 will send it: `features`, and per coin its windows, flow, impacts and meta. */
+function serverSide(s: Scene): void {
+  const rows = BOARD.map((b) => ({
+    ...coinRow(b.coin, { symbol: b.symbol, volume24hBnb: b.volume, trades24h: b.trades, launchedAt: b.young ? new Date(s.c.now() - 20 * MIN).toISOString() : "2026-10-20T00:00:00.000Z" }),
+    windows: { m5: { changePct: 0.5, volumeBnb: b.volume / 288, trades: 2, buys: 1, sells: 1 }, m15: { changePct: 1.2, volumeBnb: b.volume / 96, trades: 6, buys: 3, sells: 3 }, h1: { changePct: -2, volumeBnb: b.volume / 24, trades: 20, buys: 10, sells: 10 }, h24: { changePct: 15, volumeBnb: b.volume, trades: b.trades, buys: b.trades / 2, sells: b.trades / 2 } },
+    flow2m: { buys: 1, sells: 1, buyBnb: 0.01, sellBnb: 0.008, netBnb: 0.002, largestBnb: 0.01 },
+    impact: { buy: { "0.005": 0.3, "0.01": 0.6, "0.02": 1.2, "0.05": 3 }, sell: { "0.005": 0.4, "0.01": 0.8, "0.02": 1.6, "0.05": 4 }, roundTripFeePct: 2.0096 },
+    meta: { type: "bnb", quoteSymbol: "WBNB", marketCapBnb: 10, openingCapBnb: 0.5, roundTripFeePct: 2.0096, ageMinutes: 600 },
+  }));
+  s.feed.snapshot = () => ({ status: 200, body: { ...snapshotBody({ coins: rows }), features: ["windows", "flow2m", "impact", "meta", "launches", "freshness", "mostActive15m"], launches: [], freshness: { blockTimeAgeSeconds: 2 }, mostActive15m: BOARD.slice(2).map((b) => b.coin.toLowerCase()) }, etag: '"srv"' });
+  const league = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: new Date(DINNER).toISOString() } });
+  const field = Array.from({ length: 30 }, (_, i) => ({ rank: i + 1, name: `agent${i + 1}.ai`, wallet: `0x${(0xaa00 + i).toString(16).padStart(40, "0")}`, pnlBnb: 0.01 - i * 0.001, danger: i > 25, eaten: null, bodyCoin: null, hp: 0 }));
+  s.feed.other = (url) => (url.origin === SITE && url.pathname === "/api/league" ? { status: 200, body: url.searchParams.get("field") === "1" ? { ...league, field } : league } : null);
+}
+
+async function atScale(): Promise<void> {
+  section("(l) At 10,000 agents: the server's picture, the field, the snapshot by need (addendum 6)");
+  say("The same asks as (i), twice: on today's snapshot (the candles and the quoter local), and on the snapshot lane 976 will send (`features`: windows, flow2m, impact, meta, launches, freshness, mostActive15m) with lane 978's `field=1`. Then 30 minutes flat and 30 minutes holding, counting the snapshot reads.\n");
+  const rows: string[] = ["| the snapshot | requests to feast.meme per ask (league + candles) | quotes per ask | asked with `me=` | from |", "| --- | --- | --- | --- | --- |"];
+  for (const server of [false, true]) {
+    const s = scene(at8("14:00"), { hostTradedAt: at8("13:55"), ask: { every: 5, with: "claude" } });
+    if (server) serverSide(s);
+    await runAsking(s, at8("14:16"), "hold");
+    const packs = logOf(s.home).filter((l) => l.event === "ask.pack");
+    const withMe = s.feed.asked.filter((a) => a.url.includes("/api/league?") && a.url.includes("me=")).length;
+    rows.push(`| ${server ? "with features (lane 976) and field=1 (978)" : "today's (no features)"} | ${packs.map((l) => String(l.requests)).join(", ")} | ${server ? 0 : "up to 12"} | ${withMe} | ${server ? "server windows, flow, impacts, meta; the field's standing" : "local candles and quotes; the arena's standing"} |`);
+  }
+  say(rows.join("\n"));
+  say("");
+  const counts: string[] = ["| 30 minutes | snapshot reads | the cadence |", "| --- | --- | --- |"];
+  for (const holding of [false, true]) {
+    const s = scene(at8("14:00"), { hostTradedAt: at8("13:55"), ask: { every: 5, with: "claude" } });
+    if (holding) hostBuy(s, at8("14:00"), BOARD[2]!.coin, 0.004);
+    await runAsking(s, at8("14:30"), "hold", { pollMs: 5_000, loopMs: 1_000 }).catch(() => undefined);
+    const cadence = readFileSync(join(agentPaths(s.home, "maplegrin").dir, "cadence.json"), "utf8");
+    counts.push(`| ${holding ? "holding a position" : "flat"} | ${s.feed.snapshots().length} | ${(JSON.parse(cadence) as { mode: string; why: string }).mode}: ${(JSON.parse(cadence) as { why: string }).why} |`);
+  }
+  say(counts.join("\n"));
+  say("\n(At the default `--poll 5`: fast mode is every 5–8 s, a flat agent every 30–60 s and once before each of its 6 asks. Before this addendum a listening strategy read every 5–8 s all day; a flat agent now reads about a sixth as often as a fast one, and the CDN answers most of those with a 304.)");
 }
 
 async function askGuard(): Promise<void> {
@@ -518,6 +560,7 @@ async function main(): Promise<void> {
   await askTick();
   await askFailing();
   await askGuard();
+  await atScale();
   section("The numbers");
   say("(The first 60 minutes are cut at the dinner: the next day's fills are not in them.)\n");
   say("| scene | took over (UTC+8) | steady's fills in its first 60 min | their volume | the day's floor | steady's buys that day |");

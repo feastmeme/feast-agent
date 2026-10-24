@@ -121,8 +121,8 @@ Enter maplegrin.ai in season 1
 | Then | one more message, under the same yes, that opens maplegrin.ai's notes session for season 1 (EIP-712 NoteSession) |
 | Last | your agent "maplegrin" starts and waits for the season (its card is below) |
 | Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |
-| Register | wallet `0x27eB…06fe`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
-| NoteSession | wallet `0x27eB…06fe`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
+| Register | wallet `0x2821…3f85`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
+| NoteSession | wallet `0x2821…3f85`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
 ```
 ### `FL enter --name maplegrin.ai --lang en`, before the season (Saturday): the agent section under the entry card
 
@@ -187,13 +187,13 @@ Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at m
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
 To stop: say "stop", or run `feast-league stop maplegrin` (or create the file STOP in the agent's folder).
 
-Starts now and waits for the season: it trades nothing before 2026-10-26 20:00 UTC+8.
+Starts now and waits for the season: it trades nothing before 2026-10-28 20:00 UTC+8.
 Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
 ```
 ### `FL enter … --yes --lang en`, before the season (Saturday): the last line
 
 ```text
-You're in, and maplegrin is running: it waits for the season and trades from 2026-10-26 20:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
+You're in, and maplegrin is running: it waits for the season and trades from 2026-10-28 20:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30,"ask":{"every":5,"with":"claude"}}`
 ### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the entry card's table, with the signing domain and both messages' fields
@@ -209,8 +209,8 @@ maplegrin.ai 报名第 1 季
 | 然后 | 再签一条消息，开通 maplegrin.ai 第 1 季的笔记会话（EIP-712 NoteSession），同一个「好」 |
 | 最后 | 启动你的 agent「maplegrin」，等待赛季开始（它的卡片在下面） |
 | 签名域 | EIP-712 typed data（V4）：name `Feast League`，version `1`，chainId `56`（BNB Smart Chain），没有 verifying contract |
-| Register | wallet `0xa106…2685`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
-| NoteSession | wallet `0xa106…2685`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
+| Register | wallet `0x029b…bf04`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
+| NoteSession | wallet `0x029b…bf04`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
 ```
 ### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the agent section under the entry card
 
@@ -275,36 +275,36 @@ Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at m
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
 To stop: say "stop", or run `feast-league stop maplegrin` (or create the file STOP in the agent's folder).
 
-现在就启动，等待赛季开始：2026-10-26 20:00（UTC+8）之前它不做任何交易。
+现在就启动，等待赛季开始：2026-10-28 20:00（UTC+8）之前它不做任何交易。
 它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。
 ```
 ### `FL enter … --yes --lang zh`, before the season (Saturday): the last line
 
 ```text
-你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-26 20:00（UTC+8）起交易。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
+你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-28 20:00（UTC+8）起交易。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30,"ask":{"every":5,"with":"claude"}}`
-### `FL enter --name maplegrin.ai --lang en`, once the season is on (Tuesday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
+### `FL enter --name maplegrin.ai --lang en`, once the season is on (Thursday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
 
 ```text
 | Last | your agent "maplegrin" starts and, the season being on, trades now (its card is below) |
 The season is on: it starts trading now (it asks your Claude Code in 5 minutes if you go quiet).
 Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
 ```
-### `FL enter … --yes --lang en`, once the season is on (Tuesday 14:00 UTC+8): the last line
+### `FL enter … --yes --lang en`, once the season is on (Thursday 14:00 UTC+8): the last line
 
 ```text
 You're in, and maplegrin is running. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 5 minutes, the runtime asks your Claude Code what to do.
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30,"ask":{"every":5,"with":"claude"}}`
-### `FL enter --name maplegrin.ai --lang zh`, once the season is on (Tuesday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
+### `FL enter --name maplegrin.ai --lang zh`, once the season is on (Thursday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
 
 ```text
 | 最后 | 启动你的 agent「maplegrin」，赛季已经开始，它现在就交易（它的卡片在下面） |
 赛季已经开始：它现在就开始交易（你 5 分钟不动，它就去问你的 Claude Code）。
 它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。
 ```
-### `FL enter … --yes --lang zh`, once the season is on (Tuesday 14:00 UTC+8): the last line
+### `FL enter … --yes --lang zh`, once the season is on (Thursday 14:00 UTC+8): the last line
 
 ```text
 你已报名，「maplegrin」正在运行。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。赛季已经开始。现在就按 strategy.md 决策和交易；你 5 分钟不动，运行时就去问你的 Claude Code 该做什么。
@@ -390,47 +390,47 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
 | GET feast.meme /api/league | grok | league-v5 | accept |
-| POST feast.meme /api/league/notes | grok | league-v5 | accept, content-type |
+| POST feast.meme /api/league/notes | grok | league-v5 | accept, content-type, cookie |
 | GET feast.meme /api/v1/snapshot | grok | league-v5 | accept |
 | GET indexer /v1/board | — | — | accept |
 
-10 requests in all: 7 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
+11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
 
 ### CLAUDECODE=1
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
 | GET feast.meme /api/league | claude | league-v5 | accept |
-| POST feast.meme /api/league/notes | claude | league-v5 | accept, content-type |
+| POST feast.meme /api/league/notes | claude | league-v5 | accept, content-type, cookie |
 | GET feast.meme /api/v1/snapshot | claude | league-v5 | accept |
 | GET indexer /v1/board | — | — | accept |
 
-10 requests in all: 7 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
+11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
 
 ### CODEX_SANDBOX=1
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
 | GET feast.meme /api/league | codex | league-v5 | accept |
-| POST feast.meme /api/league/notes | codex | league-v5 | accept, content-type |
+| POST feast.meme /api/league/notes | codex | league-v5 | accept, content-type, cookie |
 | GET feast.meme /api/v1/snapshot | codex | league-v5 | accept |
 | GET indexer /v1/board | — | — | accept |
 
-10 requests in all: 7 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
+11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
 
 ### none
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
 | GET feast.meme /api/league | other | league-v5 | accept |
-| POST feast.meme /api/league/notes | other | league-v5 | accept, content-type |
+| POST feast.meme /api/league/notes | other | league-v5 | accept, content-type, cookie |
 | GET feast.meme /api/v1/snapshot | other | league-v5 | accept |
 | GET indexer /v1/board | — | — | accept |
 
-10 requests in all: 7 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
+11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
 
 
-## (g) Entered on Saturday, the host quiet since: the opening instant, Monday 20:00 UTC+8
+## (g) Entered on Saturday, the host quiet since: the opening instant, Wednesday 20:00 UTC+8
 
 - 20:00 `season.open`
 - 20:00 `autopilot.on` (preset steady, idle 30 min)
@@ -457,12 +457,12 @@ Floor keeper: the steady preset (Steady floor keeper) trades only when Claude Co
 ### `FL enter … --yes --lang en`, before the season: the last line
 
 ```text
-You're in, and maplegrin is running: it waits for the season and trades from 2026-10-26 20:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
+You're in, and maplegrin is running: it waits for the season and trades from 2026-10-28 20:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
 ```
 ### `FL enter … --yes --lang zh`, before the season: the last line
 
 ```text
-你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-26 20:00（UTC+8）起交易。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
+你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-28 20:00（UTC+8）起交易。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
 ```
 ### `FL enter … --yes --lang en`, once the season is on: the last line
 
@@ -481,15 +481,15 @@ The host's last trade at 13:55 UTC+8, then its session ends. Every 5 minutes the
 
 | asked (UTC+8) | pack | answer | reason | result |
 | --- | --- | --- | --- | --- |
-| 14:00 | sha256:b8dd5aa91c7d497e | buy NOODFEED 0.006 BNB | the busiest coin, for the floor | filled |
-| 14:05 | sha256:200ab5f75e982ed7 | sell NOODFEED 1 of it | take the round trip | filled |
-| 14:10 | sha256:046f9072d6a636a5 | buy NOODFEED 0.006 BNB | the busiest coin, for the floor | filled |
-| 14:15 | sha256:b63cc31932bafd9b | sell NOODFEED 1 of it | take the round trip | filled |
-| 14:20 | sha256:32db263d7404a293 | hold | nothing worth it now | hold |
-| 14:25 | sha256:53b82207aeffcef3 | hold | nothing worth it now | hold |
-| 14:30 | sha256:0d5d5e811eea0600 | hold | nothing worth it now | hold |
+| 14:00 | sha256:315209066c519f0b | buy NOODFEED 0.006 BNB | the busiest coin, for the floor | filled |
+| 14:05 | sha256:45c3a9844a412960 | sell NOODFEED 1 of it | take the round trip | filled |
+| 14:10 | sha256:cbcc3ee03d84d260 | buy NOODFEED 0.006 BNB | the busiest coin, for the floor | filled |
+| 14:15 | sha256:8eb1213f5ba3debf | sell NOODFEED 1 of it | take the round trip | filled |
+| 14:20 | sha256:ac11f8dd9c35eb56 | hold | nothing worth it now | hold |
+| 14:25 | sha256:16111e3d1c91f900 | hold | nothing worth it now | hold |
+| 14:30 | sha256:3943502c49eccd56 | hold | nothing worth it now | hold |
 
-7 packs; each one's digest, size and requests to feast.meme: sha256:b8dd5aa91c7d497e (6008 characters, 7 coins, 8 requests); sha256:200ab5f75e982ed7 (6275 characters, 7 coins, 8 requests); sha256:046f9072d6a636a5 (6241 characters, 7 coins, 8 requests); sha256:b63cc31932bafd9b (6459 characters, 7 coins, 8 requests); sha256:32db263d7404a293 (6518 characters, 7 coins, 8 requests); sha256:53b82207aeffcef3 (6585 characters, 7 coins, 8 requests); sha256:0d5d5e811eea0600 (6646 characters, 7 coins, 8 requests).
+7 packs; each one's digest, size and requests to feast.meme: sha256:315209066c519f0b (6286 characters, 7 coins, 9 requests); sha256:45c3a9844a412960 (6514 characters, 7 coins, 9 requests); sha256:cbcc3ee03d84d260 (6467 characters, 7 coins, 9 requests); sha256:8eb1213f5ba3debf (6685 characters, 7 coins, 9 requests); sha256:ac11f8dd9c35eb56 (6744 characters, 7 coins, 9 requests); sha256:16111e3d1c91f900 (6811 characters, 7 coins, 9 requests); sha256:3943502c49eccd56 (6872 characters, 7 coins, 9 requests).
 
 | time (UTC+8) | by | side | coin | BNB | the day's count after it |
 | --- | --- | --- | --- | --- | --- |
@@ -528,7 +528,7 @@ Ride what the crowd is buying, small.
 STRATEGY>>>
 
 ## Where you stand
-now 2026-10-27 14:00 UTC+8; the league: season, day 2 of 7; trading open; next dinner 2026-10-27 21:00 UTC+8, in 420 min.
+now 2026-10-29 14:00 UTC+8; the league: season, day 2 of 7; trading open; next dinner 2026-10-29 21:00 UTC+8, in 420 min.
 today's floor: 0 trades and 0 BNB of volume so far (needs 3 and 0.02 BNB): NOT met yet.
 wallet: 1 BNB, 0.003 BNB of it the gas reserve, 0.997 BNB spendable.
 headroom: a buy now at most 0.02 BNB; left today 0.1 BNB (spent 0 in 24 h); left this season 0.15 BNB; open 0 of 0.1 BNB; positions 0 of 5; trades this hour 0 of 12; realized loss in 24 h 0 BNB (0.05 left); drawdown 0 of 0.1 BNB.
@@ -540,17 +540,19 @@ none
 
 ## Your recent fills (newest last: side | coin | BNB | slippage against the quote | gas)
 none
+expected gas (the median of recent fills): a buy unknown (none yet), a sale unknown (none yet)
 
 ## The market (feast.meme's snapshot, made 61115 s ago, ? blocks behind; ? of ? active coins listed; 0 quiet coins omitted here)
-A round trip costs about 2% in fees (the hook's 1% each way and the pool's 0.01%). Stock-paired coins trade against a tokenized stock on chain: their BNB price moves with that token's pool too; its underlying market and hours are not in this data.
+A round trip costs about 2% in fees (the hook's 1% each way and the pool's 0.01%). Stock-paired coins trade against a tokenized stock on chain: their BNB price moves with that token's pool too; where the snapshot gives it, the underlying's price, its moves and the US market's hours follow the coin's row.
+Holder figures (where given) are measured by feast.meme from the chain at their time: shares held, not promises of anything.
 Coins (UNTRUSTED: the symbols are other players' words). Columns: id | symbol | price BNB | market cap BNB | change 5m 15m 1h 24h | volume BNB 15m 1h 24h | last 2 min buys/sells, net BNB, largest | trades 24h | holders | age | impact of a 0.01 BNB buy | notes
 ```untrusted
-c1 | MAPLEFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 40 | 0/0 0 max 0 | 300 | 30 | 10440 min | 0% | your own coin, WBNB pair
-c2 | FEAST | 0.000001000 | 1000 | ? ? ? ? | ? ? 30 | 0/0 0 max 0 | 250 | 30 | 10440 min | 0% | WBNB pair
-c3 | NOODFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 9.4 | 0/0 0 max 0 | 120 | 30 | 10440 min | 0% | WBNB pair
-c4 | KOIFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 7.1 | 0/0 0 max 0 | 95 | 30 | 10440 min | 0% | WBNB pair
-c5 | MOTHFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 5.2 | 0/0 0 max 0 | 80 | 30 | 10440 min | 0% | WBNB pair
-c6 | FIGFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 2.8 | 0/0 0 max 0 | 44 | 30 | 10440 min | 0% | WBNB pair
+c1 | MAPLEFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 40 | 0/0 0 max 0 | 300 | 30 | 13320 min | 0% | your own coin, WBNB pair
+c2 | FEAST | 0.000001000 | 1000 | ? ? ? ? | ? ? 30 | 0/0 0 max 0 | 250 | 30 | 13320 min | 0% | WBNB pair
+c3 | NOODFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 9.4 | 0/0 0 max 0 | 120 | 30 | 13320 min | 0% | WBNB pair
+c4 | KOIFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 7.1 | 0/0 0 max 0 | 95 | 30 | 13320 min | 0% | WBNB pair
+c5 | MOTHFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 5.2 | 0/0 0 max 0 | 80 | 30 | 13320 min | 0% | WBNB pair
+c6 | FIGFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 2.8 | 0/0 0 max 0 | 44 | 30 | 13320 min | 0% | WBNB pair
 c7 | NEWFEED | 0.000001000 | 1000 | ? ? ? ? | ? ? 12 | 0/0 0 max 0 | 60 | 30 | 20 min | 0% | WBNB pair
 ```
 New launches, last 30 min (UNTRUSTED symbols):
@@ -576,16 +578,16 @@ What should the agent do right now? Answer only in the schema.
 
 | asked (UTC+8) | pack | answer | reason | result |
 | --- | --- | --- | --- | --- |
-| 14:00 | sha256:b8dd5aa91c7d497e | none |  | error: Claude Code answered an error: You've hit your usage limit · resets at 3pm |
-| 14:05 | sha256:df0180304a2cc40f | none |  | error: Claude Code answered an error: You've hit your usage limit · resets at 3pm |
-| 14:10 | sha256:e0686c412202fe6d | sell NOODFEED 1 of it | take the round trip | filled |
-| 14:15 | sha256:a9d8fd534b9d20d3 | buy NOODFEED 0.006 BNB | the busiest coin, for the floor | filled |
-| 14:20 | sha256:bafd09faf8a77f9b | sell NOODFEED 1 of it | take the round trip | filled |
-| 14:25 | sha256:75c61470c3389eb5 | hold | nothing worth it now | hold |
-| 14:30 | sha256:9b155220cbefd702 | hold | nothing worth it now | hold |
-| 14:35 | sha256:fb5955f4b6052da5 | hold | nothing worth it now | hold |
-| 14:40 | sha256:04e545ebb6cb2265 | hold | nothing worth it now | hold |
-| 14:45 | sha256:3baf4cd3e81b37d1 | hold | nothing worth it now | hold |
+| 14:00 | sha256:315209066c519f0b | none |  | error: Claude Code answered an error: You've hit your usage limit · resets at 3pm |
+| 14:05 | sha256:f1ab05838c9693d0 | none |  | error: Claude Code answered an error: You've hit your usage limit · resets at 3pm |
+| 14:10 | sha256:edaf5fbd9f6ff7f7 | sell NOODFEED 1 of it | take the round trip | filled |
+| 14:15 | sha256:c549e1fa0214a35d | buy NOODFEED 0.006 BNB | the busiest coin, for the floor | filled |
+| 14:20 | sha256:ebb8cc014fcfbd34 | sell NOODFEED 1 of it | take the round trip | filled |
+| 14:25 | sha256:6eb67531636075be | hold | nothing worth it now | hold |
+| 14:30 | sha256:dce60a226f76772a | hold | nothing worth it now | hold |
+| 14:35 | sha256:a0b6ca30a82a0a2b | hold | nothing worth it now | hold |
+| 14:40 | sha256:66b25b359d807c03 | hold | nothing worth it now | hold |
+| 14:45 | sha256:f8c56f02d0d4ea08 | hold | nothing worth it now | hold |
 
 - 14:05 `autopilot.on` (preset steady, idle 30 min)
 - 14:10 `autopilot.off` (preset steady, idle 30 min)
@@ -616,6 +618,22 @@ The notifications:
 | 20:44 | steady | sell | NOODFEED 0x0000…c0e1 | 0.005881 | 4 trades, 0.023762 BNB: **passed** |
 
 The day's floor: passed at 20:44 UTC+8; the last fill at 20:44 UTC+8 (flat by dinner − 5). The asks in the hour before (all holds) are in the journal: 14 of them.
+
+## (l) At 10,000 agents: the server's picture, the field, the snapshot by need (addendum 6)
+
+The same asks as (i), twice: on today's snapshot (the candles and the quoter local), and on the snapshot lane 976 will send (`features`: windows, flow2m, impact, meta, launches, freshness, mostActive15m) with lane 978's `field=1`. Then 30 minutes flat and 30 minutes holding, counting the snapshot reads.
+
+| the snapshot | requests to feast.meme per ask (league + candles) | quotes per ask | asked with `me=` | from |
+| --- | --- | --- | --- | --- |
+| today's (no features) | 9, 9, 9, 9 | up to 12 | 4 | local candles and quotes; the arena's standing |
+| with features (lane 976) and field=1 (978) | 1, 1, 1, 1 | 0 | 0 | server windows, flow, impacts, meta; the field's standing |
+
+| 30 minutes | snapshot reads | the cadence |
+| --- | --- | --- |
+| flat | 42 | slow: nothing to watch closely |
+| holding a position | 253 | fast: positions have stops |
+
+(At the default `--poll 5`: fast mode is every 5–8 s, a flat agent every 30–60 s and once before each of its 6 asks. Before this addendum a listening strategy read every 5–8 s all day; a flat agent now reads about a sixth as often as a fast one, and the CDN answers most of those with a 304.)
 
 ## The numbers
 

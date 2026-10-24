@@ -169,9 +169,9 @@ describe("the baw signer", () => {
   });
 
   it("reads Developer Mode's expiry as the live wallet gives it: an ISO date (2026-10-21)", async () => {
-    const { runner } = fake({ "wallet settings": { success: true, data: { devMode: { enabled: true, expiresAt: "2026-10-30T10:57:20+08:00", dailyLimit: 1000, balanceExceeded: false }, developerModeQuotaUsed: 2.22 } } });
+    const { runner } = fake({ "wallet settings": { success: true, data: { devMode: { enabled: true, expiresAt: "2026-10-28T10:57:20+08:00", dailyLimit: 1000, balanceExceeded: false }, developerModeQuotaUsed: 2.22 } } });
     const settings = await new BawSigner(runner).settings();
-    expect(settings.devModeExpiresAt).toBe(Math.floor(Date.parse("2026-10-30T10:57:20+08:00") / 1000));
+    expect(settings.devModeExpiresAt).toBe(Math.floor(Date.parse("2026-10-28T10:57:20+08:00") / 1000));
   });
 
   it("previews with the call as separate arguments, value in wei", async () => {
