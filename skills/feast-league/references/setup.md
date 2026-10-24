@@ -59,7 +59,7 @@ A runtime installed at `league-v1` … `league-v4` moves to `league-v5` the same
 1. **Sign in.** Use the Binance Agentic Wallet skill: `baw auth signin`, show the pairing code, and the user scans it in the Binance App. Confirm with `baw wallet status` (it should say `CONNECTED`).
 2. **Developer Mode.** The user turns it on in the Binance App. It cannot be turned on from here. The agent's trades are Developer Mode contract calls, previewed and then executed, one at a time.
 3. **The daily limit.** Developer Mode has a daily limit, and the wallet's balance must stay below it. Keep in the wallet only what the agent may use.
-4. **Sessions.** A sign-in ends at its limit, about 7 days after the scan; the 48-hour inactivity window moves forward every time the agent reads the wallet. The agent says so at 6 h, at 1 h and when it ends, once each, and asks the wallet nothing while signed out: it can't trade or exit until you scan again. Developer Mode switches itself off after a week unused.
+4. **Sessions.** A sign-in ends at its limit, about 7 days after the scan; the 48-hour inactivity window moves forward every time the agent reads the wallet. The agent says so at 24 h, at 6 h, at 1 h and when it ends, once each, and asks the wallet nothing while signed out: it can't trade or exit until you scan again. Developer Mode switches itself off after a week unused.
 
 ## Where things live
 

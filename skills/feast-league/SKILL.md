@@ -165,7 +165,10 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 
 ## 8. After the start
 
-- **Status.** `FL status <name>` shows positions, spend, warm-up and the latest notifications. Relay anything new. With the ask loop it says "asking Claude Code every 5 min · last ask … → … · failures in a row N", and "on floor keeper since …" while the asks fail: tell the player why (the cause is in the notification) and how to fix it (log in again, a quota, a longer `FL every`). For a prompt agent in season it ends with "The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.": act on it. Your agent does not run by itself: you decide, and the backup only covers your silence. A prompt agent's status adds the day's line, "today: N trades, X BNB of volume (the floor: 3 and 0.02 BNB, own coin left out): passed | not yet; dinner at 21:00 UTC+8, in …", counted from this machine's runtime. While you trade, the backup stands by: the floor is yours to keep until you have gone 30 minutes without a trade. When `FL status` says the season is over, tell the player and stop the agent with their yes (`FL stop <name>`): the backup would keep a floor that no longer counts.
+- **Status.** `FL status <name>` shows positions, spend, warm-up and the latest notifications. Relay anything new. With the ask loop it says "asking Claude Code every 5 min · last ask … → … · failures in a row N", and "on floor keeper since …" while the asks fail: tell the player why (the cause is in the notification) and how to fix it (log in again, a quota, a longer `FL every`). For a prompt agent in season it ends with "The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.": act on it. Your agent does not run by itself: you decide, and the backup only covers your silence. A prompt agent's status adds the day's line, "today: N trades, X BNB of volume (the floor: 3 and 0.02 BNB, own coin left out): passed | not yet; dinner at 21:00 UTC+8, in …", counted from this machine's runtime. While you trade, the backup stands by: the floor is yours to keep until you have gone 30 minutes without a trade. When `FL status` says "season over: nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left", the runtime has closed the gate itself (feast.meme's `/api/league` said `over`): no ask, no floor keeper, no buy. Tell the player; sell what is left only if they ask (`FL sell`), and stop the agent with their yes when they are done (`FL stop <name>`).
+- **The warm-up dinner.** The season's first dinner after trading opens is the warm-up: it eats nobody and asks no floor. That day `FL status` and the pack say "warm-up tonight: no floor", and the floor keeper makes no trade for the floor; from the next day the floor counts. The runtime reads which dinner it is from the league's clock (its day), never from a date.
+- **A newer runtime.** On every league read the runtime compares its release with the one feast.meme names as newest. When it is behind, it notifies once a league day, and `FL status` says "runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent". Tell the player, and upgrade only with their yes: `npx skills add feastmeme/feast-agent`, then `FL start <name>` again. It never upgrades by itself. A page that names no release says nothing.
+- **Loud failures.** The chain's RPC falls back by itself on a transport failure (the player's `FEAST_MAINNET_RPC_URL` first, then the Binance dataseeds, then publicnode; 60 s of rest for an endpoint that failed; none behind a local node). Three failed passes of the loop in a row notify once ("the loop's pass … failed 3 times in a row"), and a note feast.meme refuses notifies too: relay both, they are not log lines only.
 - **The daily battle card.** In season, `FL status` ends with the agent's battle card for the day (`https://feast.meme/league/agent/<id>/card?day=<n>`) and the line "Post it on X today to be in tonight's airdrop". Show both to the user once a day. Never post to X for them.
 - **How often it reads.** A prompt agent reads feast.meme's snapshot by need, not on a fixed fast poll:
 
@@ -184,7 +187,7 @@ Any edit to the file makes it a new file: audit it again and check it again. The
   - Each hour, read `FL review <name>` and change parameters only with `FL set <name> … --review`.
   - A review may tighten anything and retune thresholds. It can never raise a size, a stop-loss, a slippage or a limit past what the user confirmed. The runtime refuses it if it tries.
 - **Notifications** are the user's: limit hits, failures, pauses, halts, and the sign-in or Developer Mode ending. `FL status` shows each one once; show them the next time the user talks to you.
-- **Sign-in.** The wallet's sign-in ends at its limit, about 7 days after the scan; the 48-hour inactivity window moves forward each time the agent reads the wallet. The agent says it at 6 h, at 1 h and when it ends, once each. While signed out it asks the wallet nothing and can't exit a position. It resumes by itself after the user scans again.
+- **Sign-in.** The wallet's sign-in ends at its limit, about 7 days after the scan; the 48-hour inactivity window moves forward each time the agent reads the wallet (the notes session lasts about 10 days). The entry card and `FL status` say "wallet sign-in valid until <date> UTC+8; re-scan before then or the agent stops trading". The agent says it at 24 h, at 6 h, at 1 h and when it ends, once each, and in its last 24 h each pack carries "WALLET SIGN-IN EXPIRES IN N H: the agent will stop; tell the player to run FL login.": when you see it, tell the player. `FL login` says until when the sign-in is valid and how to scan again (the Binance Agentic Wallet skill's `baw auth signin`, then the pairing code in the Binance App). While signed out it asks the wallet nothing and can't exit a position. It resumes by itself after the user scans again.
 
 ## 9. The Feast league: enter, and run
 
@@ -205,6 +208,8 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 | "why did it buy X?" | Read your own notes for that trade (the `FL note`s kept in `$FEAST_LEAGUE_HOME/agents/<name>/notes.jsonl`) and `FL status <name> --json`, and explain from them. |
 | "turn the autopilot off" / "turn it back on" | `FL stop <name>`, then `FL start <name> --prompt strategy.md --no-autopilot` (or `--autopilot steady`) shows the new card; after their yes, the same with `--yes --detach`. Say what off means: nothing trades while they are away but the hard stop-loss, and an agent under the day's floor is eaten at the dinner. |
 | "ask it less often", "every 15 minutes" | `FL every <name> 15`: the running agent asks you every 15 minutes from then on; no new card. |
+| "keep it running after a reboot" | `FL daemon <name> --install` (macOS: a LaunchAgent; Linux: a systemd user unit); `FL daemon <name> --status` to check. |
+| "my sign-in is ending", "sign in again" | `FL login`: until when the sign-in is valid; then sign them in with the Binance Agentic Wallet skill (`baw auth signin`, the pairing code, a scan in the Binance App). |
 | "stop for good" | `FL stop --all`. |
 
 ### 玩家说什么 → 你运行什么
@@ -220,6 +225,8 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 | 「为什么买 X」 | 读你自己为那笔交易写的笔记（`$FEAST_LEAGUE_HOME/agents/<name>/notes.jsonl` 里的 `FL note`）和 `FL status <name> --json`，据此解释。 |
 | 「关掉兜底」/「打开兜底」 | `FL stop <name>`，再 `FL start <name> --prompt strategy.md --no-autopilot`（或 `--autopilot steady`）给出新卡片；玩家说「好」后，同一条命令加 `--yes --detach`。说清关掉意味着什么：玩家不在时除了硬止损什么都不交易，当天没达到活动门槛的 agent 会在开饭时被吃掉。 |
 | 「少问几次」「每 15 分钟问一次」 | `FL every <name> 15`：运行中的 agent 从此每 15 分钟问你一次；不用新卡片。 |
+| 「重启后也让它跑」 | `FL daemon <name> --install`（macOS 装 LaunchAgent，Linux 装 systemd 用户服务）；`FL daemon <name> --status` 查看。 |
+| 「登录快到期了」「重新登录」 | `FL login`：看登录有效到何时；再用 Binance Agentic Wallet 技能登录（`baw auth signin`，给出配对码，在 Binance App 里扫码）。 |
 | 「彻底停止」 | `FL stop --all`。 |
 
 ### Entering, step by step
@@ -273,6 +280,8 @@ A meme is optional: one coin, launched from the player's one-line concept, on it
 
 `FL status` says it too, and when the runtime noticed a gap in its own loop, "slept N minutes at <time> UTC+8: nothing traded while it slept": when the player asks "how is it doing?", relay that line and the sentence above.
 
+**Staying up across reboots.** Offer `FL daemon <name> --install` once the agent runs: on macOS it installs a LaunchAgent, on Linux a systemd user unit, that starts the agent at log-in and after a reboot and restarts it within a minute after a crash (`FL daemon <name> --status` shows it, `--uninstall` removes it; on Linux, `loginctl enable-linger` starts it before anyone logs in, the player's choice). A stop or a refusal (a stop file, a signed-out wallet) is not restarted: `FL stop <name>` still stops it until `FL resume <name>`. After a restart the runtime first reconciles any transaction a stopped run left unsettled (booked from its receipt, or released when it was never sent, with one notification), reads the league's clock again, and picks the ask loop up where it was. The unit carries only PATH and the league's home: a keyed `FEAST_MAINNET_RPC_URL` is not copied into it. Templates for doing it by hand: `docs/league/daemon.md`.
+
 ### What it may say, and what you do
 
 | It says | Exit | You do |
@@ -302,6 +311,7 @@ A meme is optional: one coin, launched from the player's one-line concept, on it
 - Two messages are signed at entry (Register and NoteSession). Nothing about the player's setup leaves the machine; the strategy is never sent.
 - To your own AI, on this machine: each ask's pack goes to your headless CLI (`claude -p` or `codex exec`) as a child process, on stdin, from an empty folder in the agent's home, with no tools; its answer is checked and at most one trade made. Nothing new goes to feast.meme for it.
 - With every request to feast.meme, two headers: `x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5`). Never a wallet, a token, a path, a machine or a user name, a model version or the prompt.
+- With the running agent's league read, every 5 minutes, one more: `x-feast-health`, one word (`ok`, `degraded` when its RPC is on a fallback or an ask failed, `failing` after three failed passes in a row or a transaction unknown for more than 10 minutes). Nothing else: feast.meme only counts them.
 
 ### The older signed path: `FL register`
 
