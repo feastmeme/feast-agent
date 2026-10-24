@@ -1111,7 +1111,9 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         }
       }
       // Task 975, addendum 4: the ask, once the host has been silent an interval since its last trade and the last ask.
-      if (gate.open && !warming && askMode() && !asking && !askOutcome) {
+      // The first ask waits for the market's first read (at most 2 minutes from the start), so its pack has coins in it.
+      const marketRead = !feed || feed.mode !== "snapshot" || feed.held() !== null || now - startedAt > 2 * 60_000;
+      if (gate.open && !warming && askMode() && !asking && !askOutcome && marketRead) {
         const since = Math.max(lastHostAction(deps.home, deps.name)?.at ?? 0, askState.lastAskAt ?? 0, Date.parse(agent.confirmed?.at ?? "") || 0);
         if (askNow || now - since >= everyMs()) {
           askNow = false;

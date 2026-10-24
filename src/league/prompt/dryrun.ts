@@ -11,16 +11,21 @@
  * and zh. (b) the takeover: the host's last trade at Tuesday 14:00 UTC+8, a note at 14:10 (which does not hold the
  * backup back), then nothing, run to 23:00. (c) a dump: one of its coins falls 50 % between two ticks. (d) a late
  * takeover, in the rush before the dinner. (e) the host comes back 20 minutes after the takeover. (f) the requests,
- * under four hosts. (g) an agent entered days ahead, at the season's opening instant.
+ * under four hosts. (g) an agent entered days ahead, at the season's opening instant. Scenes (b)–(g) are the floor
+ * keeper alone, as for a Grok host (`--ask-with none`). Addendum 4's ask loop, through a stub `claude` on PATH run by
+ * the real adapter: (h) its card and "You're in" lines; (i) asks every 5 minutes, with the pack; (j) a failure streak
+ * and the floor keeper; (k) the dinner guard.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getAddress, type Address } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import { confirmAgent, planAgent, saveAgent } from "../agent.ts";
+import { callHost } from "../ask/host.ts";
+import { readJournal } from "../ask/journal.ts";
 import { BawSigner } from "../baw.ts";
 import { FakeEnterSite, fakeEnterChain, INDEXER as ENTER_INDEXER, SITE as ENTER_SITE } from "../enter/fakes.ts";
 import { enter } from "../enter/flow.ts";
@@ -141,13 +146,13 @@ async function enterCards(): Promise<void> {
 
 type Scene = { home: string; feed: FakeFeed; w: ReturnType<typeof marketWorld>; c: ReturnType<typeof fakeClock> };
 
-function scene(start: number, o: { confirmedAt?: number; league?: () => unknown; hostTradedAt?: number } = {}): Scene {
+function scene(start: number, o: { confirmedAt?: number; league?: () => unknown; hostTradedAt?: number; ask?: { every: number; with: "claude" | "codex" } } = {}): Scene {
   const root = tmpRoot();
   const promptPath = join(root, "strategy.md");
   writeFileSync(promptPath, "Ride what the crowd is buying, small.\n");
   // As FL enter plans it: neither flag, so the default backup.
   const choice = autopilotChoice({});
-  const planned = planAgent({ name: "maplegrin", promptPath, preset: choice.ok ? choice.preset : undefined });
+  const planned = planAgent({ name: "maplegrin", promptPath, preset: choice.ok ? choice.preset : undefined, ...(o.ask ? { ask: { ...o.ask, model: null } } : {}) });
   if (!planned.ok) throw new Error(planned.errors.join("; "));
   const home = join(root, "home");
   saveAgent(home, { ...confirmAgent(planned.agent, new Date(o.confirmedAt ?? Date.parse("2026-10-24T13:00:00Z"))), league: { waitForSeason: true } });
@@ -165,6 +170,144 @@ function scene(start: number, o: { confirmedAt?: number; league?: () => unknown;
 
 const run = (s: Scene, until: number, extra: Partial<Parameters<typeof runAgent>[0]> = {}) =>
   runAgent({ home: s.home, name: "maplegrin", signer: s.w.signer, chain: s.w.chain, fetch: s.feed.fetch, site: SITE, indexer: INDEXER, now: s.c.now, sleep: s.c.sleep, random: seeded(7), noJitter: true, loopMs: 15_000, pollMs: 30_000, maxRuntimeMs: until - s.c.now(), out: () => {}, ...extra });
+
+// --- the ask loop (addendum 4): a stub `claude` on PATH, run by the real adapter --------------------------------
+
+/**
+ * A stub of Claude Code's headless CLI: it reads the pack on stdin, keeps a copy, and answers by `DRYRUN_CLI_MODE`:
+ * "decide" sells what the pack says the agent holds, else buys the first coin of the pack's list (0.006 BNB); "hold"
+ * holds; "fail2" fails twice with a quota message, then decides. The real adapter (`callHost`) runs it.
+ */
+function stubClaude(): { bin: string; packs: string } {
+  const dir = tmpRoot();
+  const bin = join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  const packs = join(dir, "packs");
+  mkdirSync(packs, { recursive: true });
+  const script = String.raw`#!__NODE__
+const fs = require("node:fs");
+let pack = "";
+process.stdin.on("data", (d) => (pack += d));
+process.stdin.on("end", () => {
+  const dir = __PACKS__;
+  const n = fs.readdirSync(dir).length + 1;
+  fs.writeFileSync(dir + "/" + String(n).padStart(3, "0") + ".txt", pack);
+  const mode = process.env.DRYRUN_CLI_MODE || "decide";
+  if (mode === "fail2" && n <= 2) { process.stderr.write("You've hit your usage limit · resets at 3pm\n"); process.exit(1); }
+  const held = /## Your positions[^\n]*\n- (c\d+) \|/.exec(pack);
+  const list = pack.slice(pack.indexOf("Coins (UNTRUSTED"));
+  const rows = list.slice(list.indexOf("untrusted"), list.indexOf("\n` + "```" + String.raw`\n", list.indexOf("untrusted"))).split("\n").filter((l) => /^c\d+ \| /.test(l) && !l.includes("your own coin") && !/^c\d+ \| FEAST \|/.test(l));
+  const first = rows.length > 0 ? /^(c\d+)/.exec(rows[0]) : null;
+  let answer = { action: "hold", coin: null, amountBnb: null, fraction: null, reason: "nothing worth it now", memo: "held at ask " + n };
+  if (mode !== "hold" && held) answer = { action: "sell", coin: held[1], amountBnb: null, fraction: 1, reason: "take the round trip", memo: "sold " + held[1] };
+  else if (mode !== "hold" && first && pack.includes("NOT met yet")) answer = { action: "buy", coin: first[1], amountBnb: 0.006, fraction: null, reason: "the busiest coin, for the floor", memo: "bought " + first[1] };
+  console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: JSON.stringify(answer) }));
+});
+`;
+  writeFileSync(join(bin, "claude"), script.replace("__NODE__", process.execPath).replace("__PACKS__", JSON.stringify(packs)));
+  chmodSync(join(bin, "claude"), 0o755);
+  return { bin, packs };
+}
+
+/** Run a scene with the stub on PATH; the virtual clock waits for an ask in flight (a child takes real milliseconds). */
+async function runAsking(s: Scene, until: number, mode: string): Promise<{ packs: string }> {
+  const stub = stubClaude();
+  const saved = { PATH: process.env.PATH, DRYRUN_CLI_MODE: process.env.DRYRUN_CLI_MODE };
+  process.env.PATH = `${stub.bin}:${process.env.PATH ?? ""}`;
+  process.env.DRYRUN_CLI_MODE = mode;
+  let inflight: Promise<unknown> | null = null;
+  try {
+    await run(s, until, {
+      askHost: (o) => {
+        const p = callHost(o);
+        inflight = p;
+        return p.finally(() => (inflight = null));
+      },
+      sleep: async (ms) => {
+        if (inflight) await inflight;
+        await s.c.sleep(ms);
+      },
+    });
+  } finally {
+    process.env.PATH = saved.PATH;
+    if (saved.DRYRUN_CLI_MODE === undefined) delete process.env.DRYRUN_CLI_MODE;
+    else process.env.DRYRUN_CLI_MODE = saved.DRYRUN_CLI_MODE;
+  }
+  return { packs: stub.packs };
+}
+
+function journalTable(home: string): void {
+  const rows = readJournal(home, "maplegrin", 100);
+  say(["| asked (UTC+8) | pack | answer | reason | result |", "| --- | --- | --- | --- | --- |", ...rows.map((r) => `| ${hm(Date.parse(r.at))} | ${r.pack} | ${r.action}${r.symbol ? ` ${r.symbol}` : ""}${r.amountBnb !== null ? ` ${r.amountBnb} BNB` : ""}${r.fraction !== null ? ` ${r.fraction} of it` : ""} | ${r.reason} | ${r.result} |`)].join("\n"));
+}
+
+async function askCards(): Promise<void> {
+  section("(h) The ask loop's words: the card and the \"You're in\" line under Claude Code");
+  const saved = process.env.FEAST_LEAGUE_MODEL;
+  process.env.FEAST_LEAGUE_MODEL = "claude";
+  try {
+    const ON = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: new Date(DINNER).toISOString() } });
+    for (const [lang, seasonOn] of [["en", false], ["zh", false], ["en", true], ["zh", true]] as const) {
+      const root = tmpRoot();
+      const cwd = join(root, "work");
+      mkdirSync(cwd, { recursive: true });
+      const account = privateKeyToAccount(generatePrivateKey());
+      const { runner } = fakeBaw({ account });
+      const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: "maplegrin" }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } }, ...(seasonOn ? { league: ON } : {}) });
+      const deps = { home: join(root, "home"), signer: new BawSigner(runner), chain: fakeEnterChain({ agentId: "maplegrin" }), site: new LeagueSite(ENTER_SITE, site.fetch), indexer: ENTER_INDEXER, fetch: site.fetch, now: () => (seasonOn ? at8("14:00") : Date.parse("2026-10-24T13:00:00Z")), notesDev: false, signOptions: { pollMs: 1, sleep: async () => {} }, cwd, start: async () => 4242, oneShot: async () => { throw new Error("the dry run never launches"); } };
+      const card = await enter(deps, { name: "maplegrin.ai", yes: false, lang });
+      if (lang === "en" && !seasonOn) {
+        say("### The agent's card under the entry card: the ask loop and the floor keeper\n");
+        block(card.text.split("\n").filter((l) => l.startsWith("Ask loop:") || l.startsWith("Floor keeper:")).join("\n"));
+      }
+      const done = await enter(deps, { name: "maplegrin.ai", yes: true, lang });
+      say(`### \`FL enter … --yes --lang ${lang}\`, ${seasonOn ? "once the season is on" : "before the season"}: the last line\n`);
+      block(done.text.split("\n").at(-1)!);
+    }
+  } finally {
+    if (saved === undefined) delete process.env.FEAST_LEAGUE_MODEL;
+    else process.env.FEAST_LEAGUE_MODEL = saved;
+  }
+}
+
+async function askTick(): Promise<void> {
+  section("(i) Asks: every 5 minutes of the host's silence, through a stub `claude` on PATH and the real adapter");
+  say("The host's last trade at 13:55 UTC+8, then its session ends. Every 5 minutes the runtime builds the pack, runs `claude -p --output-format json --max-turns 1 --tools \"\" --strict-mcp-config --disable-slash-commands --no-session-persistence --json-schema …` with the pack on stdin, checks the answer and makes it. The stub buys the first coin of the list while the floor is unmet, and sells what it holds.\n");
+  const s = scene(at8("14:00"), { hostTradedAt: at8("13:55"), ask: { every: 5, with: "claude" } });
+  const { packs } = await runAsking(s, at8("14:31"), "decide");
+  journalTable(s.home);
+  const packLines = logOf(s.home).filter((l) => l.event === "ask.pack");
+  say(`\n${packLines.length} packs; each one's digest, size and requests to feast.meme: ${packLines.map((l) => `${String(l.pack)} (${String(l.chars)} characters, ${String(l.coins)} coins, ${String(l.requests)} requests)`).join("; ")}.\n`);
+  fillTable(fills(s.home));
+  const first = readdirSync(packs).sort()[0];
+  if (first) {
+    say("\nThe first pack, as the stub received it on stdin (addresses 6+4 here; the schema line cut):\n");
+    block(readFileSync(join(packs, first), "utf8").split("\n").map((l) => (l.startsWith('{"type":"object"') ? `${l.slice(0, 80)}…` : l)).join("\n"));
+  }
+}
+
+async function askFailing(): Promise<void> {
+  section("(j) A failure streak: the stub fails twice (a quota), the floor keeper trades, then the asks answer again");
+  const s = scene(at8("14:00"), { hostTradedAt: at8("13:55"), ask: { every: 5, with: "claude" } });
+  await runAsking(s, at8("14:46"), "fail2");
+  journalTable(s.home);
+  say("");
+  events(s.home, ["autopilot.on", "autopilot.off"]);
+  const notices = existsSync(agentPaths(s.home, "maplegrin").notifications) ? readFileSync(agentPaths(s.home, "maplegrin").notifications, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { at: string; kind: string; text: string }).filter((n) => n.kind === "ask" || n.kind === "autopilot") : [];
+  say(`\nThe notifications:\n${notices.map((n) => `- ${hm(Date.parse(n.at))} ${n.kind}: ${n.text}`).join("\n")}\n`);
+  fillTable(fills(s.home));
+}
+
+async function askGuard(): Promise<void> {
+  section("(k) The dinner guard: the AI only holds; 20 minutes before dinner the floor keeper fills the floor");
+  const s = scene(DINNER - 70 * MIN, { hostTradedAt: DINNER - 75 * MIN, ask: { every: 5, with: "claude" } });
+  await runAsking(s, DINNER, "hold");
+  events(s.home, ["autopilot.on", "autopilot.off"]);
+  say("");
+  fillTable(fills(s.home));
+  const passed = fills(s.home).find((f) => f.day.passed);
+  say(`\nThe day's floor: ${passed ? `passed at ${hm(passed.t)} UTC+8` : "not passed"}; the last fill at ${hm(Math.max(...fills(s.home).map((f) => f.t)))} UTC+8 (flat by dinner − 5). The asks in the hour before (all holds) are in the journal: ${readJournal(s.home, "maplegrin", 100).length} of them.`);
+}
 
 /** The host's FL buy, as the CLI hands it to the running agent: its inbox. */
 const hostBuy = (s: Scene, when: number, target: Address, size: number) =>
@@ -188,6 +331,8 @@ function fills(home: string) {
   const source = new Map(log.filter((l) => l.event === "intent.queued").map((l) => [String(l.id), String(l.source)]));
   const reason = new Map(log.filter((l) => l.event === "intent.queued").map((l) => [String(l.id), String(l.reason)]));
   const BY: Record<string, string> = { preset: "steady", manual: "host", runtime: "runtime (L6)" };
+  // The ask loop's trades take the manual road, with a reason of their own.
+  const by = (id: string) => (source.get(id) === "manual" && (reason.get(id) ?? "").startsWith("ask:") ? "ask" : BY[source.get(id) ?? ""] ?? "?");
   // The count after each fill, in the log's order: the runtime's own rule (`floor.ts`), one fill at a time.
   const days = new Map<number, { trades: number; volumeBnb: number }>();
   return log
@@ -200,7 +345,7 @@ function fills(home: string) {
       const day = days.get(key) ?? { trades: 0, volumeBnb: 0 };
       if (!OWN_SET.includes(String(l.coin).toLowerCase())) days.set(key, (day.trades += 1, (day.volumeBnb += bnb(wei)), day));
       const passed = passesFloor(day.trades, day.volumeBnb);
-      return { t, by: BY[source.get(String(l.id)) ?? ""] ?? "?", side, coin: String(l.coin), bnb: bnb(wei), reason: reason.get(String(l.id)) ?? "", day: { trades: day.trades, volumeBnb: day.volumeBnb, passed } };
+      return { t, by: by(String(l.id)), side, coin: String(l.coin), bnb: bnb(wei), reason: reason.get(String(l.id)) ?? "", day: { trades: day.trades, volumeBnb: day.volumeBnb, passed } };
     });
 }
 
@@ -369,6 +514,10 @@ async function main(): Promise<void> {
   await back();
   await requests();
   await opening();
+  await askCards();
+  await askTick();
+  await askFailing();
+  await askGuard();
   section("The numbers");
   say("(The first 60 minutes are cut at the dinner: the next day's fills are not in them.)\n");
   say("| scene | took over (UTC+8) | steady's fills in its first 60 min | their volume | the day's floor | steady's buys that day |");

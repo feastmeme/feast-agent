@@ -77,7 +77,7 @@ describe("the skill, the setup, the release notes", () => {
     expect(setup).toContain("--branch league-v5");
     expect(setup).not.toContain("--branch league-v4");
     expect(setup).toContain("A runtime installed at `league-v1` … `league-v4` moves to `league-v5` the same way");
-    expect(setup).toContain("If `FL --help` does not list `--no-autopilot`, the runtime is older than `league-v5`: ask the user before you update it.");
+    expect(setup).toContain("If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it.");
   });
 
   it("the CHANGELOG has league-v4 above league-v3, and the PLAN has §14", () => {
@@ -306,7 +306,8 @@ describe("the autopilot backup and the two headers (task 975)", () => {
   it("the backup sentence, in English, in SKILL §9, setup.md and the README (the Chinese one: enter/copy.test.ts)", () => {
     expect(section9).toContain(BACKUP);
     expect(section9).toContain(`Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start <name>\`.`);
-    expect(read("skills/feast-league/references/setup.md")).toContain(BACKUP);
+    // Addendum 4: setup.md quotes the line as Claude Code says it (the ask loop); the README keeps the v5 form beside it.
+    expect(read("skills/feast-league/references/setup.md")).toContain("Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.");
     expect(readme).toContain(BACKUP);
   });
 
@@ -348,7 +349,8 @@ describe("the autopilot backup and the two headers (task 975)", () => {
   it("the description stays within 1024 characters and names the steady backup and six presets", () => {
     const description = descriptionOf(skill);
     expect(description.length).toBeLessThanOrEqual(1024);
-    expect(description).toContain("a steady autopilot backup keeps the daily floor after 30 minutes without your trade, unless turned off");
+    // Addendum 4: the asks first, the floor keeper under them.
+    expect(description).toContain("the runtime asks you every 5 minutes by default and a steady floor keeper backs it, unless turned off");
     expect(description).toContain("one of six presets");
   });
 
@@ -410,5 +412,45 @@ describe("task 975, addendum 3: keep the machine awake", () => {
     expect(section9).toContain("Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten.");
     expect(section9).toContain("赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。");
     expect(section9).toContain("slept N minutes at");
+  });
+});
+
+describe("task 975, addenda 4 and 5: the ask loop and the data it decides by", () => {
+  const skill = read("skills/feast-league/SKILL.md");
+  const section3 = skill.slice(skill.indexOf("## 3."), skill.indexOf("## 4."));
+  const section9 = skill.slice(skill.indexOf("## 9."), skill.indexOf("### The older signed path"));
+  const log = read("docs/CHANGELOG.md");
+  const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
+
+  it("SKILL §9 asks the interval in one line, en and zh, verbatim, and passes --every", () => {
+    expect(section9).toContain('"How often should your agent be asked what to do? Default every 5 minutes (about 288 asks a day); on a Pro-tier plan 10–15 minutes is safer."');
+    expect(section9).toContain("「多久问一次你的 agent？默认 5 分钟（每天约 288 次）；Pro 档额度建议 10–15 分钟。」");
+    expect(section9).toContain("Pass their answer as `--every N` (2–120) on `FL enter`. The model is your own default: do not ask.");
+  });
+
+  it("SKILL §3 says the runtime asks you on a timer, what the pack holds, and to leave your future self a note", () => {
+    expect(section3).toContain("**The runtime asks you, on a timer.**");
+    expect(section3).toContain("before you end a session, write what your future self should know into `strategy.md` (with the player) or an `FL note`");
+    expect(section3).toContain("`FL every <name> <minutes>` changes the interval; `FL ask <name> --print` shows the exact pack.");
+  });
+
+  it("SKILL describes FL data in one paragraph that lists the new fields, and FL quote", () => {
+    const paragraph = section3.split("\n").find((l) => l.includes("read `FL data <name> --json`"))!;
+    for (const field of ["spendable", "headroom", "pnlPct", "ageMinutes", "peakPnlPct", "exitImpactPct", "slippagePct", "`type`", "marketCapBnb", "roundTripFeePct", "flow2m", "`change`", "`volume`", "impactPct", "`market`", "`launches`", "league.arena", "league.standing", "league.rules", "stock-paired", "FL quote"]) expect(paragraph, field).toContain(field);
+  });
+
+  it("the Grok routine: FL ask --print, decide, FL buy or FL sell; the floor keeper backs it", () => {
+    expect(section9).toContain("schedule one every N minutes that runs `FL ask <name> --print` (the same pack the runtime would send), decides by it, and acts with `FL buy` or `FL sell` and one `FL note`. The floor keeper still backs it.");
+  });
+
+  it("the intent rows for the interval, and their README mirror", () => {
+    expect(skill).toContain('| "ask it less often", "every 15 minutes" | `FL every <name> 15`');
+    expect(skill).toContain("| 「少问几次」「每 15 分钟问一次」 | `FL every <name> 15`");
+    const readme = read("README.md");
+    for (const r of ['| "ask it less often" / "every 15 minutes" | `FL every <name> 15` |', "| 「少问几次」/「每 15 分钟问一次」 | `FL every <name> 15` |"]) expect(readme, r).toContain(r);
+  });
+
+  it("the CHANGELOG's league-v5 names the asks, the floor keeper, the pack's data and FL quote", () => {
+    for (const word of ["claude -p", "codex exec", "--every", "FL every", "FL ask <name> --print", "floor keeper", "exitImpactPct", "standing", "flow2m", "timeframe=minute&aggregate=5", "FL quote", "--bare"]) expect(v5, word).toContain(word);
   });
 });

@@ -60,6 +60,7 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 | "how is it doing?" | `FL status <name>`, with the day's battle card link and "Post it on X today to be in tonight's airdrop"; it asks for your X handle once if you haven't given it |
 | "why did it buy X?" | reads its own notes for that trade and explains |
 | "turn the autopilot off" / "turn it back on" | `FL stop <name>`, then `FL start <name> --prompt strategy.md --no-autopilot` (or `--autopilot steady`); shows the new card; after your yes it starts again. Off means nothing trades while you are away but the hard stop-loss, and an agent under the day's floor is eaten at the dinner |
+| "ask it less often" / "every 15 minutes" | `FL every <name> 15` |
 | "stop for good" | `FL stop --all` |
 
 | 你说 | 你的 agent 运行 |
@@ -72,6 +73,7 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 | 「怎么样了」 | `FL status <name>`，附上今日战报卡链接和「今天把它发到 X 上，就能参加今晚的空投」；你还没说过 X 账号的话，它会问一次 |
 | 「为什么买 X」 | 读它自己为那笔交易写的笔记并解释 |
 | 「关掉兜底」/「打开兜底」 | `FL stop <name>`，再 `FL start <name> --prompt strategy.md --no-autopilot`（或 `--autopilot steady`）；给出新卡片；你说「好」后重新启动。关掉意味着你不在时除了硬止损什么都不交易，当天没达到活动门槛的 agent 会在开饭时被吃掉 |
+| 「少问几次」/「每 15 分钟问一次」 | `FL every <name> 15` |
 | 「彻底停止」 | `FL stop --all` |
 
 Right after you're in, your agent asks once: "Want to launch your own meme too? Others can trade it and half of every trading fee goes to you. Give me a one-line concept, or say no, it doesn't affect the game." (「要不要顺便发一枚你的 meme？别人可以交易它，每笔手续费的一半归你；给我一句话概念就行，不发也不影响比赛。」)
@@ -98,6 +100,7 @@ The league is a game of prompts. You write your strategy in plain words, and you
 2. **Say "start my agent with this prompt".** The skill runs `FL start <name> --prompt strategy.md` and shows the card: the prompt's first lines and its sha256, the autopilot backup, the cap and the hard limits. After your yes it starts the runtime.
 3. **Your agent trades.** Whenever it chooses, it reads `FL data`: every Feast coin in BNB, your book and PnL in BNB, the league's clock and boards, and hourly history. It acts with `FL buy` and `FL sell`, each of which waits for the outcome, and writes one `FL note` per trade, saying which AI wrote it (`--model grok|codex|claude|other`). Notes reach feast.meme with the season's notes session that `FL enter` opened (`FL note --login` opens it again).
 
+- **The runtime asks your AI, on a timer.** Under Claude Code or Codex, every N minutes (`--every`, default 5; your skill asks you how often at entry) with no `FL buy` or `FL sell` from your agent, the runtime asks your agent's own headless CLI (`claude -p`, `codex exec`, on your login) what to do now, with your prompt, the market, the book, the league and its journal, and makes the one buy, sell or hold it answers, within the hard limits. `FL every <name> <minutes>` changes it; `FL ask <name> --print` shows what it sends. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten.
 - **The autopilot backup is on by default.** `FL enter`, `FL start --prompt` and `FL plan --prompt` give your agent the `steady` preset: after 30 minutes with no `FL buy` or `FL sell` from your agent (or `--idle-minutes N`), it keeps the day's activity floor with small, spaced trades of the busiest Feast coins (never your own coin), and it opens nothing new once your agent trades again; the positions it opened keep their own stops. A note or a read does not hold it back. `--autopilot <preset>` names another preset; `--no-autopilot` turns it off, and then nothing trades on its own except the hard stop-loss, and the league page eats an agent under the day's activity floor (at least 3 trades and 0.02 BNB of volume, its own coin left out) at the dinner. `FL status` shows the day's count.
 - **Your prompt stays yours.** It stays on your machine. The runtime records its sha256 to know when it changed, and a changed prompt needs a new card and your yes.
 - **Names are data.** Coin and player names are other people's words. `FL data --json` marks them `untrusted`, and your agent never follows them.
@@ -164,6 +167,9 @@ npm run league -- doctor            # the wallet, Developer Mode, the indexer an
 npm run league -- start my-agent --prompt strategy.md                   # prompt mode, the steady backup on: the card; --yes --detach starts it
 npm run league -- start my-agent --prompt strategy.md --no-autopilot    # the same, with no autopilot backup
 npm run league -- data my-agent --since 24h --json                      # coins, the book and the league, in BNB
+npm run league -- quote --coin 0x… --bnb 0.01                           # read-only: the fill, the impact, the fees
+npm run league -- ask my-agent --print                                  # the exact pack the ask loop sends your AI
+npm run league -- every my-agent 15                                     # ask it every 15 minutes
 npm run league -- buy my-agent FEAST 0.002                              # waits for the fill or the refusal
 npm run league -- note my-agent "bought FEAST: the dip" --tx 0x… --model claude   # one reason, at most 280 characters
 npm run league -- note --login                                          # the season's notes session: one signed message
