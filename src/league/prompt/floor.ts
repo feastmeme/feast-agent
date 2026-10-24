@@ -31,7 +31,8 @@ export function nextDinner(now: number): number {
   return today > now ? today : today + DAY;
 }
 
-export type DayCount = { startsAt: number; endsAt: number; trades: number; volumeWei: bigint; volumeBnb: number; passed: boolean };
+/** `noFloor`: tonight's dinner is the warm-up's, which asks no floor (task 975, addendum 8; the runtime sets it). */
+export type DayCount = { startsAt: number; endsAt: number; trades: number; volumeWei: bigint; volumeBnb: number; passed: boolean; noFloor?: boolean };
 
 export const passesFloor = (trades: number, volumeBnb: number) => trades >= ACTIVITY_FLOOR_TRADES && volumeBnb >= ACTIVITY_FLOOR_BNB;
 

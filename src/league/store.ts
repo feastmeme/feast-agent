@@ -1,5 +1,5 @@
 import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, uptime as osUptime } from "node:os";
 import { dirname, join } from "node:path";
 
 /**
@@ -151,8 +151,19 @@ export function pidAlive(pid: number): boolean {
 const alive = pidAlive;
 
 /**
+ * When this machine last booted, ms (task 975, addendum 8): a lock or a pid file older than the boot was left by a
+ * runtime the reboot ended, whatever process now has its pid.
+ */
+export function bootTime(now = Date.now(), uptimeSeconds = osUptime()): number {
+  return now - uptimeSeconds * 1_000;
+}
+/** Written before this boot (a minute's slack for the clock): left by a runtime a reboot ended. */
+export const beforeBoot = (at: number, boot = bootTime()) => Number.isFinite(at) && at < boot - 60_000;
+
+/**
  * One runtime per wallet: the lock holds the owner's pid and agent name. A lock
- * whose process is gone is stale and is taken over; a live one refuses.
+ * whose process is gone, or that was written before the machine last booted, is
+ * stale and is taken over; a live one refuses.
  */
 export function acquireWalletLock(home: string, agent: string): { release: () => void } {
   const path = walletLockPath(home);
@@ -168,8 +179,8 @@ export function acquireWalletLock(home: string, agent: string): { release: () =>
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const held = readJson<{ pid: number; agent: string }>(path);
-      if (held && alive(held.pid)) throw new Error(`the wallet is in use by agent "${held.agent}" (pid ${held.pid}); stop it first`);
+      const held = readJson<{ pid: number; agent: string; at?: string }>(path);
+      if (held && alive(held.pid) && !beforeBoot(Date.parse(held.at ?? ""))) throw new Error(`the wallet is in use by agent "${held.agent}" (pid ${held.pid}); stop it first`);
       rmSync(path, { force: true });
     }
   }
@@ -177,8 +188,8 @@ export function acquireWalletLock(home: string, agent: string): { release: () =>
 }
 
 export function walletLockHolder(home: string): { pid: number; agent: string } | null {
-  const held = readJson<{ pid: number; agent: string }>(walletLockPath(home));
-  return held && alive(held.pid) ? held : null;
+  const held = readJson<{ pid: number; agent: string; at?: string }>(walletLockPath(home));
+  return held && alive(held.pid) && !beforeBoot(Date.parse(held.at ?? "")) ? { pid: held.pid, agent: held.agent } : null;
 }
 
 // --- the wallet ledger (L3) -------------------------------------------------------------

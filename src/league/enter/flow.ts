@@ -19,10 +19,12 @@ import { AGENT_ID, nextIssuedAt } from "../register/message.ts";
 import type { KeptAgent, LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { tradingOpens } from "../season-gate.ts";
+import { sessionView } from "../session.ts";
 import { askChoice, autopilotChoice, prepareStart, shapeOf } from "../start.ts";
 import { modelHint } from "../headers.ts";
 import { agentPaths, appendJsonl, readJson, removeStop, walletLockHolder, writeJsonAtomic, writeStop } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
+import { upgradeSentence, versionView } from "../version.ts";
 import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { composeMeme, hostPicture, type Meme } from "./meme.ts";
@@ -277,6 +279,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const autopilot = agent.preset && agent.autopilot ? { preset: agent.preset, idleMinutes: agent.autopilot.idleMinutes, ...(agent.ask ? { ask: { every: agent.ask.every, with: agent.ask.with } } : {}) } : null;
     return { name, agent, card: checked.kind === "needs-yes" ? checked.card : renderCard(agent), shape: shapeOf(agent), needsYes: checked.kind === "needs-yes", strategy, autopilot };
   };
+  /** The wallet's sign-in end, for the entry card (addendum 8); null when it cannot be read. */
+  const signInEndNow = async () => deps.signer.settings().then((s) => sessionView(s).end).catch(() => null);
   /** Planned once, where its card is needed: after the wallet is read on a first entry, at once on a rerun. */
   const planOnce = (): EnterResult | null => {
     if (!startWanted || planned) return null;
@@ -310,16 +314,19 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const head = copy.alreadyEntered({ agentId: given, coin: record!.bodyCoin, notes: record!.notes ?? null, season: record!.registered?.season ?? null, seat: record!.registered?.seat ?? null }, lang);
     if (!planned) return end(0, true, "entered", [head, ...(input.memeOnly ? [] : [copy.doneLine(lang)])], { agentId: given, bodyCoin: record!.bodyCoin, notes: record!.notes ?? null });
     if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
-    const opens = tradingOpens(await deps.site.league("today", null).catch(() => null));
+    const rerunRead = await deps.site.league("today", null).catch(() => null);
+    const opens = tradingOpens(rerunRead);
+    const upgrade = upgradeSentence(versionView(rerunRead?.latestRuntime, now()), lang);
+    const signInEnd = await signInEndNow();
     if (planned.needsYes) {
       const digest = sha256(JSON.stringify({ stage: "start", agentId: given, start: planned.shape }));
       if (!yesFor("start", digest)) {
         lines.push(head);
-        return ask("start", digest, [copy.startCard(lang), "", copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot }, lang)].join("\n"), { agent: planned.name });
+        return ask("start", digest, [copy.startCard(lang), "", copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot, signInEnd }, lang)].join("\n"), { agent: planned.name });
       }
     }
     lines.push(head, ...(await startStep()));
-    return end(0, true, "done", copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md")), { agent: planned.name });
+    return end(0, true, "done", copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade), { agent: planned.name });
   }
 
   // --- the wallet and its Agent ID ------------------------------------------------------------
@@ -372,6 +379,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const leagueRead = await deps.site.league("today", null).catch(() => null);
   const season = leagueRead?.season.number ?? 1;
   const opens = tradingOpens(leagueRead);
+  const upgrade = upgradeSentence(versionView(leagueRead?.latestRuntime, now()), lang);
+  const signInEnd = await signInEndNow();
   const dev = deps.notesDev ?? notesDev();
   const save = (next: EntryRecord) => {
     record = next;
@@ -386,10 +395,10 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     return sessionSaid(outcome, { agentId, season }, lang, "entry");
   };
   const registeredFrom = (kept: KeptAgent): NonNullable<EntryRecord["registered"]> => ({ season: kept.season ?? season, issuedAt: kept.issuedAt, seat: kept.seatNo, founding: kept.foundingNo, at: new Date(now()).toISOString() });
-  const agentSection = () => (planned ? copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot }, lang) : null);
+  const agentSection = () => (planned ? copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot, signInEnd }, lang) : null);
   const finish = async (): Promise<EnterResult> => {
     if (planned) lines.push(...(await startStep()));
-    lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md")) : copy.doneLine(lang));
+    lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade) : copy.doneLine(lang));
     if (composed) return memeStep(composed);
     // Signed in, and the site has not given the seat yet: "registered", not done; a rerun picks it up.
     return end(0, true, record?.registered && record.registered.seat === null ? "registered" : "done", [], { agentId, season, registered: record?.registered ?? null, notes: record?.notes ?? null, agent: planned?.name ?? null });

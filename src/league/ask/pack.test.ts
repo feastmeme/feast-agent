@@ -106,6 +106,16 @@ describe("the pack", () => {
     expect(text).not.toMatch(/\bFEAST\b[^\n]*(left out|not count|excluded)/);
   });
 
+  it("addendum 8: the warm-up dinner's floor line; the sign-in's warning in its last 24 h only", () => {
+    const warm = buildPack(input({ now: DINNER - 30 * 60_000, season: { opensAt: null, open: true, state: "season", day: 1, noFloorTonight: true } })).text;
+    expect(warm).toContain("today's floor: warm-up tonight: no floor. Tonight's dinner is the warm-up and eats nobody; from tomorrow the floor is 3 trades and 0.02 BNB a day (buys and sells of any Feast coin count, your own coin left out).");
+    expect(warm).not.toContain("FLOOR UNMET");
+    expect(warm).not.toContain("NOT met yet");
+    expect(buildPack(input({ signInEndsAt: NOW + 25 * 3_600_000 })).text).not.toContain("WALLET SIGN-IN");
+    expect(buildPack(input({ signInEndsAt: NOW + 5 * 3_600_000 + 1 })).text).toContain("WALLET SIGN-IN EXPIRES IN 6 H: the agent will stop; tell the player to run FL login.");
+    expect(buildPack(input({ signInEndsAt: NOW - 1 })).text).toContain("WALLET SIGN-IN ENDED: the agent cannot trade or exit until the player scans again; tell the player to run FL login.");
+  });
+
   it("keeps other players' words inside UNTRUSTED fences, and nothing in them can close a fence or a table", () => {
     const { text } = buildPack(input());
     const fences = [...text.matchAll(/```untrusted\n([\s\S]*?)```/g)].map((m) => m[1]!);

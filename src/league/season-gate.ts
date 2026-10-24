@@ -34,12 +34,46 @@ export function tradingOpens(read: LeagueRead | null): Opening {
   return { kind: "unknown" };
 }
 
+/**
+ * The season is over (task 975, addendum 8, gap G6): `/api/league` says `over`. The gate closes again: no autopilot,
+ * no ask, no strategy trades; the hard stop-loss stays, and the player may still sell (never buy). `tradingOpens`
+ * still answers "open" for it (the season did open); this is the one that closes.
+ */
+export const seasonOver = (read: LeagueRead | null) => read?.state === "over";
+
+/**
+ * The dinner that asks no floor (addendum 8): the site's warm-up dinner, dinner 1 (`WARM_UP_DINNER = 1` in the site's
+ * season.ts), the one that ends the season's day 1. Read from the league's clock, never from a date: on day 1 it is
+ * the countdown; before the start (the countdown is the start, dinner 0) it is a day after it. Null otherwise.
+ */
+export const WARM_UP_DINNER_DAY = 1;
+const DAY_MS = 24 * 3_600_000;
+export function warmUpDinner(read: LeagueRead | null): number | null {
+  const countdown = read?.season.countdownTo ?? null;
+  if (!read || countdown === null) return null;
+  if (read.state === "season" && read.season.day === WARM_UP_DINNER_DAY) return countdown;
+  if (read.state === "warm-up" || read.state === "coming-soon") return countdown + WARM_UP_DINNER_DAY * DAY_MS;
+  return null;
+}
+
 /** What the runtime last knew of its gate, for `FL status` (no address in it). */
-export type GateState = { state: "waiting" | "open"; opensAt: string | null; at: string };
+export type GateState = { state: "waiting" | "open" | "over"; opensAt: string | null; at: string; warmUpDinnerAt?: string | null; day?: number | null };
+
+/** The line a request refused after the season and `FL status` say. */
+export const SEASON_OVER_LINE = "season over: nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left";
 
 export const gatePath = (home: string, name: string) => join(agentPaths(home, name).dir, "season.json");
 export const readGate = (home: string, name: string) => readJson<GateState>(gatePath(home, name));
 export const writeGate = (home: string, name: string, state: GateState) => writeJsonAtomic(gatePath(home, name), state);
+
+/** From the gate's file (`FL ask --print`, `FL status`): is tonight's dinner the warm-up's? */
+export function noFloorTonight(g: GateState | null, now: number): boolean {
+  const at = g?.warmUpDinnerAt ? Date.parse(g.warmUpDinnerAt) : Number.NaN;
+  if (!Number.isFinite(at)) return false;
+  const d = new Date(now);
+  const today = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 13);
+  return (today > now ? today : today + DAY_MS) === at;
+}
 
 /** The line a refused request and `FL status` say while the gate is closed. */
 export function seasonClosedLine(opensAt: number | null): string {

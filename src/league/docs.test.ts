@@ -498,3 +498,41 @@ describe("task 975, addendum 7: the rehearsal's fixes", () => {
     for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md", "docs/CHANGELOG.md", "docs/prompts/default-s1.en.md", "src/league/ask/pack.ts", "src/league/data/standing.ts", "src/league/prompt/floor.ts"]) expect(read(file), file).not.toMatch(/(own coin|\bFEAST\b)[^.\n]*(and FEAST|FEAST[^.\n]*left out)|FEAST is left out|FEAST trades do not count/);
   });
 });
+
+describe("task 975, addendum 8: ready for the season", () => {
+  const skill = read("skills/feast-league/SKILL.md");
+  const log = read("docs/CHANGELOG.md");
+  const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
+
+  it("SKILL says the release line, the sign-in's date and warning, the season's end, the warm-up, the daemon and the health flag", () => {
+    for (const piece of [
+      '"runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent"',
+      "It never upgrades by itself.",
+      '"wallet sign-in valid until <date> UTC+8; re-scan before then or the agent stops trading"',
+      '"WALLET SIGN-IN EXPIRES IN N H: the agent will stop; tell the player to run FL login."',
+      "at 24 h, at 6 h, at 1 h and when it ends",
+      '"season over: nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left"',
+      '"warm-up tonight: no floor"',
+      "`FL daemon <name> --install`",
+      "`x-feast-health`",
+      "| \"keep it running after a reboot\" | `FL daemon <name> --install`",
+      "| 「重启后也让它跑」 | `FL daemon <name> --install`",
+    ])
+      expect(skill, piece).toContain(piece);
+    expect(skill).not.toContain("the backup would keep a floor that no longer counts");
+  });
+
+  it("the daemon's templates are documented, with no machine's own path in them", () => {
+    const doc = read("docs/league/daemon.md");
+    for (const piece of ["meme.feast.league.<name>.plist", "feast-league-<name>.service", "<string>--supervised</string>", "Restart=on-failure", "loginctl enable-linger", "FEAST_MAINNET_RPC_URL"]) expect(doc, piece).toContain(piece);
+    expect(doc).not.toMatch(/\/Users\/|\/home\/[a-z]/);
+  });
+
+  it("the CHANGELOG's league-v5 says it, the README mirrors the two rows, the sign-in table has its 24 h", () => {
+    for (const word of ["latestRuntime", "npx skills add feastmeme/feast-agent", "FL login", "bsc-dataseed1", "x-feast-health", "FL daemon", "warm-up tonight: no floor", "season over"]) expect(v5, word).toContain(word);
+    const readme = read("README.md");
+    expect(readme).toContain('| "keep it running after a reboot" | `FL daemon <name> --install` |');
+    expect(readme).toContain("| 「重启后也让它跑」 | `FL daemon <name> --install` |");
+    expect(read("skills/feast-league/references/register.md")).toContain("| `24h` | Your wallet's sign-in ends in under 24 hours");
+  });
+});

@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { getAddress, isAddress, type Address, type Hex } from "viem";
 
@@ -35,11 +36,13 @@ import { nextDinner } from "./prompt/floor.ts";
 import { nextSlowRead, pollCadence, writeCadence, type Cadence } from "./feed/cadence.ts";
 import { sessionNotice, utc8 } from "./register/copy.ts";
 import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
-import { GATE_READ_MS, seasonClosedLine, tradingOpens, writeGate } from "./season-gate.ts";
+import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, warmUpDinner, writeGate } from "./season-gate.ts";
+import { leagueDayKey, readVersion, versionNotice, versionPath, versionView, writeVersion } from "./version.ts";
+import { healthFlag, withHealth, type Health } from "./headers.ts";
 import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
 import { freshMemory, pastEnd, sessionStep, sessionView, type SessionMemory, type SessionView } from "./session.ts";
-import { addToLedger, acquireWalletLock, agentPaths, pidAlive, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
+import { addToLedger, acquireWalletLock, agentPaths, beforeBoot, pidAlive, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
 import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExtras, type Snapshot, type StrategyEvent } from "./strategy.ts";
 
 /**
@@ -108,8 +111,11 @@ export type RuntimeDeps = {
   startJitterMs?: number;
   /** The jitter's random (tests pass a seeded one). */
   random?: () => number;
-  /** Task 968: the season gate's read of `/api/league` (default: feast.meme's, one ask); null when it cannot be read. */
-  seasonRead?: () => Promise<LeagueRead | null>;
+  /**
+   * Task 968: the season gate's read of `/api/league` (default: feast.meme's, one ask); null when it cannot be read.
+   * Addendum 8: every 5 minutes for the whole run of a prompt agent, with the health flag it carries.
+   */
+  seasonRead?: (o: { health: Health }) => Promise<LeagueRead | null>;
   /** `--no-jitter`: the gate opens without the start jitter. */
   noJitter?: boolean;
   /** Task 975, addendum 4: the host's headless CLI (default `callHost`; tests pass a fake). */
@@ -205,7 +211,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
     };
 
-    const chain = deps.chain ?? new LeagueChain(network, rpcUrl);
+    // Addendum 8: the RPC's fallback, logged when the endpoint in use changes (never the primary's URL).
+    const chain = deps.chain ?? new LeagueChain(network, rpcUrl, 30_000, (change) => log("rpc.switch", change));
     const executor = new Executor({ signer: deps.signer, chain, wallet, network, rpcUrl, stopReason: () => stopReason(deps.home, deps.name), log, now: clock, fetch: deps.fetch });
     const market = new Market(chain, { indexer: deps.indexer, fetch: deps.fetch, log });
 
@@ -264,29 +271,76 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
 
     // --- the season gate (task 968) ------------------------------------------------------------
     const waits = agent.league?.waitForSeason === true && agent.track !== "entry";
+    // Addendum 8: a prompt agent reads the league every 5 minutes for its whole run (the gate, the season's end, the
+    // warm-up dinner, the runtime's release, and the health flag it carries), not only while it waits.
+    const leagueReads = waits || (agent.track === "prompt" && !deps.only);
     const random = deps.random ?? Math.random;
-    const gate = { open: !waits, opensAt: null as number | null, nextRead: 0 };
+    const gate = { open: !waits, opensAt: null as number | null, nextRead: 0, over: false, warmUpDinnerAt: null as number | null, day: null as number | null };
     const gateBackoff = new Backoff({ now: clock, random });
-    const readSeason = deps.seasonRead ?? (() => new LeagueSite(deps.site ?? siteFromEnv(), deps.fetch ?? fetch, 8_000).league("today", null));
-    const saveGate = () => writeGate(deps.home, deps.name, { state: gate.open ? "open" : "waiting", opensAt: gate.opensAt === null ? null : new Date(gate.opensAt).toISOString(), at: new Date(clock()).toISOString() });
-    /** One read of the league: when trading opens. A failed read keeps what was known, and asks again under the backoff. */
+    const readSeason = deps.seasonRead ?? ((o: { health: Health }) => new LeagueSite(deps.site ?? siteFromEnv(), withHealth(deps.fetch ?? fetch, o.health), 8_000).league("today", null));
+    /** The health flag the league read carries; set once the loop's figures exist. */
+    let healthOf: () => Health = () => "ok";
+    const saveGate = () =>
+      writeGate(deps.home, deps.name, {
+        state: gate.over ? "over" : gate.open ? "open" : "waiting",
+        opensAt: gate.opensAt === null ? null : new Date(gate.opensAt).toISOString(),
+        at: new Date(clock()).toISOString(),
+        warmUpDinnerAt: gate.warmUpDinnerAt === null ? null : new Date(gate.warmUpDinnerAt).toISOString(),
+        day: gate.day,
+      });
+    /** The runtime's release against the page's newest (addendum 8): said once a league day when behind; never acted on. */
+    const noteRelease = (read: LeagueRead, now: number) => {
+      const v = versionView(read.latestRuntime, now);
+      if (!v) {
+        // The page says nothing of it: nothing is said, and nothing old is shown.
+        rmSync(versionPath(deps.home, deps.name), { force: true });
+        return;
+      }
+      const day = leagueDayKey(now);
+      const said = readVersion(deps.home, deps.name)?.saidFor ?? null;
+      const tell = v.behind && said !== day;
+      if (tell) {
+        log("runtime.behind", { current: v.current, latest: v.latest, minSupported: v.minSupported });
+        notify("version", versionNotice(v), { latest: v.latest, current: v.current });
+      }
+      writeVersion(deps.home, deps.name, { ...v, saidFor: tell ? day : said });
+    };
+    /** The dinner tonight is the warm-up's, which asks no floor (addendum 8): from the league's clock. */
+    const warmUpTonight = (now: number) => gate.warmUpDinnerAt !== null && nextDinner(now) === gate.warmUpDinnerAt;
+    /** One read of the league: when trading opens, whether the season is over, which dinner is the warm-up. A failed read keeps what was known, and asks again under the backoff. */
     const readGate = async () => {
       const now = clock();
-      const read = await readSeason().catch(() => null);
+      const read = await readSeason({ health: healthOf() }).catch(() => null);
       if (!read) {
-        gate.nextRead = now + gateBackoff.fail({ status: null, reason: "the league could not be read" });
+        const wait = gateBackoff.fail({ status: null, reason: "the league could not be read" });
+        // A closed gate asks again soon (its opening may be near); an open one has nothing urgent: the 5 minutes.
+        gate.nextRead = now + (gate.open ? Math.max(wait, GATE_READ_MS) : wait);
         return;
       }
       gateBackoff.ok();
-      const opening = tradingOpens(read);
-      gate.opensAt = opening.kind === "open" ? now : opening.kind === "at" ? opening.at : null;
-      // Every 5 minutes, and once more at the instant.
-      gate.nextRead = gate.opensAt !== null && gate.opensAt > now ? Math.min(now + GATE_READ_MS, gate.opensAt) : now + GATE_READ_MS;
+      noteRelease(read, now);
+      const wasOver = gate.over;
+      gate.over = seasonOver(read);
+      gate.day = read.state === "season" ? read.season.day : null;
+      const warm = warmUpDinner(read);
+      if (warm !== null) gate.warmUpDinnerAt = warm;
+      if (!gate.open) {
+        const opening = tradingOpens(read);
+        gate.opensAt = opening.kind === "open" ? now : opening.kind === "at" ? opening.at : null;
+      }
+      // Every 5 minutes, and once more at the opening instant.
+      gate.nextRead = !gate.open && gate.opensAt !== null && gate.opensAt > now ? Math.min(now + GATE_READ_MS, gate.opensAt) : now + GATE_READ_MS;
+      if (gate.over !== wasOver) {
+        log(gate.over ? "season.over" : "season.resumed", { state: read.state });
+        notify("season", gate.over ? "the season is over (feast.meme says so): nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left" : "the league says the season is on again: trading resumes");
+      }
       saveGate();
     };
-    if (waits) await readGate();
+    if (leagueReads) await readGate();
 
     // --- the book and the strategy --------------------------------------------------------
+    /** This run's own token (addendum 8): its sends in flight are its own; any other's are a stopped run's. */
+    const runToken = randomUUID();
     let book: Book = existsSync(paths.state) ? parseBook(readFileSync(paths.state, "utf8")) : emptyBook();
     // A passing FL script check on record for these exact bytes, with the audit passed above, is the warm-up done (task 963).
     const checkPassed = agent.track === "script" && scriptCheckPassed(deps.home, agent.script!.sha256);
@@ -341,7 +395,9 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       // Task 975: the day's trades and volume from this agent's log, as the page counts them; null when unreadable.
       day: () => {
         try {
-          return dayCount(deps.home, deps.name, clock(), leftOut(deps.home, book.launched?.coin));
+          const count = dayCount(deps.home, deps.name, clock(), leftOut(deps.home, book.launched?.coin));
+          // The warm-up dinner asks no floor (addendum 8): the floor keeper has none to keep tonight.
+          return warmUpTonight(clock()) ? { ...count, passed: true, noFloor: true } : count;
         } catch {
           return null;
         }
@@ -430,7 +486,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const RELEASE_AFTER_MS = 15 * 60_000;
     const resolvePending = async () => {
       for (const item of [...book.unresolved]) {
+        // A send of this run still in the wallet's hands: its own call settles it.
+        if (item.sending && item.run === runToken) continue;
         const age = clock() - item.at;
+        /** Left by a run that stopped before the wallet answered (addendum 8): reconciled now, not in 15 minutes. */
+        const leftMidSend = item.sending === true;
         const release = (why: string) => {
           book = { ...book, unresolved: book.unresolved.filter((u) => u !== item) };
           log("unresolved.released", { id: item.intentId, txHash: item.txHash, kind: item.kind, why });
@@ -495,6 +555,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             continue;
           }
         }
+        if (leftMidSend && item.txHash === null && item.balanceBefore !== null && (await deps.signer.txLock().catch(() => "LOCKED" as const)) === "UNLOCKED") {
+          // The wallet is free, gave no hash, and the coin's balance did not move: the last run stopped before it sent.
+          release("the last run stopped before the wallet sent it, and no balance moved: nothing was traded");
+          continue;
+        }
         if (age > RELEASE_AFTER_MS && (await deps.signer.txLock().catch(() => "LOCKED" as const)) === "UNLOCKED") release("no balance moved in 15 minutes and the wallet is free: it was not sent");
       }
     };
@@ -546,11 +611,53 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     };
     /** A send whose outcome is unknown — no receipt, a failed execute, an App confirmation — is kept, never just failed. */
     const unknownOutcome = (stage: string) => stage === "receipt" || stage === "execute" || stage === "confirmation";
+    /**
+     * A send, journal first (task 975, addendum 8, gap G3): the record is on disk before the wallet is asked, its hash
+     * the moment the wallet gives one, and it leaves the book only with the outcome (the booking that follows saves
+     * both at once). A run killed between the send and the receipt leaves it for the next start to reconcile.
+     */
+    const sendRecorded = async (
+      intent: Intent,
+      kind: "buy" | "sell" | "launch" | "claim",
+      what: { coin: Address; quote: Address; symbol: string; payIn?: "native" | "quote"; sizeWei?: bigint; balanceBefore?: bigint | null; minCoins?: bigint },
+      label: string,
+      call: Parameters<Executor["send"]>[1],
+    ) => {
+      let record: Book["unresolved"][number] = {
+        txHash: null,
+        kind,
+        at: clock(),
+        intentId: intent.id,
+        source: intent.source,
+        fundedBy: intent.fundedBy ?? "wallet",
+        coin: what.coin,
+        symbol: what.symbol,
+        quote: what.quote,
+        payIn: what.payIn ?? "native",
+        sizeWei: what.sizeWei ?? 0n,
+        balanceBefore: what.balanceBefore ?? null,
+        minCoins: what.minCoins ?? 0n,
+        sending: true,
+        run: runToken,
+      };
+      book = { ...book, unresolved: [...book.unresolved, record] };
+      save();
+      log("send.recorded", { id: intent.id, kind });
+      const sent = await executor.send(label, call, (txHash) => {
+        const next = { ...record, txHash };
+        book = { ...book, unresolved: book.unresolved.map((u) => (u === record ? next : u)) };
+        record = next;
+        save();
+      });
+      book = { ...book, unresolved: book.unresolved.filter((u) => u !== record) };
+      return sent;
+    };
 
     const failed = (intent: Intent, stage: string, reason: string, txHash?: Hex) => {
       if (stage === "stopped" || stage === "busy") {
         settle(intent, { outcome: "dropped", kind: intent.kind, stage, reason });
         log("intent.dropped", { id: intent.id, stage, reason });
+        save();
         return;
       }
       settle(intent, { outcome: "failed", kind: intent.kind, stage, reason, txHash });
@@ -634,7 +741,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (!again.ok) return refused(approved, again);
         log("buy.prepared", { id: approved.id, coin, sizeWei: prepared.value.sizeWei, payIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, impactPct: prepared.value.impactPct });
         const balanceBefore = await chain.tokenBalance(coin, wallet).catch(() => null);
-        const sent = await executor.send(`buy ${prepared.value.info.symbol}`, prepared.value.call);
+        const sent = await sendRecorded(approved, "buy", { ...prepared.value.info, payIn, sizeWei: prepared.value.sizeWei, balanceBefore, minCoins: prepared.value.minOut }, `buy ${prepared.value.info.symbol}`, prepared.value.call);
         if (!sent.ok && unknownOutcome(sent.stage)) {
           return unresolvedSend(approved, sent.txHash ?? null, "buy", { ...prepared.value.info, payIn, sizeWei: prepared.value.sizeWei, balanceBefore, minCoins: prepared.value.minOut }, `${sent.stage}: ${sent.reason}`);
         }
@@ -684,7 +791,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (!prepared.ok) return failed(approved, "prepare", prepared.reason);
         log("sell.prepared", { id: approved.id, coin, coinsIn: prepared.value.coinsIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, quotedBy: prepared.value.quotedBy });
         const balanceBefore = await chain.tokenBalance(coin, wallet).catch(() => null);
-        const sent = await executor.send(`sell ${prepared.value.info.symbol}`, prepared.value.call);
+        const sent = await sendRecorded(approved, "sell", { ...prepared.value.info, sizeWei: prepared.value.coinsIn, balanceBefore, minCoins: prepared.value.minOut }, `sell ${prepared.value.info.symbol}`, prepared.value.call);
         if (!sent.ok && unknownOutcome(sent.stage)) {
           return unresolvedSend(approved, sent.txHash ?? null, "sell", { ...prepared.value.info, sizeWei: prepared.value.coinsIn, balanceBefore, minCoins: prepared.value.minOut }, `${sent.stage}: ${sent.reason}`);
         }
@@ -712,7 +819,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (book.launched || book.unresolved.some((u) => u.kind === "launch")) return log("launch.skipped", { id: approved.id, why: book.launched ? "this agent has launched its coin" : "a launch's outcome is not known yet" });
         const prepared = await executor.prepareLaunch({ ...approved.launch!, quote: approved.launch!.quote });
         if (!prepared.ok) return failed(approved, "prepare", prepared.reason);
-        const sent = await executor.send(`launch ${approved.launch!.symbol}`, prepared.value.call);
+        const sent = await sendRecorded(approved, "launch", { coin: prepared.value.predicted, quote: prepared.value.quote, symbol: approved.launch!.symbol }, `launch ${approved.launch!.symbol}`, prepared.value.call);
         if (!sent.ok && unknownOutcome(sent.stage)) {
           return unresolvedSend(approved, sent.txHash ?? null, "launch", { coin: prepared.value.predicted, quote: prepared.value.quote, symbol: approved.launch!.symbol }, `${sent.stage}: ${sent.reason}`);
         }
@@ -736,7 +843,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (!prepared.value) return log("claim.nothing", { id: approved.id, coin });
         const valueWei = await chain.quoteToBnbWei(prepared.value.quote, prepared.value.claimable);
         if (valueWei < bnbToWei(approved.claim?.minClaimBnb ?? 0)) return log("claim.small", { id: approved.id, valueWei });
-        const sent = await executor.send("claim the creator's share", prepared.value.call);
+        const sent = await sendRecorded(approved, "claim", { coin, quote: prepared.value.quote, symbol: "claim" }, "claim the creator's share", prepared.value.call);
         if (!sent.ok && unknownOutcome(sent.stage)) return unresolvedSend(approved, sent.txHash ?? null, "claim", { coin, quote: prepared.value.quote, symbol: "claim" }, `${sent.stage}: ${sent.reason}`);
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const paid = executor.verifyClaim(sent.receipt);
@@ -768,7 +875,12 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           request = null;
         }
         rmSync(full, { force: true });
-        if (request?.type === "intent" && request.request && !gate.open) {
+        if (request?.type === "intent" && request.request && gate.over && request.request.kind !== "sell") {
+          // The season is over (addendum 8): a sale still runs; nothing else is taken.
+          const requestId = typeof request.requestId === "string" && /^[a-z0-9-]{1,64}$/i.test(request.requestId) ? request.requestId : null;
+          log("inbox.refused", { problem: SEASON_OVER_LINE, season: "over", kind: request.request.kind });
+          if (requestId) log("request.outcome", { requestId, outcome: "refused", kind: request.request.kind, limit: null, message: SEASON_OVER_LINE });
+        } else if (request?.type === "intent" && request.request && !gate.open) {
           // The season has not opened: the request is answered at once, and nothing is queued.
           const requestId = typeof request.requestId === "string" && /^[a-z0-9-]{1,64}$/i.test(request.requestId) ? request.requestId : null;
           const message = seasonClosedLine(gate.opensAt);
@@ -818,6 +930,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const tickMs = () => (agent!.track === "prompt" ? Math.min(SAFETY_PASS_SECONDS, agent!.tickSeconds) : agent!.tickSeconds) * 1_000;
     let nextStrategyTick = 0;
     let nextTick = 0;
+    /** The loop's passes that failed in a row (addendum 8): three are told, and count toward the health flag. */
+    let tickFails = 0;
     let nextPreflight = clock() + (deps.preflightMs ?? 300_000);
     let nextUnresolvedCheck = 0;
     // The coins marked fresh from the chain in a snapshot: deduplicated and capped, whatever a strategy asks for.
@@ -830,6 +944,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       // An outcome an earlier run could not learn is asked about first, so the guard reads a book that is up to date.
       if (book.unresolved.length > 0) await resolvePending().catch((error: unknown) => log("unresolved.check.failed", { reason: String((error as Error).message) }));
       for (const request of deps.only) {
+        if (gate.over && request.kind !== "sell") return { exit: "refused", reason: SEASON_OVER_LINE };
         const normal = normalizeIntent(request, { snapshot: { feast, now: clock(), limits: agent.limits }, source: "manual", slippagePct: Math.min(3, agent.limits.maxSlippagePct), ttlMs: 120_000 });
         if ("error" in normal) return { exit: "refused", reason: normal.error };
         enqueue([normal.intent]);
@@ -866,7 +981,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (now - guardCache.at < 30_000) return guardCache.on;
       const day = extras.day!();
       guardCache.at = now;
-      guardCache.on = now >= nextDinner(now) - 20 * 60_000 && day !== null && !day.passed;
+      // The warm-up dinner asks no floor (addendum 8): no guard trades before it.
+      guardCache.on = !warmUpTonight(now) && now >= nextDinner(now) - 20 * 60_000 && day !== null && !day.passed;
       return guardCache.on;
     };
     const keeper = () => (askMode() ? askState.streak >= 2 && silentFor() >= everyMs() : silentFor() >= idleMs());
@@ -971,7 +1087,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       saveGate();
     };
     log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null, feed: feed ? feed.mode : null, pollMs: deps.pollMs ?? 5_000, startJitterMs, ...(waits ? { waitForSeason: true, opensAt: gate.opensAt === null ? null : new Date(gate.opensAt).toISOString() } : {}) });
-    if (!gate.open) notify("season", gate.opensAt === null ? "waiting for the season: it trades nothing until feast.meme announces the start" : `waiting for the season: it trades nothing before ${utc8(gate.opensAt)} (UTC+8)`);
+    // A start after the opening (a restart on day 2, a reboot) opens at once: no "waiting" is said for it.
+    if (!gate.open && !(gate.opensAt !== null && gate.opensAt <= clock())) notify("season", gate.opensAt === null ? "waiting for the season: it trades nothing until feast.meme announces the start" : `waiting for the season: it trades nothing before ${utc8(gate.opensAt)} (UTC+8)`);
     if (agent.track === "prompt") {
       // Addendum 7: with the asks on, the unified line says what runs; without them, league-v5's first cut is still true.
       if (askMode()) notify("started", `prompt mode; ${autopilotLine({ preset: agent.preset!, idleMinutes: agent.autopilot!.idleMinutes, ask: agent.ask! }, "en")}`);
@@ -992,7 +1109,12 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (!readNotes(deps.home, deps.name).some((n) => n.state === "queued")) return;
       flushing = true;
       void flushNotes(deps.home, deps.name, wallet, { site: deps.site ?? siteFromEnv(), fetch: deps.fetch ?? fetch, now: clock, max: 20, log })
-        .then((out) => (out.sent + out.refused > 0 ? log("notes.flushed", { sent: out.sent, refused: out.refused, kept: out.kept }) : undefined))
+        .then((out) => {
+          if (out.sent + out.refused > 0) log("notes.flushed", { sent: out.sent, refused: out.refused, kept: out.kept });
+          // A refused note is told, not only logged (addendum 8): once a flush, with the page's status.
+          if (out.refused > 0) notify("notes", `feast.meme refused ${out.refused} note${out.refused === 1 ? "" : "s"} (HTTP ${out.lastRefused}): kept on this machine and never sent again`);
+          if (out.reason === "unauthorized" || out.reason === "no-session") notify("notes", "the notes session has ended (or was never opened): notes stay on this machine; run `FL note --login` to open it again", {}, "notes-session");
+        })
         .catch(() => undefined)
         .finally(() => (flushing = false));
     };
@@ -1018,7 +1140,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       // A read right before the ask (addendum 6): the pack sees the market as it is now, not as the slow cadence left it.
       if (feed && feed.due()) await feed.step({ events: false }).catch(() => []);
       // The pack (addenda 4 and 5): the book this runtime just saved, the snapshot the feed holds, the league, candles, impacts.
-      const gathered = await gatherPack({ home: deps.home, agent: agent!, now: startedAt, wallet, chain, snapshot: feed?.held() ?? null, fetch: deps.fetch ?? fetch, site: deps.site ?? siteFromEnv(), gate: { opensAt: gate.opensAt, open: gate.open }, feast, impacts: impacts(executor, chain) });
+      const gathered = await gatherPack({ home: deps.home, agent: agent!, now: startedAt, wallet, chain, snapshot: feed?.held() ?? null, fetch: deps.fetch ?? fetch, site: deps.site ?? siteFromEnv(), gate: { opensAt: gate.opensAt, open: gate.open, noFloorTonight: warmUpTonight(startedAt), signInEndsAt: session.end }, feast, impacts: impacts(executor, chain) });
       const pack: Pack = gathered.pack;
       const input = gathered.input;
       log("ask.pack", { pack: pack.digest, chars: pack.text.length, coins: pack.ids.size, requests: gathered.requests });
@@ -1076,6 +1198,12 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
     };
 
+    // The one word the league read carries (addendum 8), from what the loop knows now.
+    healthOf = () => {
+      const oldest = book.unresolved.length > 0 ? clock() - Math.min(...book.unresolved.map((u) => u.at)) : null;
+      return healthFlag({ tickFailsInARow: tickFails, oldestUnresolvedMs: oldest, rpcOnFallback: chain.rpcState?.().onFallback === true, askFailsInARow: askState.streak });
+    };
+
     for (;;) {
       const now = clock();
       const stop = stopReason(deps.home, deps.name);
@@ -1092,21 +1220,27 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         save();
         return { exit: "finished", reason: "the run's time is up" };
       }
-      if (!gate.open) {
-        if (now >= gate.nextRead) await readGate();
-        if (gate.opensAt !== null && clock() >= gate.opensAt) openGate(clock());
-      }
+      // The league, every 5 minutes for a prompt agent (addendum 8); while the gate is closed, at its opening instant too.
+      if (leagueReads && now >= gate.nextRead) await readGate();
+      if (!gate.open && gate.opensAt !== null && clock() >= gate.opensAt) openGate(clock());
       drainInbox();
       // FL start's spread: until it is over, nothing reads the site and no strategy is asked; the safety runs.
       // The season gate holds the same back, longer.
       const spreading = now < jitterUntil;
-      const warming = spreading || !gate.open;
+      // After the season (addendum 8) the loop keeps only the safety: the hard stop-loss, the wallet, the outcomes, the player's sales.
+      const warming = spreading || !gate.open || gate.over;
       if (!warming && !jitterDone) {
         jitterDone = true;
         nextTick = 0;
         log("jitter.done", { afterMs: now - startedAt });
       }
-      if (gate.open && agent.track === "prompt" && agent.preset && agent.autopilot) {
+      if (gate.over && autopilotOn) {
+        // The season's end is said once, by the gate; the floor keeper only stands down.
+        autopilotOn = false;
+        autopilotWhy = null;
+        log("autopilot.off", { preset: agent.preset, why: "season over" });
+      }
+      if (gate.open && !gate.over && agent.track === "prompt" && agent.preset && agent.autopilot) {
         const on = silent();
         const why: KeeperWhy | null = !on ? null : keeper() ? (askMode() ? "asks failing" : "host silent") : "floor guard";
         const was: KeeperWhy | null = autopilotWhy;
@@ -1223,8 +1357,13 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: board, stale: feed?.stale() ?? null });
             await runStrategy("onTick", snapshot);
           } else save();
+          tickFails = 0;
         } catch (error) {
-          log("tick.failed", { reason: String((error as Error).message).slice(0, 300) });
+          const reason = String((error as Error).message).slice(0, 300);
+          tickFails += 1;
+          log("tick.failed", { reason, inARow: tickFails });
+          // Three in a row is told, once a streak (addendum 8): until then a passing RPC hiccup is the log's.
+          if (tickFails === 3) notify("failure", `the loop's pass (balance, marks, exits) failed 3 times in a row: ${reason.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>").slice(0, 160)}; it keeps trying, and its exits wait for a pass that works`);
         }
       }
       if (!signedOut && pastEnd(session, now)) {
@@ -1282,7 +1421,8 @@ export function statusOf(home: string, name: string): { agent: AgentConfig | nul
         .map((line) => JSON.parse(line) as unknown)
     : [];
   // Under a sandboxed host the probe may answer EPERM for a live runtime: that is running, not gone (task 975).
-  const running = existsSync(paths.pid) && pidAlive(Number(readFileSync(paths.pid, "utf8").trim()));
+  // A pid file from before the machine's last boot names whatever process has that pid now (addendum 8): not running.
+  const running = existsSync(paths.pid) && pidAlive(Number(readFileSync(paths.pid, "utf8").trim())) && !beforeBoot(statSync(paths.pid).mtimeMs);
   return { agent, book, notifications, stop: stopReason(home, name), running };
 }
 

@@ -29,17 +29,30 @@ describe("the sign-in's end (measured 2026-10-22)", () => {
 describe("the reminder: once per sign-in", () => {
   const view = (end: number, key = "k1") => ({ connected: true, view: { key, end, source: "sign-in limit" as const } });
 
-  it("says 6 h, 1 h and the end once each, however often it is asked", () => {
+  it("says 24 h, 6 h, 1 h and the end once each, however often it is asked (addendum 8)", () => {
     let memory: SessionMemory = freshMemory();
-    const said: string[] = [];
+    const said: { code: string; left: number }[] = [];
     const end = 100 * H;
-    for (let now = 90 * H; now < 102 * H; now += 300_000) {
+    for (let now = 60 * H; now < 102 * H; now += 300_000) {
       // The wallet says CONNECTED until its end, then not.
       const step = sessionStep(memory, now < end ? view(end) : { connected: false, view: null }, now);
       memory = step.memory;
+      said.push(...step.say.map((code) => ({ code, left: (end - now) / H })));
+    }
+    expect(said.map((s) => s.code)).toEqual(["24h", "6h", "1h", "ended"]);
+    // Each at its step, read every 5 minutes: inside the step's last 5 minutes of reach.
+    expect(said.slice(0, 3).map((s) => Math.ceil(s.left))).toEqual([24, 6, 1]);
+  });
+
+  it("addendum 8: first seen 10 h before the end, it says 24 h only, then 6 h and 1 h at theirs", () => {
+    let memory = freshMemory();
+    const said: string[] = [];
+    for (let now = 90 * H; now < 100 * H; now += 300_000) {
+      const step = sessionStep(memory, view(100 * H), now);
+      memory = step.memory;
       said.push(...step.say);
     }
-    expect(said).toEqual(["6h", "1h", "ended"]);
+    expect(said).toEqual(["24h", "6h", "1h"]);
   });
 
   it("goes straight to 1 h when it first looks inside the last hour", () => {

@@ -9,6 +9,7 @@ import type { Limits } from "../limits.ts";
 import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES } from "../prompt/constants.ts";
 import type { DayView } from "../prompt/floor.ts";
 import { utc8 } from "../register/copy.ts";
+import { signInWarning } from "../session.ts";
 
 /**
  * What the player's own AI sees on each ask (task 975, addenda 4 and 5), and what its answer may be. The runtime owns
@@ -71,7 +72,10 @@ export type PackInput = {
   now: number;
   limits: Limits;
   prompt: { text: string | null; sha256: string | null; changed: boolean };
-  season: { opensAt: number | null; open: boolean; state: string | null; day: number | null };
+  /** `noFloorTonight`: tonight's dinner is the warm-up's, which asks no floor (addendum 8, from the league's clock). */
+  season: { opensAt: number | null; open: boolean; state: string | null; day: number | null; noFloorTonight?: boolean };
+  /** Addendum 8: when the wallet's sign-in ends (the runtime's last reading); the pack warns in its last 24 h. */
+  signInEndsAt?: number | null;
   day: DayView;
   wallet: { balanceBnb: number; gasReserveBnb: number; spendableBnb: number } | null;
   headroom: Headroom;
@@ -169,8 +173,11 @@ export function buildPack(input: PackInput): Pack {
     "",
     "## Where you stand",
     `now ${utc8(input.now)} UTC+8; the league: ${input.season.state ?? "not read"}${input.season.day !== null ? `, day ${input.season.day} of 7` : ""}; trading ${input.season.open ? "open" : "not open yet"}; next dinner ${utc8(Date.parse(input.day.endsAt))} UTC+8, in ${toDinner} min.`,
-    `today's floor: ${input.day.trades} trades and ${bnb(input.day.volumeBnb)} BNB of volume so far (needs ${ACTIVITY_FLOOR_TRADES} and ${ACTIVITY_FLOOR_BNB} BNB; ${FLOOR_COUNTS}): ${input.day.passed ? "met" : "NOT met yet"}.`,
-    ...(!input.day.passed && toDinner <= 60 ? [`FLOOR UNMET, ${toDinner} minutes left: meet it now with small round trips, or the agent is eaten at the dinner. 20 minutes before the dinner the runtime's floor keeper does it instead.`] : []),
+    ...(signInWarning(input.signInEndsAt ?? null, input.now) ? [signInWarning(input.signInEndsAt ?? null, input.now)!] : []),
+    input.season.noFloorTonight
+      ? `today's floor: warm-up tonight: no floor. Tonight's dinner is the warm-up and eats nobody; from tomorrow the floor is ${ACTIVITY_FLOOR_TRADES} trades and ${ACTIVITY_FLOOR_BNB} BNB a day (${FLOOR_COUNTS}). So far today: ${input.day.trades} trades, ${bnb(input.day.volumeBnb)} BNB.`
+      : `today's floor: ${input.day.trades} trades and ${bnb(input.day.volumeBnb)} BNB of volume so far (needs ${ACTIVITY_FLOOR_TRADES} and ${ACTIVITY_FLOOR_BNB} BNB; ${FLOOR_COUNTS}): ${input.day.passed ? "met" : "NOT met yet"}.`,
+    ...(!input.season.noFloorTonight && !input.day.passed && toDinner <= 60 ? [`FLOOR UNMET, ${toDinner} minutes left: meet it now with small round trips, or the agent is eaten at the dinner. 20 minutes before the dinner the runtime's floor keeper does it instead.`] : []),
     `wallet: ${input.wallet ? `${bnb(input.wallet.balanceBnb)} BNB, ${input.wallet.gasReserveBnb} BNB of it the gas reserve, ${bnb(input.wallet.spendableBnb)} BNB spendable` : "the balance could not be read: no buy fits"}.`,
     `headroom: a buy now at most ${cap} BNB; left today ${bnb(h.leftTodayBnb)} BNB (spent ${bnb(h.spent24hBnb)} in 24 h); left this season ${bnb(h.leftSeasonBnb)} BNB; open ${bnb(h.exposureBnb)} of ${bnb(h.exposureBnb + h.leftExposureBnb)} BNB; positions ${h.openPositions} of ${h.maxOpenPositions}; trades this hour ${h.trades1h} of ${h.maxTradesPerHour}; realized loss in 24 h ${bnb(h.realizedLoss24hBnb)} BNB (${bnb(h.leftLoss24hBnb)} left); drawdown ${bnb(h.drawdownBnb)} of ${bnb(h.maxDrawdownBnb)} BNB${h.cooldowns.length > 0 ? `; in cooldown: ${h.cooldowns.map((c) => `${idOf.get(c.coin.toLowerCase()) ?? "a coin not listed"} until ${utc8(Date.parse(c.until))}`).join(", ")}` : ""}.`,
     `PnL: realized ${bnb(input.pnl.realizedBnb)} BNB, unrealized ${bnb(input.pnl.unrealizedBnb)} BNB, gas ${bnb(input.pnl.gasBnb)} BNB; last trade ${input.lastTradeAt ? `${utc8(Date.parse(input.lastTradeAt))} UTC+8` : "never"}.`,

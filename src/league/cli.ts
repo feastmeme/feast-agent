@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,7 @@ import { applyChange, confirmAgent, loadAgent, planAgent, saveAgent, type AgentC
 import { AUDIT_RULES } from "./audit/static.ts";
 import { auditFile, auditRefusal, recordModelVerdict } from "./audit/verdict.ts";
 import { BawError, BawSigner, execRunner } from "./baw.ts";
+import { daemon, daemonPath, type Runner } from "./daemon.ts";
 import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
@@ -76,12 +78,13 @@ import { ENTRY_AGENT } from "./enter/constants.ts";
 import { autopilotLine, awakeLine, clean, tradeNowLine } from "./enter/copy.ts";
 import { enter, entryOneShot, readEntry } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
-import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
+import { LeagueSite, seatingOfKept, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
 import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./script/check.ts";
 import { standingLines, type StandingInput } from "./season-card.ts";
-import { readGate } from "./season-gate.ts";
-import { sessionView } from "./session.ts";
+import { noFloorTonight, readGate, SEASON_OVER_LINE, type GateState } from "./season-gate.ts";
+import { sessionView, signInEndOf, signInLine } from "./session.ts";
+import { readVersion, versionLine, versionView } from "./version.ts";
 import { askChoice, autopilotChoice, prepareStart } from "./start.ts";
 import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
 import type { IntentRequest } from "./strategy.ts";
@@ -161,6 +164,10 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   preview-only checks: the wallet's answer, nothing executed
   agents                          the agents on this machine
   doctor                          is everything in place?
+  login [--json]                  the wallet's sign-in: until when it is valid, and how to scan again (reads only)
+  daemon <name> --install | --uninstall | --status
+                                  keep the agent running across reboots and crashes: a LaunchAgent (macOS) or a
+                                  systemd user unit (Linux) that runs \`run <name> --supervised\`; FL stop still stops it
 
 Home: $FEAST_LEAGUE_HOME (default ~/.feast-league). RPC: $FEAST_MAINNET_RPC_URL (default the Binance dataseed).
 Site: $FEAST_LEAGUE_SITE (default https://feast.meme). Indexer: $FEAST_LEAGUE_INDEXER (default https://indexer.feast.meme).`;
@@ -233,6 +240,11 @@ async function main(argv: string[]): Promise<number> {
       "model-verdict": { type: "string" },
       notes: { type: "string" },
       "max-runtime": { type: "string" },
+      // Task 975, addendum 8: FL daemon, and the supervised run it starts.
+      install: { type: "boolean", default: false },
+      uninstall: { type: "boolean", default: false },
+      status: { type: "boolean", default: false },
+      supervised: { type: "boolean", default: false },
       coin: { type: "string" },
       bnb: { type: "string" },
       home: { type: "string" },
@@ -441,7 +453,9 @@ async function main(argv: string[]): Promise<number> {
         noJitter: values["no-jitter"],
       });
       console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
-      return outcome.exit === "error" ? 1 : outcome.exit === "refused" ? 2 : 0;
+      // Under a supervisor (FL daemon, addendum 8) a refusal (a stop file, a signed-out wallet) exits 0: it is not
+      // restarted into the same refusal every minute; an error exits 1 and is.
+      return outcome.exit === "error" ? 1 : outcome.exit === "refused" ? (values.supervised ? 0 : 2) : 0;
     }
     case "stop": {
       const names = values.all ? (existsSync(join(home, "agents")) ? readdirSync(join(home, "agents")) : []) : [need(args[0], "an agent name (or --all)")];
@@ -474,6 +488,8 @@ async function main(argv: string[]): Promise<number> {
       const bnbUsd = mine && (holds || mine.pnl.realizedBnb !== 0) ? await within(chain.bnbUsd(), 8_000) : null;
       const usdRef = typeof bnbUsd === "number" && bnbUsd > 0 ? { bnbUsd: Number(bnbUsd.toFixed(4)), at: new Date().toISOString() } : null;
       const sleptAt = lastSleep(home, name);
+      const release = (league?.latestRuntime ? versionView(league.latestRuntime, Date.now()) : null) ?? readVersion(home, name) ?? null;
+      const signInEnd = signInEndOf(home, name);
       const askState = readAskState(home, name);
       const askNow = { lastAskAt: askState.lastAskAt === null ? null : new Date(askState.lastAskAt).toISOString(), last: askState.last ? { ...askState.last, at: new Date(askState.last.at).toISOString() } : null, failuresInARow: askState.streak, floorKeeperSince: askState.floorKeeperSince === null ? null : new Date(askState.floorKeeperSince).toISOString() };
       const data = {
@@ -514,8 +530,11 @@ async function main(argv: string[]): Promise<number> {
         notifications: s.notifications,
         unread,
         league: league?.data ?? null,
-        // Task 968: an agent FL enter started waits for the season's opening.
-        season: s.agent.league?.waitForSeason ? (readGate(home, name) ?? { state: "waiting", opensAt: null, at: null }) : null,
+        // Task 968: an agent FL enter started waits for the season's opening; addendum 8: any prompt agent's gate (the season's end, the warm-up).
+        season: s.agent.league?.waitForSeason ? (readGate(home, name) ?? { state: "waiting", opensAt: null, at: null }) : s.agent.track === "prompt" ? readGate(home, name) : null,
+        // Task 975, addendum 8: the release against the page's newest (this read's, else the runtime's last), and the sign-in's end.
+        runtime: release,
+        signInEndsAt: signInEnd === null ? null : new Date(signInEnd).toISOString(),
       };
       const gate = data.season;
       const waiting = gate && gate.state === "waiting" ? [`waiting for the season (${gate.opensAt ? `opens ${utc8(Date.parse(gate.opensAt))} UTC+8` : "opens when feast.meme announces the start"}): it trades nothing before`] : [];
@@ -559,6 +578,11 @@ async function main(argv: string[]): Promise<number> {
           `positions: ${data.positions.length ? data.positions.map((p) => `${p.symbol} ${p.costBnb} BNB${p.armed ? "" : " (exit not armed)"}`).join(", ") : "none"}`,
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...waiting,
+          // Task 975, addendum 8: the season's end, the warm-up dinner, the release, the sign-in.
+          ...(gate?.state === "over" ? [SEASON_OVER_LINE] : []),
+          ...(s.agent!.track === "prompt" && noFloorTonight(gate?.at ? (gate as GateState) : null, Date.now()) ? ["warm-up tonight: no floor (the warm-up dinner eats nobody); the floor counts from tomorrow"] : []),
+          ...(versionLine(release) ? [versionLine(release)!] : []),
+          ...(s.agent!.track !== "entry" && signInLine(signInEnd, utc8) ? [signInLine(signInEnd, utc8)!] : []),
           // It runs on this machine: say so, and when it last slept (task 975, addendum 3).
           ...(s.agent!.track !== "entry" ? [awakeLine(lang)] : []),
           ...(sleptAt ? [`slept ${sleptAt.minutes} minutes at ${utc8(sleptAt.at)} UTC+8: nothing traded while it slept`] : []),
@@ -774,7 +798,7 @@ async function main(argv: string[]): Promise<number> {
         }
         const g = readGate(home, name);
         const opensAt = g?.opensAt ? Date.parse(g.opensAt) : null;
-        const gathered = await gatherPack({ home, agent, now: Date.now(), wallet, chain, snapshot, fetch, site: siteFromEnv(), gate: { opensAt, open: g ? g.state === "open" : !agent.league?.waitForSeason }, feast: MAINNET.platformCoin?.address ?? null, impacts: impacts(quoter, chain) });
+        const gathered = await gatherPack({ home, agent, now: Date.now(), wallet, chain, snapshot, fetch, site: siteFromEnv(), gate: { opensAt, open: g ? g.state === "open" : !agent.league?.waitForSeason, noFloorTonight: noFloorTonight(g, Date.now()), signInEndsAt: signInEndOf(home, name) }, feast: MAINNET.platformCoin?.address ?? null, impacts: impacts(quoter, chain) });
         print(json, { ok: true, digest: gathered.pack.digest, chars: gathered.pack.text.length, requests: gathered.requests, pack: gathered.pack.text }, () => gathered.pack.text);
         return 0;
       }
@@ -843,6 +867,43 @@ async function main(argv: string[]): Promise<number> {
       );
       return 0;
     }
+    case "login": {
+      // Addendum 8: the sign-in the pack and the notifications point to. Reads only: the wallet's own sign-in is the
+      // Binance Agentic Wallet skill's (baw auth signin), which this runtime may not run.
+      const signer = signerFor(home, null);
+      const status = await within(signer.status(), 10_000).catch(() => null);
+      const settings = status?.connected ? await within(signer.settings(), 10_000).catch(() => null) : null;
+      const end = settings ? sessionView(settings).end : null;
+      const how = "To sign in again: use the Binance Agentic Wallet skill (`baw auth signin`), show the pairing code, and scan it in the Binance App. A running agent picks the new sign-in up by itself; nothing needs restarting.";
+      const data = { connected: status?.connected ?? null, signInEndsAt: end === null ? null : new Date(end).toISOString(), how };
+      print(json, data, () =>
+        [
+          status === null ? "the wallet could not be read just now" : !status.connected ? "the wallet is signed out: the agent cannot trade or exit until it is signed in again" : end !== null ? `the wallet is signed in, valid until ${utc8(end)} UTC+8 (${end > Date.now() ? `in ${duration(end - Date.now(), "en")}` : "ended"})` : "the wallet is signed in; its end could not be read",
+          how,
+        ].join("\n"),
+      );
+      return status?.connected ? 0 : 1;
+    }
+    case "daemon": {
+      const name = notEntry(need(args[0], "an agent name"));
+      if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
+      const action = values.install ? "install" : values.uninstall ? "uninstall" : values.status ? "status" : null;
+      if (!action || [values.install, values.uninstall, values.status].filter(Boolean).length > 1) throw new Error("FL daemon <name> takes one of --install, --uninstall, --status");
+      if (process.platform !== "darwin" && process.platform !== "linux") throw new Error(`FL daemon is for macOS and Linux; on ${process.platform}, see docs/league/daemon.md`);
+      const run: Runner = (command, list) =>
+        new Promise((done) => {
+          const child = spawn(command, list, { stdio: ["ignore", "pipe", "pipe"] });
+          let stdout = "";
+          let stderr = "";
+          child.stdout?.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
+          child.stderr?.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+          child.on("error", (error) => done({ code: 127, stdout, stderr: error.message }));
+          child.on("close", (code) => done({ code: code ?? 1, stdout, stderr }));
+        });
+      const result = await daemon({ action, platform: process.platform, name, home, userHome: homedir(), node: process.execPath, bin: BIN, path: daemonPath(process.env, process.execPath), uid: process.getuid?.() ?? 0, run, running: statusOf(home, name).running });
+      print(json, result, () => result.lines.join("\n"));
+      return result.ok ? 0 : 1;
+    }
     case "doctor":
       return doctor(home, json);
     default:
@@ -878,7 +939,7 @@ function noticeLine(n: unknown, lang: Lang): string {
 }
 
 /** The league block of `status` (PLAN-941 §6). Best effort: it never fails `status`. */
-async function leagueStanding(home: string, lang: Lang, agent: StandingInput["agent"] = null): Promise<{ lines: string[]; data: Record<string, unknown> }> {
+async function leagueStanding(home: string, lang: Lang, agent: StandingInput["agent"] = null): Promise<{ lines: string[]; data: Record<string, unknown>; latestRuntime: LeagueRead["latestRuntime"] | null }> {
   const site = new LeagueSite(siteFromEnv(), fetch, 8_000);
   const me = await Promise.race([signerFor(home, null).address(), new Promise<null>((r) => setTimeout(() => r(null), 5_000))]).catch(() => null);
   const record = readLeagueRecord(home);
@@ -898,7 +959,7 @@ async function leagueStanding(home: string, lang: Lang, agent: StandingInput["ag
   const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered, agent, standing: ranked.standing }, lang);
   // The page's own rows, without the wallet's address: printed output keeps the home's rule.
   const own = today?.me ? { earners: today.me.earners ? { ...today.me.earners, wallet: undefined } : null, backed: today.me.backed ? { ...today.me.backed, wallet: undefined } : null, eaten: today.me.eaten } : (today?.me ?? null);
-  return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own } };
+  return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own }, latestRuntime: today?.latestRuntime ?? null };
 }
 
 /** `feast-league enter` and `feast-league meme` (tasks 961, 968): `src/league/enter/flow.ts` is the whole of it. */

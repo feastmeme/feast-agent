@@ -31,7 +31,7 @@ export type GatherDeps = {
   snapshot: FeastSnapshot | null;
   fetch: typeof fetch;
   site: string;
-  gate: { opensAt: number | null; open: boolean };
+  gate: { opensAt: number | null; open: boolean; noFloorTonight?: boolean; signInEndsAt?: number | null };
   feast: Address | null;
   impacts?: { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null> };
   /** The league's read, when the caller already has it (tests); default one GET. */
@@ -90,7 +90,8 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     now: d.now,
     limits: d.agent.limits,
     prompt: { text: read?.ok ? read.text : null, sha256: sha, changed: state.promptSha !== null && sha !== null && state.promptSha !== sha },
-    season: { opensAt: d.gate.opensAt, open: d.gate.open, state: league?.state ?? null, day: league?.season.day ?? null },
+    season: { opensAt: d.gate.opensAt, open: d.gate.open, state: league?.state ?? null, day: league?.season.day ?? null, noFloorTonight: d.gate.noFloorTonight === true },
+    signInEndsAt: d.gate.signInEndsAt ?? null,
     day: mine.day,
     wallet: mine.wallet,
     headroom: mine.headroom,

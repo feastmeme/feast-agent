@@ -37,7 +37,7 @@ import { fakeBaw, leagueWire } from "../register/fakes.ts";
 import { LeagueSite } from "../register/site.ts";
 import { runAgent } from "../runtime.ts";
 import { autopilotChoice } from "../start.ts";
-import { agentPaths, writeJsonAtomic } from "../store.ts";
+import { agentPaths, readJson, writeJsonAtomic, writeStop } from "../store.ts";
 import { FEAST, fakeClock, marketWorld } from "./fakes.ts";
 import { dayCount, nextDinner, passesFloor } from "./floor.ts";
 
@@ -60,7 +60,8 @@ const BOARD = [
   { coin: coin(0xc0e5), symbol: "NEWFEED", volume: 12, trades: 60, young: true },
 ];
 const symbolOf = new Map(BOARD.map((b) => [b.coin.toLowerCase(), b.symbol]));
-const OWN_SET = [OWN.toLowerCase(), FEAST.toLowerCase()];
+// The day's count leaves out the agent's own coin only: FEAST counts (addendum 7, as the settlement engine counts it).
+const OWN_SET = [OWN.toLowerCase()];
 
 const roots: string[] = [];
 const tmpRoot = () => {
@@ -540,7 +541,87 @@ async function opening(): Promise<void> {
   events(s.home, ["season.open", "autopilot.on"]);
   say("");
   fillTable(fills(s.home));
-  say("\nThe silence counts from the yes, so the backup is on at the opening instant (here with `--no-jitter`; `FL enter` starts with the jitter, 0–120 s). The opening hour is the last hour before dinner 1, so it is in the rush: buys and sales 3 minutes apart. Dinner 1 eats nobody; the floor it keeps there is the arithmetic's first of seven days.");
+  say("\nThe silence counts from the yes, so the backup is on at the opening instant (here with `--no-jitter`; `FL enter` starts with the jitter, 0–120 s). The opening hour is the last hour before dinner 1, the warm-up dinner: it eats nobody and asks no floor (addendum 8), so the backup stands on but makes no trade for the floor; the league's clock says which dinner it is (`warmUpDinnerAt` in `season.json`), never a date. From the next day the floor counts.");
+}
+
+// --- addendum 8: the season's end, the warm-up dinner, a run killed mid-send ------------------------------------
+
+const noticesOf = (home: string) =>
+  existsSync(agentPaths(home, "maplegrin").notifications)
+    ? readFileSync(agentPaths(home, "maplegrin").notifications, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { at: string; kind: string; text: string })
+    : [];
+const inboxAt = (s: Scene, when: number, file: string, body: Record<string, unknown>) =>
+  s.c.at(when, () => {
+    mkdirSync(agentPaths(s.home, "maplegrin").inbox, { recursive: true });
+    writeJsonAtomic(join(agentPaths(s.home, "maplegrin").inbox, file), body);
+  });
+
+async function seasonEnd(): Promise<void> {
+  section("(m) The season's last dinner: feast.meme says `over`; and a newer runtime is out");
+  const END = Date.parse("2026-11-03T13:00:00Z");
+  let now = () => 0;
+  const s = scene(END - 40 * MIN, {
+    hostTradedAt: END - 45 * MIN,
+    ask: { every: 5, with: "claude" },
+    league: () => ({ ...(now() >= END ? leagueWire({ state: "over", season: { number: 1, day: null, countdownTo: null } }) : leagueWire({ state: "season", season: { number: 1, day: 7, countdownTo: new Date(END).toISOString() } })), latestRuntime: { tag: "league-v6", publishedAt: "2026-11-02T04:00:00.000Z", minSupported: "league-v5" } }),
+  });
+  now = s.c.now;
+  say("Day 7, 20:20 UTC+8, the ask loop on (the stub `claude` holds), a page that names `league-v6` as the newest release. At 21:00 UTC+8 the stub `/api/league` turns to `over`. The host bought NOODFEED at 20:25; at 21:10 it sends one more `FL buy` and an `FL sell` of NOODFEED.\n");
+  inboxAt(s, END - 35 * MIN, "1-buy.json", { type: "intent", requestId: "m1", request: { kind: "buy", coin: BOARD[2]!.coin, bnb: 0.004, reason: "manual buy" } });
+  inboxAt(s, END + 10 * MIN, "2-buy.json", { type: "intent", requestId: "m2", request: { kind: "buy", coin: BOARD[3]!.coin, bnb: 0.004, reason: "after the end" } });
+  inboxAt(s, END + 10 * MIN, "3-sell.json", { type: "intent", requestId: "m3", request: { kind: "sell", coin: BOARD[2]!.coin, fraction: 1, reason: "close out" } });
+  await runAsking(s, END + 2 * HOUR, "hold");
+  events(s.home, ["season.over", "runtime.behind"]);
+  const outcomes = logOf(s.home).filter((l) => l.event === "request.outcome");
+  say(`\nThe host's requests: ${outcomes.map((l) => `\`${String(l.requestId)}\` ${String(l.kind)} → ${String(l.outcome)}${l.message ? ` ("${String(l.message)}")` : ""}`).join("; ")}.`);
+  const asks = readJournal(s.home, "maplegrin", 100);
+  say(`The asks: ${asks.length}, the last at ${hm(Date.parse(asks.at(-1)!.at))} UTC+8 (none after the end). The floor keeper's intents after 21:00 UTC+8: ${logOf(s.home).filter((l) => l.event === "intent.queued" && l.source === "preset" && Date.parse(l.at) >= END).length}.\n`);
+  say("The notifications (the season and the release):");
+  for (const n of noticesOf(s.home).filter((x) => x.kind === "season" || x.kind === "version")) say(`- ${hm(Date.parse(n.at))} ${n.kind}: ${n.text}`);
+  say("");
+  fillTable(fills(s.home));
+  say("\nThe release is told once a league day: once before 21:00 UTC+8 and once after it, the dinner being a new league day; `FL status` says `runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent` meanwhile. Nothing upgrades by itself.");
+}
+
+async function warmUp(): Promise<void> {
+  section("(n) The warm-up dinner: day 1, the AI only holds, the floor unmet at 20:40 UTC+8");
+  const WARM = Date.parse("2026-10-28T13:00:00Z");
+  const s = scene(WARM - 70 * MIN, { hostTradedAt: WARM - 75 * MIN, ask: { every: 5, with: "claude" }, league: () => leagueWire({ state: "season", season: { number: 1, day: 1, countdownTo: new Date(WARM).toISOString() } }) });
+  const { packs } = await runAsking(s, WARM, "hold");
+  events(s.home, ["autopilot.on", "autopilot.off"]);
+  const files = existsSync(packs) ? readdirSync(packs).sort() : [];
+  const last = files.length ? readFileSync(join(packs, files.at(-1)!), "utf8") : "";
+  say(`\nThe same hour as (k), a day earlier: no \`autopilot.on\`, ${fills(s.home).length} fills. ${files.length} asks; the last pack's floor line:\n`);
+  block(last.split("\n").find((l) => l.startsWith("today's floor:")) ?? "(none)");
+  say(`\n\`season.json\`: ${JSON.stringify(readJson(join(agentPaths(s.home, "maplegrin").dir, "season.json")))}`.replace(/"at":"[^"]+",?/, ""));
+}
+
+async function killedMidSend(): Promise<void> {
+  section("(o) Killed between the send and the receipt, then restarted");
+  const s = scene(at8("14:00"), { hostTradedAt: at8("13:50") });
+  const receipt = s.w.chain.receipt.bind(s.w.chain);
+  let hang: (e: Error) => void = () => {};
+  (s.w.chain as unknown as { receipt: unknown }).receipt = () => new Promise((_, reject) => (hang = reject));
+  const first = run(s, at8("15:00"));
+  mkdirSync(agentPaths(s.home, "maplegrin").inbox, { recursive: true });
+  writeJsonAtomic(join(agentPaths(s.home, "maplegrin").inbox, "1-buy.json"), { type: "intent", requestId: "o1", request: { kind: "buy", coin: BOARD[3]!.coin, bnb: 0.004, reason: "manual buy" } });
+  const state = () => (existsSync(agentPaths(s.home, "maplegrin").state) ? (JSON.parse(readFileSync(agentPaths(s.home, "maplegrin").state, "utf8")) as { unresolved?: Record<string, unknown>[]; positions?: Record<string, { coins?: string }> }) : null);
+  for (let i = 0; i < 400 && !state()?.unresolved?.some((u) => u.txHash !== null); i += 1) await new Promise((r) => setTimeout(r, 10));
+  const kept = state()!.unresolved![0]!;
+  say("The host's `FL buy` of 0.004 BNB of KOIFEED at 14:00 UTC+8. The wallet broadcasts it; the receipt never comes back to this run, which is killed there (its lock and pid file gone with it). In the book on disk, before any receipt:\n");
+  block(JSON.stringify({ kind: kept.kind, symbol: kept.symbol, sizeWei: kept.sizeWei, txHash: `${String(kept.txHash).slice(0, 10)}…`, sending: kept.sending, positions: Object.keys(state()!.positions ?? {}).length }, null, 2));
+  rmSync(join(s.home, "wallet.lock"), { force: true });
+  rmSync(agentPaths(s.home, "maplegrin").pid, { force: true });
+  (s.w.chain as unknown as { receipt: unknown }).receipt = receipt;
+  (s.w.chain.client as unknown as { getTransactionReceipt: unknown }).getTransactionReceipt = ({ hash }: { hash: `0x${string}` }) => receipt(hash, 1);
+  const told = noticesOf(s.home).length;
+  await run(s, s.c.now() + 2 * MIN);
+  const after = state()!;
+  say(`\nThe restart, at ${hm(s.c.now() - 2 * MIN)} UTC+8: the record is read by its hash, its receipt found, the fill booked. Unresolved after it: ${after.unresolved?.length ?? 0}; KOIFEED held: ${Object.keys(after.positions ?? {}).length === 1 ? "yes" : "no"}. Told once:\n`);
+  for (const n of noticesOf(s.home).slice(told).filter((x) => x.kind === "trade")) say(`- ${n.kind}: ${n.text}`.replace(/0x[0-9a-f]{64}/g, (h) => `${h.slice(0, 10)}…`));
+  writeStop(agentPaths(s.home, "maplegrin").stop, "dry run over");
+  hang(new Error("timed out"));
+  await first;
 }
 
 const results: Record<string, ReturnType<typeof firstHour>> = {};
@@ -562,6 +643,9 @@ async function main(): Promise<void> {
   await askFailing();
   await askGuard();
   await atScale();
+  await seasonEnd();
+  await warmUp();
+  await killedMidSend();
   section("The numbers");
   say("(The first 60 minutes are cut at the dinner: the next day's fills are not in them.)\n");
   say("| scene | took over (UTC+8) | steady's fills in its first 60 min | their volume | the day's floor | steady's buys that day |");

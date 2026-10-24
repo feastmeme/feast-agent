@@ -100,3 +100,32 @@ export function readDeclaredHost(home: string): Model | null {
 export function declareHost(home: string, host: Model, now = Date.now()): void {
   writeJsonAtomic(declaredHostPath(home), { host, at: new Date(now).toISOString() });
 }
+
+// --- the health flag (task 975, addendum 8, gap G7) --------------------------------------------------------------
+
+/**
+ * One word on the runtime's 5-minute league read, and on nothing else: `ok`, `degraded` (the chain's RPC is on a
+ * fallback, or an ask has failed) or `failing` (three failed passes of the loop in a row, or a transaction whose
+ * outcome has been unknown for more than 10 minutes). No count, no reason, no wallet: the site adds them up by
+ * release and host, and a widespread fault shows as one, not as players gone quiet.
+ */
+export const HEALTH_HEADER = "x-feast-health";
+export const HEALTH = ["ok", "degraded", "failing"] as const;
+export type Health = (typeof HEALTH)[number];
+
+export function healthFlag(o: { tickFailsInARow: number; oldestUnresolvedMs: number | null; rpcOnFallback: boolean; askFailsInARow: number }): Health {
+  if (o.tickFailsInARow >= 3 || (o.oldestUnresolvedMs !== null && o.oldestUnresolvedMs > 10 * 60_000)) return "failing";
+  if (o.rpcOnFallback || o.askFailsInARow > 0) return "degraded";
+  return "ok";
+}
+
+/** A fetch that sets the health flag on every request it makes (used for the league read alone). */
+export function withHealth(fetchImpl: typeof fetch, health: Health): typeof fetch {
+  const value: Health = (HEALTH as readonly string[]).includes(health) ? health : "ok";
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const headers = new Headers(input instanceof Request ? input.headers : undefined);
+    if (init?.headers !== undefined) new Headers(init.headers).forEach((v, k) => headers.set(k, v));
+    headers.set(HEALTH_HEADER, value);
+    return fetchImpl(input, { ...init, headers });
+  }) as typeof fetch;
+}

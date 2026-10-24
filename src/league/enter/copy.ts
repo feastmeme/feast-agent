@@ -314,8 +314,15 @@ export function entryCard(view: { agentId: string; season: number; notes: boolea
 }
 
 /** The agent's part of a card: the strategy, its card, when it trades, and its autopilot backup. */
-export function agentSection(view: { strategy: StrategyShown; name: string; card: string; opens: OpensShown; autopilot?: AutopilotShown }, lang: Lang): string {
-  return [strategyLine(view.strategy, view.name, lang), "", view.card, "", waitingLine(view.opens, lang, view.autopilot), ...(view.autopilot !== undefined ? [autopilotLine(view.autopilot, lang)] : [])].join("\n");
+export function agentSection(view: { strategy: StrategyShown; name: string; card: string; opens: OpensShown; autopilot?: AutopilotShown; signInEnd?: number | null }, lang: Lang): string {
+  return [strategyLine(view.strategy, view.name, lang), "", view.card, "", waitingLine(view.opens, lang, view.autopilot), ...(view.autopilot !== undefined ? [autopilotLine(view.autopilot, lang)] : []), ...(view.signInEnd ? [signInSentence(view.signInEnd, lang)] : [])].join("\n");
+}
+
+/** The wallet's sign-in on the entry card (task 975, addendum 8): the date to scan again by, en and zh. */
+export function signInSentence(end: number, lang: Lang): string {
+  return lang === "zh"
+    ? `钱包登录有效期至 ${utc8(end)} UTC+8：在那之前重新扫码，否则 agent 会停止交易（\`FL login\` 会告诉你怎么做）。`
+    : `Wallet sign-in valid until ${utc8(end)} UTC+8: re-scan before then or the agent stops trading (\`FL login\` says how).`;
 }
 
 export function keptUnreadable(reason: string, lang: Lang): string {
@@ -494,7 +501,13 @@ export function doneLine(lang: Lang): string {
 }
 
 /** After the entry that started the agent (task 968), with its autopilot backup (task 975). */
-export function doneRunning(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown, promptFile = "strategy.md"): string {
+export function doneRunning(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown, promptFile = "strategy.md", upgrade: string | null = null): string {
+  const line = doneRunningLine(name, opens, lang, autopilot, promptFile);
+  // Addendum 8: a runtime behind the page's newest release says the upgrade command, last.
+  return upgrade ? `${line}${lang === "zh" ? "" : " "}${upgrade}` : line;
+}
+
+function doneRunningLine(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown, promptFile = "strategy.md"): string {
   const zh = lang === "zh";
   const backup = `${autopilot !== undefined ? `${autopilotLine(autopilot, lang)}${zh ? "" : " "}` : ""}${awakeLine(lang)}${zh ? "" : " "}`;
   const after = zh

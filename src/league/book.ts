@@ -78,6 +78,13 @@ export type Unresolved = {
   /** The wallet's balance of the coin before it was sent, and the least a fill moves it by: an unknown outcome is read from these. */
   balanceBefore: bigint | null;
   minCoins: bigint;
+  /**
+   * Task 975, addendum 8 (gap G3): written before the wallet is asked to send, cleared when the outcome is known. One
+   * still here at a start was left by a run that stopped mid-send: it is reconciled against the chain at once.
+   */
+  sending?: boolean;
+  /** Which run wrote it (a token of that run's own): the run itself never takes its own send in flight for a leftover. */
+  run?: string;
 };
 
 const DAY = 24 * 60 * 60 * 1_000;

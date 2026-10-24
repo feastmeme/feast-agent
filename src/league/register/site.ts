@@ -158,6 +158,11 @@ export type LeagueRead = {
   field?: FieldRow[];
   /** The page's body as it came (the field's read keeps it, for `FL data`'s window and dinner). */
   raw?: unknown;
+  /**
+   * Task 975, addendum 8 (the site's lane): the newest runtime release and the oldest still supported; undefined when
+   * the page does not say (then nothing is said of it). Tags are `league-vN`; anything else is dropped.
+   */
+  latestRuntime?: { tag: string; publishedAt: number | null; minSupported: string | null };
 };
 
 /** One seated agent of `field=1`: names are other players' words. `trades` only when the page gives it. */
@@ -268,7 +273,19 @@ export function parseLeague(body: unknown): LeagueRead | null {
     const me = b.me as Record<string, unknown> | null;
     read.me = me ? { earners: earnerRow(me.earners), backed: backedRow(me.backed), eaten: eatenOf(me.eaten) } : null;
   }
+  const latest = latestRuntimeOf(b.latestRuntime);
+  if (latest) read.latestRuntime = latest;
   return read;
+}
+
+const RELEASE_TAG = /^league-v\d{1,4}$/;
+/** `latestRuntime: { tag, publishedAt, minSupported }`, checked: a tag that is not `league-vN` is no answer. */
+export function latestRuntimeOf(raw: unknown): LeagueRead["latestRuntime"] | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.tag !== "string" || !RELEASE_TAG.test(r.tag)) return null;
+  const at = typeof r.publishedAt === "string" ? Date.parse(r.publishedAt) : Number.NaN;
+  return { tag: r.tag, publishedAt: Number.isFinite(at) ? at : null, minSupported: typeof r.minSupported === "string" && RELEASE_TAG.test(r.minSupported) ? r.minSupported : null };
 }
 
 // --- the league entry's reads (task 960's routes, for `FL enter`) ---------------------------

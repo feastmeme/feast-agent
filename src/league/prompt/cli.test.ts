@@ -332,6 +332,30 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
     expect(quote.stdout.trim()).toMatch(/^no quote: /);
   }, 90_000);
 
+  it("addendum 8: FL status names the newer release and its upgrade command, the sign-in's end, the season over; FL daemon refuses a missing action", async () => {
+    const { env, prompt, home } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "claude", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const dir = agentPaths(home, "demo").dir;
+    const end = Date.now() + 20 * 3_600_000;
+    writeJsonAtomic(join(dir, "runtime-version.json"), { current: "league-v5", latest: "league-v6", minSupported: "league-v5", publishedAt: null, behind: true, unsupported: false, at: new Date().toISOString(), saidFor: null });
+    writeJsonAtomic(join(dir, "session.json"), { key: "k", end, said: [] });
+    writeJsonAtomic(join(dir, "season.json"), { state: "over", opensAt: null, at: new Date().toISOString() });
+    const human = await run(["status", "demo", "--no-league"], env);
+    const { utc8 } = await import("../register/copy.ts");
+    expect(human.stdout).toContain("runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
+    expect(human.stdout).toContain(`wallet sign-in valid until ${utc8(end)} UTC+8; re-scan before then or the agent stops trading (FL login says how)`);
+    expect(human.stdout).toContain("season over: nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left");
+    const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as Record<string, unknown>;
+    expect(data.runtime).toMatchObject({ behind: true, latest: "league-v6" });
+    expect(data.signInEndsAt).toBe(new Date(end).toISOString());
+    expect(data.season).toMatchObject({ state: "over" });
+    const bare = await run(["daemon", "demo"], env);
+    expect(bare.code).not.toBe(0);
+    expect(bare.stderr).toContain("FL daemon <name> takes one of --install, --uninstall, --status");
+  }, 60_000);
+
   it("FL status says how the asks go and carries them, the wallet and the headroom in --json", async () => {
     const { env, prompt, home } = setup();
     const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "claude", model: null } });

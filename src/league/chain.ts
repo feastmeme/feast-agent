@@ -7,6 +7,7 @@ import type { FeastNetwork, Hop } from "../sdk/networks.ts";
 import { E18, coinPriceE18 } from "../sdk/price.ts";
 import { permit2Abi } from "../sdk/venue-abi.ts";
 import { AGENT_ID } from "./register/message.ts";
+import { fallbackRpc, rpcEndpoints, type RpcState } from "./rpc.ts";
 
 /**
  * The runtime's reads of BNB Smart Chain, for everything that touches money
@@ -37,13 +38,25 @@ export class LeagueChain {
   private bnbUsdCache: Cached<number> | null = null;
   private readonly quoteBnbCache = new Map<string, Cached<bigint>>();
 
+  /** Addendum 8: which endpoint answers now, for the health flag and `FL status`; never a URL. */
+  readonly rpcState: () => RpcState;
+
   constructor(
     readonly network: FeastNetwork,
     rpcUrl: string = DEFAULT_MAINNET_RPC,
     private readonly ttlMs = 30_000,
+    onSwitch?: (change: { from: string; to: string; reason: string }) => void,
   ) {
     const chain = { ...bsc, rpcUrls: { default: { http: [rpcUrl] } } };
-    this.client = createPublicClient({ chain, transport: http(rpcUrl, { timeout: 20_000, retryCount: 2, retryDelay: 600 }) }) as PublicClient;
+    // On BSC, the primary and then the public fallbacks (addendum 8); another chain keeps its one URL.
+    if (network.chainId === 56) {
+      const rpc = fallbackRpc(rpcEndpoints(rpcUrl), { timeoutMs: 20_000, onSwitch });
+      this.client = createPublicClient({ chain, transport: rpc.transport }) as PublicClient;
+      this.rpcState = rpc.state;
+    } else {
+      this.client = createPublicClient({ chain, transport: http(rpcUrl, { timeout: 20_000, retryCount: 2, retryDelay: 600 }) }) as PublicClient;
+      this.rpcState = () => ({ endpoint: "primary", onFallback: false, resting: 0 });
+    }
   }
 
   get wrappedNative(): Address {

@@ -91,7 +91,12 @@ describe("the board from the held snapshot", () => {
     const w = tradeWorld({ now: c.now });
     const feed = new FakeFeed(c.now);
     await runAgent({ home: h, name: "demo", signer: w.signer, chain: w.chain, fetch: feed.fetch, site: SITE, indexer: INDEXER, now: c.now, sleep: c.sleep, random: seeded(2), loopMs: S, maxRuntimeMs: 10 * MIN, out: () => {} });
-    expect(feed.asked).toEqual([]);
+    expect(feed.snapshots()).toEqual([]);
+    // Addendum 8: what it does ask is the league, every 5 minutes, with the one-word health flag and nothing else of its own.
+    const league = feed.asked.filter((a) => a.url.startsWith(`${SITE}/api/league?`));
+    expect(feed.asked.length).toBe(league.length);
+    // At the start and 5 minutes in (the run is 10 minutes; a page that does not answer is asked again in 5).
+    expect(league.map((a) => [a.at - T0, a.headers["x-feast-health"]])).toEqual([[0, "ok"], [5 * MIN, "ok"]]);
   });
 });
 

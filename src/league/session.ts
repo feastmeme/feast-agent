@@ -1,5 +1,6 @@
 import type { WalletSettings } from "./baw.ts";
 import type { SessionCode } from "./register/copy.ts";
+import { agentPaths, readJson } from "./store.ts";
 
 /**
  * The wallet's sign-in, and the reminder to scan again (docs/PLAN-941.md §7).
@@ -11,8 +12,9 @@ import type { SessionCode } from "./register/copy.ts";
  * minutes, so only `signInMaxTime` ever comes near. The end is the earliest of
  * the three that are known.
  *
- * The reminder speaks once per sign-in: at 6 h, at 1 h, when it ends, and
- * once more when the user has scanned again. What it has said is kept on disk,
+ * The reminder speaks once per sign-in: at 24 h (task 975, addendum 8), at 6 h,
+ * at 1 h, when it ends, and once more when the user has scanned again. A step
+ * first seen late is said once, and the earlier ones are counted as said. What it has said is kept on disk,
  * keyed by the sign-in, so a restart never repeats it.
  *
  * THE WALLET IS THE AUTHORITY. The known end only says when to ask: once it has
@@ -73,15 +75,40 @@ export function sessionStep(memory: SessionMemory, reading: { connected: boolean
   }
   if (next.end !== null) {
     const left = next.end - now;
-    if (left < 3_600_000 && !next.said.includes("1h")) {
-      say.push("1h");
-      next.said.push("1h", ...(next.said.includes("6h") ? [] : (["6h"] as SessionCode[])));
-    } else if (left < 6 * 3_600_000 && !next.said.includes("6h")) {
-      say.push("6h");
-      next.said.push("6h");
+    // The nearest step the time left is under: said once; the ones before it count as said.
+    const step = SESSION_STEPS.find((s) => left < s.ms);
+    if (step && !next.said.includes(step.code)) {
+      say.push(step.code);
+      for (const s of SESSION_STEPS) if (s.ms >= step.ms && !next.said.includes(s.code)) next.said.push(s.code);
     }
   }
   return { say, memory: next, signedOut };
+}
+
+/** The reminder's steps before the end, nearest first. */
+export const SESSION_STEPS: { code: SessionCode; ms: number }[] = [
+  { code: "1h", ms: 3_600_000 },
+  { code: "6h", ms: 6 * 3_600_000 },
+  { code: "24h", ms: 24 * 3_600_000 },
+];
+
+/** The pack's one line in the sign-in's last 24 h (addendum 8), so the host can tell the player; null before. */
+export function signInWarning(end: number | null, now: number): string | null {
+  if (end === null || end - now >= 24 * 3_600_000) return null;
+  if (end <= now) return "WALLET SIGN-IN ENDED: the agent cannot trade or exit until the player scans again; tell the player to run FL login.";
+  const hours = Math.max(1, Math.ceil((end - now) / 3_600_000));
+  return `WALLET SIGN-IN EXPIRES IN ${hours} H: the agent will stop; tell the player to run FL login.`;
+}
+
+/** The re-scan line for the entry card and `FL status` (addendum 8). */
+export function signInLine(end: number | null, utc8: (ms: number) => string): string | null {
+  return end === null ? null : `wallet sign-in valid until ${utc8(end)} UTC+8; re-scan before then or the agent stops trading (FL login says how)`;
+}
+
+/** The sign-in's end as the running agent last read it (its `session.json`); null when not known. */
+export function signInEndOf(home: string, name: string): number | null {
+  const end = readJson<SessionMemory>(agentPaths(home, name).session)?.end;
+  return typeof end === "number" && Number.isFinite(end) ? end : null;
 }
 
 /** Between two readings: has the known end passed? */

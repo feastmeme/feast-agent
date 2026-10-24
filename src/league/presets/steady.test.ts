@@ -274,3 +274,16 @@ describe("steady: the exits", () => {
     expect(tick(w).sells).toEqual([]);
   });
 });
+
+describe("task 975, addendum 8: the warm-up dinner", () => {
+  it("a day with no floor (noFloor): no buy, said once; a day with one: it buys", () => {
+    const held = coin(0xc1);
+    const w = world({ day: day({ noFloor: true, passed: true }), positions: [position(held, { markBnb: 0.0072, pnlPct: 20, peakBnb: 0.0072 })], state: { mine: { [held.toLowerCase()]: DINNER - 6 * 60 * MIN - 10 * MIN } } });
+    const out = tick(w);
+    expect(out.buys).toEqual([]);
+    expect(out.logs).toContain("steady: tonight's dinner is the warm-up, which asks no floor: no buy");
+    expect(tick(w).logs).not.toContain("steady: tonight's dinner is the warm-up, which asks no floor: no buy");
+    // The same world on a day with a floor: it buys.
+    expect(tick(world()).buys.length).toBe(1);
+  });
+});

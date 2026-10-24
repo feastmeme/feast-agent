@@ -114,7 +114,11 @@ export class Executor {
   }
 
   /** The one path every transaction takes. */
-  async send(what: string, call: Call): Promise<SendOutcome> {
+  /**
+   * `onHash` is told the transaction's hash the moment the wallet gives it, before the receipt is waited for, so a
+   * runtime killed in that wait finds it on its next start (task 975, addendum 8, gap G3).
+   */
+  async send(what: string, call: Call, onHash?: (txHash: Hex) => void): Promise<SendOutcome> {
     const fail = (stage: Stage, reason: string, extra: { txHash?: Hex; sent?: boolean } = {}): SendOutcome => {
       this.deps.log("send.failed", { what, stage, reason, txHash: extra.txHash });
       return { ok: false, stage, reason, txHash: extra.txHash, sent: extra.sent ?? false };
@@ -179,6 +183,11 @@ export class Executor {
     if (executed.status !== "BROADCASTED") return fail("declined", `execute answered ${executed.status}${executed.message ? `: ${executed.message}` : ""}`);
     const txHash = executed.txHash;
     if (!txHash) return fail("execute", "execute answered BROADCASTED with no transaction hash");
+    try {
+      onHash?.(txHash);
+    } catch {
+      // The record is best effort; the send's own outcome still comes back below.
+    }
 
     let receipt: TransactionReceipt;
     try {

@@ -455,12 +455,16 @@ export function noAnswerLine(kept: boolean | null, lang: Lang): string {
 
 // --- the session notices (§7) --------------------------------------------------------------
 
-export type SessionCode = "6h" | "1h" | "ended" | "back";
+export type SessionCode = "24h" | "6h" | "1h" | "ended" | "back";
 
 export function sessionNotice(code: SessionCode, endMs: number | null, lang: Lang): string {
   const zh = lang === "zh";
   const at = endMs !== null ? utc8(endMs) : null;
   switch (code) {
+    case "24h":
+      return zh
+        ? `钱包登录不到 24 小时后到期${at ? `（${at} UTC+8）` : ""}。请在那之前重新扫码（\`FL login\` 会告诉你怎么做），否则 agent 会停止交易，包括止损。`
+        : `Your wallet's sign-in ends in under 24 hours${at ? ` (at ${at} UTC+8)` : ""}. Scan again before then (\`FL login\` says how), or the agent stops trading, exits included.`;
     case "6h":
       return zh
         ? `钱包登录不到 6 小时后到期${at ? `（${at} UTC+8）` : ""}。请在那之前重新扫码，agent 才能继续交易和止损。`

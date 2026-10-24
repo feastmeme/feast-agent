@@ -409,6 +409,8 @@ function steady(): Strategy {
       // --- at most one buy --------------------------------------------------------------------------
       if (extras?.standingBy?.()) return;
       if (!day) return once("no-count", "steady: the day's count is not known, so no buy (it fails closed)");
+      // Task 975, addendum 8: the warm-up dinner asks no floor: nothing to keep tonight.
+      if (day.noFloor) return once("no-floor", "steady: tonight's dinner is the warm-up, which asks no floor: no buy");
       const buys = bag<number[]>(state, "buys", []).filter((t) => t >= day.startsAt && t < day.endsAt);
       state.buys = buys;
       const projectedTrades = day.trades + held.length;
