@@ -73,7 +73,7 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
-import { awakeLine, clean, tradeNowLine } from "./enter/copy.ts";
+import { autopilotLine, awakeLine, clean, tradeNowLine } from "./enter/copy.ts";
 import { enter, entryOneShot, readEntry } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
@@ -539,7 +539,14 @@ async function main(argv: string[]): Promise<number> {
                   `last trade ${ago(mine.lastTradeAt)}; last action by your agent ${ago(mine.lastActionAt)}`,
                   ...(mine.day ? [dayLine(mine.day, Date.now())] : []),
                   ...(mine.day && !mine.day.passed && !mine.autopilot?.active
-                    ? [mine.autopilot ? `while your agent trades, the day's floor is its to keep; the backup takes over after ${mine.autopilot.idleMinutes} min without a trade` : "no backup: the day's floor is your agent's to keep"]
+                    ? [
+                        // Addendum 7: in ask mode the unified line (the asks, then the floor keeper), not league-v5's first cut.
+                        s.agent!.ask && s.agent!.ask.with !== "none" && mine.autopilot
+                          ? autopilotLine({ preset: mine.autopilot.preset, idleMinutes: mine.autopilot.idleMinutes, ask: s.agent!.ask }, "en")
+                          : mine.autopilot
+                            ? `while your agent trades, the day's floor is its to keep; the backup takes over after ${mine.autopilot.idleMinutes} min without a trade`
+                            : "no backup: the day's floor is your agent's to keep",
+                      ]
                     : []),
                   `the league page's rule: ${PAGE_IDLE_RULE}`,
                 ]

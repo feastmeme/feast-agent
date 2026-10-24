@@ -62,7 +62,7 @@ describe("windows from 5-minute candles", () => {
 
 describe("coin metadata", () => {
   it("BNB-quoted or stock-paired, the quote spelled out from the address book only, the market cap at the fixed supply, the round trip's fees", () => {
-    expect(coinMeta({ quote: WBNB, quoteSymbol: null, priceBnb: 2e-8 })).toEqual({ type: "bnb", quoteSymbol: "WBNB", underlyingTicker: null, marketCapBnb: 20, openingCapBnb: null, roundTripFeePct: 2.0096 });
+    expect(coinMeta({ quote: WBNB, quoteSymbol: null, priceBnb: 2e-8 })).toEqual({ type: "bnb", quoteSymbol: "WBNB", underlyingTicker: null, marketCapBnb: 20, openingCapBnb: null, openingCapBinding: null, roundTripFeePct: 2.0096 });
     const stock = coinMeta({ quote: STOCK.address, quoteSymbol: "IGNORED", priceBnb: null });
     expect(stock).toMatchObject({ type: "stock-paired", quoteSymbol: STOCK.symbol, marketCapBnb: null });
     // A quote the address book does not know: never the snapshot's own text.

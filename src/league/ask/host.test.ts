@@ -20,7 +20,7 @@ afterEach(() => {
 
 const ANSWER = { action: "buy", coin: "c1", amountBnb: 0.006, fraction: null, reason: "floor first", memo: "bought c1 at 14:30" };
 
-type Mode = "answer" | "bad-json" | "exit" | "sleep" | "is-error";
+type Mode = "answer" | "bad-json" | "exit" | "sleep" | "is-error" | "grandchild-exits" | "grandchild-hangs" | "grandchild-answers";
 
 /** A stub CLI: `mode` decides what it does; everything it saw goes in `<seen>/<name>.json`. */
 function stubs(mode: Mode) {
@@ -36,8 +36,16 @@ let stdin = "";
 process.stdin.on("data", (d) => (stdin += d));
 process.stdin.on("end", () => {
   const args = process.argv.slice(2);
-  fs.writeFileSync(${JSON.stringify(seen)} + "/${name}.json", JSON.stringify({ args, stdin, cwd: process.cwd(), env: { CLAUDECODE: process.env.CLAUDECODE ?? null, FEAST_MAINNET_RPC_URL: process.env.FEAST_MAINNET_RPC_URL ?? null, HOME: process.env.HOME ?? null } }));
+  fs.writeFileSync(${JSON.stringify(seen)} + "/${name}.json", JSON.stringify({ args, stdin, cwd: process.cwd(), env: process.env }));
   const mode = ${JSON.stringify(mode)};
+  if (mode.startsWith("grandchild")) {
+    // A grandchild that inherits stdout and keeps it open long after the host is done.
+    const g = require("node:child_process").spawn("/bin/sleep", ["600"], { stdio: ["ignore", "inherit", "inherit"] });
+    g.unref();
+    fs.writeFileSync(${JSON.stringify(seen)} + "/grandchild.pid", String(g.pid));
+    if (mode === "grandchild-hangs") return setTimeout(() => {}, 60000);
+    if (mode === "grandchild-exits") process.exit(0);
+  }
   if (mode === "sleep") return setTimeout(() => {}, 60000);
   if (mode === "exit") { process.stderr.write("You have hit your usage limit. Try again later.\\n"); process.exit(3); }
   const answer = ${JSON.stringify(JSON.stringify(ANSWER))};
@@ -57,8 +65,9 @@ process.stdin.on("end", () => {
   }
   const home = join(dir, "home");
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, FEAST_MAINNET_RPC_URL: "https://rpc.example/with-a-key" };
-  const read = (name: string) => JSON.parse(readFileSync(join(seen, `${name}.json`), "utf8")) as { args: string[]; stdin: string; cwd: string; env: Record<string, string | null> };
-  return { home, env, read };
+  const read = (name: string) => JSON.parse(readFileSync(join(seen, `${name}.json`), "utf8")) as { args: string[]; stdin: string; cwd: string; env: Record<string, string | undefined> };
+  const grandchild = () => Number(readFileSync(join(seen, "grandchild.pid"), "utf8"));
+  return { home, env, read, grandchild };
 }
 
 describe("the adapters' argv", () => {
@@ -79,6 +88,33 @@ describe("the adapters' argv", () => {
     const env = childEnv({ CLAUDECODE: "1", FEAST_MAINNET_RPC_URL: "x", LEAGUE_NOTES_DEV: "1", BAW_SOMETHING: "y", HOME: "/h", PATH: "/p", ANTHROPIC_API_KEY: "k" });
     expect(env).toEqual({ HOME: "/h", PATH: "/p", ANTHROPIC_API_KEY: "k" });
   });
+
+  it("addendum 7: no session of the parent's reaches the child; PATH, HOME, the locale and the login stay", () => {
+    const session = {
+      CLAUDECODE: "1",
+      CLAUDE_CODE_SESSION_ID: "s",
+      CLAUDE_CODE_ENTRYPOINT: "cli",
+      CLAUDE_CODE_EXECPATH: "/x",
+      CLAUDE_CODE_CHILD_SESSION: "1",
+      CLAUDE_CODE_BRIDGE_SESSION_ID: "b",
+      CLAUDE_CODE_MESSAGING_SOCKET: "/sock",
+      CLAUDE_CODE_MESSAGING_TOKEN: "t",
+      CLAUDE_CODE_SESSION_ATTENDED: "1",
+      _CHILD_SESSION: "1",
+      _BRIDGE_PORT: "1",
+      _BRIDGE_TOKEN: "t",
+      _MESSAGING_SOCKET: "/sock",
+      _MESSAGING_TOKEN: "t",
+      CODEX_COMPANION_SESSION_ID: "c",
+      CODEX_SANDBOX: "seatbelt",
+      CLAUDE_PID: "1",
+      CLAUDE_PROJECT_DIR: "/proj",
+    };
+    const kept = { PATH: "/p", HOME: "/h", LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8", TERM: "xterm", USER: "u", ANTHROPIC_API_KEY: "k", OPENAI_API_KEY: "o", CLAUDE_CONFIG_DIR: "/c", CLAUDE_CODE_OAUTH_TOKEN: "tok", CLAUDE_CODE_USE_BEDROCK: "1", CODEX_HOME: "/ch", __CF_USER_TEXT_ENCODING: "0x0" };
+    const env = childEnv({ ...session, ...kept });
+    for (const key of Object.keys(session)) expect(env, key).not.toHaveProperty(key);
+    expect(env).toEqual(kept);
+  });
 });
 
 describe("callHost, against the stub CLIs", () => {
@@ -92,13 +128,23 @@ describe("callHost, against the stub CLIs", () => {
       expect(out).toEqual({ ok: true, answer: ANSWER });
       const seen = s.read("claude");
       expect(seen.stdin).toBe("THE PACK");
-      expect(seen.env.CLAUDECODE).toBeNull();
-      expect(seen.env.FEAST_MAINNET_RPC_URL).toBeNull();
+      expect(seen.env.CLAUDECODE).toBeUndefined();
+      expect(seen.env.FEAST_MAINNET_RPC_URL).toBeUndefined();
       // The folder the runtime made, empty (macOS may show it under /private).
       expect(seen.cwd.endsWith(askDirs(s.home, "demo").cwd.replace(/^\/private/, ""))).toBe(true);
       expect(seen.args).toContain("--json-schema");
     });
   }
+
+  it("addendum 7: the argv and the environment the child actually got: no session variable of the parent's", async () => {
+    const s = stubs("answer");
+    const env = { ...s.env, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_CODE_CHILD_SESSION: "1", _CHILD_SESSION: "1", _BRIDGE_TOKEN: "t", _MESSAGING_SOCKET: "/sock", _MESSAGING_TOKEN: "t", CODEX_COMPANION_SESSION_ID: "c", LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "k" };
+    expect(await callHost({ with: "claude", pack: "p", home: s.home, name: "demo", env })).toEqual({ ok: true, answer: ANSWER });
+    const seen = s.read("claude");
+    expect(seen.args).toEqual(askArgv("claude", { cwd: "", schemaPath: "", lastMessagePath: "" }).args);
+    expect(Object.keys(seen.env).filter((k) => /^(CLAUDECODE|CLAUDE_CODE_|CODEX_|_CHILD_|_BRIDGE_|_MESSAGING_|FEAST_|LEAGUE_|BAW)/.test(k) || /_(CHILD|BRIDGE|MESSAGING)_/.test(k))).toEqual([]);
+    expect(seen.env).toMatchObject({ LANG: "en_US.UTF-8", ANTHROPIC_API_KEY: "k", HOME: process.env.HOME, PATH: env.PATH });
+  });
 
   it("codex: the pack on stdin, no positional prompt, the answer from the last-message file", async () => {
     const s = stubs("answer");
@@ -122,5 +168,39 @@ describe("callHost, against the stub CLIs", () => {
     expect(Date.now() - started).toBeLessThan(10_000);
     const none = stubs("answer");
     expect(await callHost({ with: "codex", pack: "p", home: none.home, name: "demo", env: { ...none.env, PATH: "/nonexistent" } })).toEqual({ ok: false, cause: "Codex is not installed here (no `codex` on PATH)" });
+  }, 30_000);
+
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const gone = async (pid: number) => {
+    for (let i = 0; i < 50 && alive(pid); i++) await new Promise((r) => setTimeout(r, 20));
+    return !alive(pid);
+  };
+
+  for (const mode of ["grandchild-hangs", "grandchild-exits"] as const) {
+    it(`addendum 7: the timeout holds when a grandchild keeps stdout open (${mode === "grandchild-hangs" ? "the host hangs too" : "the host has exited"}); the whole group is killed`, async () => {
+      const s = stubs(mode);
+      const started = Date.now();
+      // The timer (1.5 s) fires before the exit grace (2 s) would: the ask has failed, on time.
+      const out = await callHost({ with: "claude", pack: "p", home: s.home, name: "demo", env: s.env, timeoutMs: 1_500 });
+      const took = Date.now() - started;
+      expect(out).toEqual({ ok: false, cause: "Claude Code did not answer within 2 s" });
+      expect(took).toBeLessThan(5_000);
+      expect(await gone(s.grandchild())).toBe(true);
+    }, 20_000);
+  }
+
+  it("addendum 7: a host that answered and exited is read, though a grandchild still holds its stdout; the grandchild is killed", async () => {
+    const s = stubs("grandchild-answers");
+    const started = Date.now();
+    expect(await callHost({ with: "claude", pack: "p", home: s.home, name: "demo", env: s.env, timeoutMs: 20_000 })).toEqual({ ok: true, answer: ANSWER });
+    expect(Date.now() - started).toBeLessThan(8_000);
+    expect(await gone(s.grandchild())).toBe(true);
   }, 30_000);
 });

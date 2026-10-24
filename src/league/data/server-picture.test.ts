@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { MAINNET } from "../../sdk/networks.ts";
 import { parseSnapshot } from "../feed/snapshot.ts";
-import { exitImpacts, interpolate, picture, serverImpact } from "./picture.ts";
+import { exitImpacts, hasFeature, interpolate, picture, serverImpact } from "./picture.ts";
 /** Keys only, nested: a number where one path has data and null where the other has none is the same shape. */
 const keysOf = (v: unknown): unknown => (v !== null && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, keysOf((v as Record<string, unknown>)[k])])) : "value");
 
@@ -96,3 +96,86 @@ describe("the server's picture", () => {
     expect(positions[1]).toMatchObject({ exitImpactPct: 7.5 });
   });
 });
+
+/** A row exactly as lane 976's contract (docs/api/snapshot.md, c5b1a8f8 + 7723c9bf) shapes it. */
+const contractRow = (c: Address, quote: Address = WBNB) => ({
+  address: c.toLowerCase(),
+  quote: quote.toLowerCase(),
+  symbol: `S${c.slice(-2)}`,
+  launchedAt: new Date(NOW - 600 * 60_000).toISOString(),
+  priceQuote: 1e-8,
+  volume24hBnb: 3,
+  trades24h: 40,
+  holders: 20,
+  windows: { "5m": { changePct: 1.2, volumeBnb: 0.31, trades: 7, buys: 5, sells: 2 }, "15m": { changePct: 2, volumeBnb: 0.5, trades: 9, buys: 6, sells: 3 }, "1h": { changePct: null, volumeBnb: 0, trades: 0, buys: 0, sells: 0 }, "24h": { changePct: 40, volumeBnb: 3, trades: 40, buys: 20, sells: 20 } },
+  flow2m: { buys: 2, sells: 1, buyBnb: 0.02, sellBnb: 0.005, netBnb: 0.015, largestTradeBnb: 0.012, uniquePayers: 3 },
+  impact: { buy: { "0.005": 0.098, "0.01": 0.199, "0.02": 0.399, "0.05": null }, sell: { "0.005": 0.11, "0.01": 0.21, "0.02": 0.41, "0.05": 1.02 }, roundTripFeePct: 2.002, asOf: "2026-10-31T05:59:30.000Z", movedPct: 0.12 },
+  meta: { type: quote === WBNB ? "bnb" : "stock-paired", quoteSymbol: "x", marketCapBnb: 12.5, openingCapBnb: 0.5, openingCapBinding: true, roundTripFeePct: 2.002, ageMinutes: 600 },
+  underlying: quote === WBNB ? null : { symbol: "x", priceBnb: 0.31, change1hPct: 0.2, change24hPct: null, usMarketOpen: false, nextOpenAt: "2026-10-31T13:30:00.000Z", nextCloseAt: "2026-10-31T20:00:00.000Z" },
+});
+const contractSnapshot = (features: string[], market = true) =>
+  parseSnapshot({
+    generatedAt: new Date(NOW - 4_000).toISOString(),
+    block: 1,
+    schemaMinor: 1,
+    features,
+    coins: market ? [contractRow(A), contractRow(B, STOCK.address)] : [row(A, false), row(B, false, STOCK.address)],
+    events: [],
+    freshness: { builtAt: new Date(NOW - 4_000).toISOString(), lagSeconds: 2 },
+    ...(market ? { launches: [{ coin: A.toLowerCase(), symbol: null, name: null, launchedAt: new Date(NOW - 12 * 60_000).toISOString(), creator: coin(0xa11c).toLowerCase(), firstMinutes: { minutes: 12, trades: 9, volumeBnb: 0.4, holders: 7, uniqueBuyers: 6 } }], mostActive15m: [B.toLowerCase(), A.toLowerCase()] } : {}),
+  })!;
+
+describe("addendum 7: lane 976's features, by the contract's own names", () => {
+  const ALL = ["windows", "flow", "launches", "impact", "freshness", "clock"];
+
+  it("the six flags gate their fields; meta, underlying and mostActive15m come with the market part; the field names still work", () => {
+    const snap = contractSnapshot(ALL);
+    expect(snap.schemaMinor).toBe(1);
+    for (const f of ["windows", "flow2m", "impact", "launches", "freshness", "meta", "underlying", "mostActive15m"] as const) expect(hasFeature(snap, f), f).toBe(true);
+    expect(hasFeature(snap, "holdersLedger")).toBe(false);
+    expect(hasFeature({ features: ["windows", "freshness"] }, "flow2m")).toBe(false);
+    expect(hasFeature({ features: ["windows", "freshness"] }, "impact")).toBe(false);
+    // The fallback: addendum 6's reading, a field named by itself.
+    expect(hasFeature({ features: ["flow2m", "holdersLedger", "meta"] }, "flow2m")).toBe(true);
+    expect(hasFeature({ features: ["holdersLedger"] }, "holdersLedger")).toBe(true);
+    expect(hasFeature({ features: ["meta"] }, "meta")).toBe(true);
+  });
+
+  it("the contract's row read as the server's picture: no candle, no quoter; its windows, flow, impact, meta, underlying, launches and ranking", async () => {
+    let gets = 0;
+    let quotes = 0;
+    const p = await picture({ now: NOW, snapshot: contractSnapshot(ALL), quoteBnb: async () => 0.01, get: async () => (gets++, { status: 200, body: { rows: [] } }), site: "https://feast.test", cacheDir: null, impact: async () => (quotes++, 9), held: [], own: new Set() });
+    expect([gets, quotes, p.requests]).toEqual([0, 0, 0]);
+    expect(p.from).toEqual({ windows: "server", flow2m: "server", impact: "server", meta: "server", launches: "server" });
+    const a = p.coins.find((c) => c.coin === A)!;
+    expect(a.windows).toEqual({ change: { m5: 1.2, m15: 2, h1: null, h24: 40 }, volume: { m5: 0.31, m15: 0.5, h1: 0 } });
+    expect(a.flow2m.largestBnb).toBe(0.012);
+    expect(a.impactPct).toBe(0.199);
+    // A size the pool refuses (null) is left out of the table.
+    expect(a.impactSell).toEqual([[0.005, 0.11], [0.01, 0.21], [0.02, 0.41], [0.05, 1.02]]);
+    expect(a.meta).toMatchObject({ type: "bnb", marketCapBnb: 12.5, openingCapBnb: 0.5, openingCapBinding: true });
+    expect(p.coins.find((c) => c.coin === B)!.underlying).toEqual({ priceBnb: 0.31, change1hPct: 0.2, change24hPct: null, usMarketOpen: false, nextOpenAt: "2026-10-31T13:30:00.000Z", nextCloseAt: "2026-10-31T20:00:00.000Z" });
+    expect(p.launches).toEqual([{ coin: A, symbol: null, launchedAt: new Date(NOW - 12 * 60_000).toISOString(), ageMinutes: 12, trades: 9, volumeBnb: 0.4, holders: 7 }]);
+    expect(p.market.freshness).toMatchObject({ lagSeconds: 2 });
+    expect(serverImpact(contractRow(A).impact)).toMatchObject({ asOf: "2026-10-31T05:59:30.000Z", movedPct: 0.12, roundTripFeePct: 2.002 });
+  });
+
+  it("without `clock`, underlying's market hours are not read; its mark still is", async () => {
+    const p = await picture({ now: NOW, snapshot: contractSnapshot(["windows", "flow", "launches", "impact", "freshness"]), quoteBnb: async () => 0.01, site: "https://feast.test", cacheDir: null, held: [], own: new Set() });
+    expect(p.coins.find((c) => c.coin === B)!.underlying).toEqual({ priceBnb: 0.31, change1hPct: 0.2, change24hPct: null, usMarketOpen: null, nextOpenAt: null, nextCloseAt: null });
+  });
+
+  it('features: ["freshness"] alone, the market part absent: no server picture, the local path; the freshness kept', async () => {
+    let gets = 0;
+    let quotes = 0;
+    const snap = contractSnapshot(["freshness"], false);
+    for (const f of ["windows", "flow2m", "impact", "launches", "meta", "underlying", "mostActive15m"] as const) expect(hasFeature(snap, f), f).toBe(false);
+    const p = await picture({ now: NOW, snapshot: snap, quoteBnb: async () => 0.01, get: async () => (gets++, { status: 200, body: { rows: [candle(20), candle(10), candle(0)] } }), site: "https://feast.test", cacheDir: null, impact: async () => (quotes++, 0.9), held: [], own: new Set() });
+    expect(p.from).toEqual({ windows: "local", flow2m: "local", impact: "local", meta: "local", launches: "local" });
+    expect(gets).toBeGreaterThan(0);
+    expect(quotes).toBeGreaterThan(0);
+    expect(p.coins.every((c) => c.underlying === null && c.meta.openingCapBinding === null)).toBe(true);
+    expect(p.market.freshness).toMatchObject({ lagSeconds: 2 });
+  });
+});
+

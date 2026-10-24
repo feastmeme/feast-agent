@@ -12,7 +12,8 @@ import { ANSWER_SCHEMA, parseAnswerText } from "./pack.ts";
  * own login, as a child process. Argv only, never a shell string; the pack goes on stdin, which is always given (both
  * CLIs wait for ever on a terminal's stdin); the child's working directory is an empty folder inside the agent's home,
  * so no project's instructions are picked up but the player's own; `CLAUDECODE` is taken out of the child's
- * environment (the runtime is usually started from inside a Claude Code session); 120 s, then the child is killed.
+ * environment (the runtime is usually started from inside a Claude Code session); 120 s, then the child's whole process
+ * group is killed and the ask has failed, whether or not a grandchild still holds its pipes (addendum 7).
  *
  * `--bare` is not passed to `claude`, though the brief named it: its help says that under `--bare` "Anthropic auth is
  * strictly ANTHROPIC_API_KEY … (OAuth and keychain are never read)", which would refuse the player's own login, the
@@ -22,6 +23,8 @@ import { ANSWER_SCHEMA, parseAnswerText } from "./pack.ts";
 export const ASK_WITH = ["claude", "codex", "none"] as const;
 export type AskWith = (typeof ASK_WITH)[number];
 export const ASK_TIMEOUT_MS = 120_000;
+/** After the host exits, how long its pipes may stay open (a grandchild holding them) before the group is killed. */
+export const EXIT_GRACE_MS = 2_000;
 export const ASK_EVERY_DEFAULT = 5;
 export const ASK_EVERY_MIN = 2;
 export const ASK_EVERY_MAX = 120;
@@ -50,19 +53,63 @@ export function askArgv(w: "claude" | "codex", o: { cwd: string; schemaPath: str
 }
 
 /**
- * The child's environment: the parent's, without `CLAUDECODE` (so a runtime started inside a Claude Code session can
- * still call `claude -p`), and without the runtime's own settings (`FEAST_*`, `LEAGUE_*`, `BAW*`: an RPC URL may carry
- * a key, and the child needs none of them). Everything else stays: the player's login may live in any of it.
+ * The child's environment: the parent's, without the runtime's own settings (`FEAST_*`, `LEAGUE_*`, `BAW*`: an RPC URL
+ * may carry a key, and the child needs none of them) and without the session of whatever started the runtime
+ * (addendum 7): `CLAUDECODE`, every `CLAUDE_CODE_*`, `CODEX_*`, anything naming a `_CHILD_`, `_BRIDGE_` or `_MESSAGING_`
+ * channel, and the hook variables a Claude Code session sets (`CLAUDE_PID`, `CLAUDE_PROJECT_DIR`, …): the child is a
+ * new session of its own, not a part of that one. PATH, HOME, the locale and the rest stay: the player's login may live
+ * in any of it, and so the few session-looking names that are a login, not a session, stay too (`LOGIN_KEPT`).
  */
+export const LOGIN_KEPT = ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CODEX_HOME"] as const;
+const SESSION = /^(CLAUDECODE$|CLAUDE_CODE_|CODEX_|CLAUDE_(PID|PROJECT_DIR|PLUGIN_ROOT|PLUGIN_DATA|ENV_FILE)$)|(^|_)(CHILD|BRIDGE|MESSAGING)_/;
+
 export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out = { ...env };
-  delete out.CLAUDECODE;
-  for (const key of Object.keys(out)) if (/^(FEAST_|LEAGUE_|BAW)/.test(key)) delete out[key];
+  for (const key of Object.keys(out)) {
+    if ((LOGIN_KEPT as readonly string[]).includes(key)) continue;
+    if (/^(FEAST_|LEAGUE_|BAW)/.test(key) || SESSION.test(key)) delete out[key];
+  }
   return out;
 }
 
 /** A child's words, fit to show: the tail, one line, no URL (it may carry a key). */
 const tail = (text: string) => clean(text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>").trim().split("\n").slice(-3).join(" "), 200);
+
+/** The groups of the asks in flight: killed if the runtime exits mid-ask (a detached group gets no ^C of its own). */
+const live = new Set<number>();
+let exitHook = false;
+function track(pid: number | undefined): void {
+  if (!pid) return;
+  live.add(pid);
+  if (exitHook) return;
+  exitHook = true;
+  process.once("exit", () => {
+    for (const p of live) {
+      try {
+        process.kill(-p, "SIGKILL");
+      } catch {
+        // Gone.
+      }
+    }
+  });
+}
+
+/** The child and everything it started (its process group, `detached`), killed; the streams let go so nothing holds the loop. */
+function killGroup(child: ReturnType<typeof spawn>): void {
+  try {
+    if (child.pid) process.kill(-child.pid, "SIGKILL");
+  } catch {
+    // The group is gone already.
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // Gone.
+  }
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.stdin?.destroy();
+}
 
 export type HostCall = { ok: true; answer: unknown } | { ok: false; cause: string };
 
@@ -80,30 +127,48 @@ export async function callHost(o: { with: "claude" | "codex"; pack: string; home
   const run = await new Promise<{ code: number | null; stdout: string; stderr: string; error: NodeJS.ErrnoException | null; timedOut: boolean }>((resolve) => {
     let stdout = "";
     let stderr = "";
-    let timedOut = false;
-    let child: ReturnType<typeof spawn>;
+    let done = false;
+    let child: ReturnType<typeof spawn> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    const finish = (r: { code: number | null; error: NodeJS.ErrnoException | null; timedOut: boolean }) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      clearTimeout(grace);
+      if (child?.pid) live.delete(child.pid);
+      resolve({ ...r, stdout, stderr });
+    };
     try {
-      child = spawn(command, args, { cwd, env: childEnv(o.env ?? process.env), stdio: ["pipe", "pipe", "pipe"] });
+      // Its own process group (addendum 7): a grandchild that keeps stdout open goes with it when the timer fires.
+      child = spawn(command, args, { cwd, env: childEnv(o.env ?? process.env), stdio: ["pipe", "pipe", "pipe"], detached: true });
     } catch (error) {
-      resolve({ code: null, stdout, stderr, error: error as NodeJS.ErrnoException, timedOut });
+      finish({ code: null, error: error as NodeJS.ErrnoException, timedOut: false });
       return;
     }
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
+    const proc = child;
+    track(proc.pid);
+    timer = setTimeout(() => {
+      killGroup(proc);
+      // Failed when the timer fires, whatever the pipes are doing: a later close is ignored.
+      finish({ code: null, error: null, timedOut: true });
     }, timeoutMs);
-    child.stdout?.on("data", (d: Buffer) => (stdout.length < 2_000_000 ? (stdout += d.toString("utf8")) : undefined));
-    child.stderr?.on("data", (d: Buffer) => (stderr.length < 200_000 ? (stderr += d.toString("utf8")) : undefined));
-    child.stdin?.on("error", () => undefined);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ code: null, stdout, stderr, error, timedOut });
+    proc.stdout?.on("data", (d: Buffer) => (stdout.length < 2_000_000 ? (stdout += d.toString("utf8")) : undefined));
+    proc.stderr?.on("data", (d: Buffer) => (stderr.length < 200_000 ? (stderr += d.toString("utf8")) : undefined));
+    proc.stdin?.on("error", () => undefined);
+    proc.on("error", (error) => finish({ code: null, error, timedOut: false }));
+    // The host itself has exited: its pipes get a moment to drain, then whatever it left holding them goes.
+    proc.on("exit", (code) => {
+      grace = setTimeout(() => {
+        killGroup(proc);
+        finish({ code, error: null, timedOut: false });
+      }, EXIT_GRACE_MS);
     });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr, error: null, timedOut });
+    proc.on("close", (code) => {
+      killGroup(proc);
+      finish({ code, error: null, timedOut: false });
     });
-    child.stdin?.end(o.pack);
+    proc.stdin?.end(o.pack);
   });
   if (run.error?.code === "ENOENT") return { ok: false, cause: `${who} is not installed here (no \`${command}\` on PATH)` };
   if (run.error) return { ok: false, cause: `${who} could not be started: ${tail(run.error.message)}` };

@@ -5,7 +5,6 @@ import { getAddress, type Address } from "viem";
 import { bookView, type Book, type Position } from "../book.ts";
 import { readEntry } from "../enter/flow.ts";
 import { MIN_TRADE_BNB, weiToBnb, type Limits } from "../limits.ts";
-import { MAINNET } from "../../sdk/networks.ts";
 import { LEAGUE_CAP_BNB } from "../prompt/constants.ts";
 import { dayCount, dayView, leftOut, tailLines, type DayView } from "../prompt/floor.ts";
 import { lastHostAction, lastTradeAt, promptChanged, within } from "../prompt/host.ts";
@@ -85,7 +84,7 @@ export type SelfView = {
   lastTradeAt: string | null;
   lastActionAt: string | null;
   lastAction: string | null;
-  /** Task 975: the day's trades and volume, dinner to dinner, as the page counts its floor (own coin and FEAST left out). */
+  /** Task 975: the day's trades and volume, dinner to dinner, as the settlement engine counts its floor (any Feast coin, FEAST too; the own coin left out). */
   day: DayView;
   /** Task 975, addendum 5: the wallet's BNB, the gas reserve the limits keep back, and what may be spent; null when unread. */
   wallet: { balanceBnb: number; gasReserveBnb: number; spendableBnb: number } | null;
@@ -256,7 +255,7 @@ export async function selfView(
     lastTradeAt: iso(lastTrade),
     lastActionAt: iso(host?.at ?? null),
     lastAction: host?.what ?? null,
-    day: dayView(dayCount(home, name, deps.now, leftOut(home, book?.launched?.coin, MAINNET.platformCoin?.address))),
+    day: dayView(dayCount(home, name, deps.now, leftOut(home, book?.launched?.coin))),
     wallet: balanceWei === null ? null : { balanceBnb: weiToBnb(balanceWei), gasReserveBnb: agent.limits.gasReserveBnb, spendableBnb: r(Math.max(0, weiToBnb(balanceWei) - agent.limits.gasReserveBnb)) },
     headroom: headroomOf(book, agent.limits, spentWei, deps.now),
     recentFills: fills,

@@ -11,10 +11,12 @@ import { untrusted, type Untrusted } from "./untrusted.ts";
 
 export const DROP_SHARE = 0.2;
 export const FLOOR_TRADES = 3;
+/** What the floor counts, the published rule's words (addendum 7): the pack and `FL data` say it the same way. */
+export const FLOOR_COUNTS = "buys and sells of any Feast coin count, your own coin left out";
 
 /** The league's rules as the pack and `FL data` state them, each with where it comes from. */
 export const RULES: { rule: string; text: string; source: string }[] = [
-  { rule: "floor", text: "each day, dinner to dinner, at least 3 trades and 0.02 BNB of volume, the agent's own coin left out; an agent under it at the dinner is eaten (idle)", source: "feast-app src/lib/league/score.ts ACTIVITY_FLOOR_TRADES, ACTIVITY_FLOOR_BNB (40ebae81)" },
+  { rule: "floor", text: `each day, dinner to dinner, at least 3 trades and 0.02 BNB of volume (${FLOOR_COUNTS}); an agent under it at the dinner is eaten (idle)`, source: "feast-app src/lib/league/score.ts ACTIVITY_FLOOR_TRADES, ACTIVITY_FLOOR_BNB (40ebae81); the published rules and the settlement engine's dayActivity" },
   { rule: "dinner", text: "every day at 21:00 UTC+8 (13:00 UTC); dinner 1 eats nobody", source: "feast-app src/lib/league/season.ts DINNER_HOUR_UTC (40ebae81)" },
   { rule: "drop", text: "of the N agents over the floor, the bottom floor(N/5) by the day's profit in BNB whose day lost money are eaten (drop); a day that made money is never eaten; one life a season", source: "feast-app src/lib/league/score.ts ELIMINATION, DROP_SHARE 0.2 (40ebae81)" },
   { rule: "prizes", text: "paid by Feast in FEAST, valued in USDT at settlement; an eaten agent is out of the season's prizes; the amounts are the league page's and are not in this data", source: "skills/feast-league/SKILL.md, Before you take part and §9 Status" },

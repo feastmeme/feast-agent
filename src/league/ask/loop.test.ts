@@ -123,7 +123,7 @@ describe("the ask loop", () => {
     expect(readAskState(home, "demo").memo).toBe("MEMO-THREE");
   }, 60_000);
 
-  it("two failed asks put the floor keeper on, said once with the cause; an answer again takes it off, said once", async () => {
+  it("two failed asks put the floor keeper on, said once with the cause; an answer again takes it off, said once (addendum 7: one notice each, counted)", async () => {
     const { home } = setup(5);
     const c = fakeClock(T0);
     const { feed, w } = world(c);
@@ -135,9 +135,14 @@ describe("the ask loop", () => {
       return answer({ reason: "back" });
     });
     const log = lines(home);
-    const notices = readFileSync(agentPaths(home, "demo").notifications, "utf8");
-    expect(notices.match(/could not be reached: Claude Code exited 1: You have hit your usage limit\.; trading on the floor keeper until it answers/g)).toHaveLength(1);
-    expect(notices.match(/answers again: the floor keeper steps back/g)).toHaveLength(1);
+    const notices = readFileSync(agentPaths(home, "demo").notifications, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { kind: string; text: string });
+    // Addendum 7: the start says the unified line, not "autopilot after 30 min of silence".
+    expect(notices.find((n) => n.kind === "started")!.text).toBe("prompt mode; Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.");
+    // Addendum 7: one notice for the takeover and one for the recovery, nothing else about the asks or the floor keeper.
+    expect(notices.filter((n) => n.kind === "ask" || n.kind === "autopilot").map((n) => n.text)).toEqual([
+      "Claude Code could not be reached: Claude Code exited 1: You have hit your usage limit.; the floor keeper (steady) trades until it answers again",
+      "Claude Code answers again: the floor keeper (steady) steps back; its own positions keep their exits",
+    ]);
     const on = log.find((l) => l.event === "autopilot.on");
     expect(on).toMatchObject({ why: "asks failing" });
     // The floor keeper traded while the asks failed (T0+10 to T0+25).
@@ -162,7 +167,7 @@ describe("the ask loop", () => {
     expect(buys.length).toBeGreaterThanOrEqual(2);
     expect(buys.every((t) => t >= DINNER - 20 * MIN && t < DINNER - 10 * MIN)).toBe(true);
     expect(buys[1]! - buys[0]!).toBeGreaterThanOrEqual(2 * MIN);
-    expect(dayCount(home, "demo", DINNER - 5 * MIN, [OWN.toLowerCase(), FEAST.toLowerCase()]).passed).toBe(true);
+    expect(dayCount(home, "demo", DINNER - 5 * MIN, [OWN.toLowerCase()]).passed).toBe(true);
     const lastFill = Math.max(...log.filter((l) => l.event.endsWith(".filled")).map((l) => Date.parse(l.at)));
     expect(lastFill).toBeLessThanOrEqual(DINNER - 5 * MIN);
   }, 60_000);
@@ -182,7 +187,7 @@ describe("the ask loop", () => {
     });
     expect(said.length).toBeGreaterThan(0);
     expect(lines(home).some((l) => l.event === "autopilot.on")).toBe(false);
-    expect(dayCount(home, "demo", DINNER - 1, [OWN.toLowerCase(), FEAST.toLowerCase()]).passed).toBe(true);
+    expect(dayCount(home, "demo", DINNER - 1, [OWN.toLowerCase()]).passed).toBe(true);
   }, 60_000);
 });
 

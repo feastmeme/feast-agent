@@ -67,7 +67,7 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
   // The cached field, never the uncached me= read unless the site is older (addendum 6).
   const leagueRead = d.league !== undefined ? { read: d.league, standing: d.league?.field ? { ...standing(fromField(d.league.field), d.wallet), from: "field" as const } : d.league?.arena ? { ...standing(fromArena(d.league.arena), d.wallet), from: "arena" as const } : null } : await readStanding(new LeagueSite(d.site, counted, 8_000), d.wallet);
   const league = leagueRead.read;
-  const own = leftOut(d.home, mine.ownCoin[0]?.coin ?? null, null);
+  const own = leftOut(d.home, mine.ownCoin[0]?.coin ?? null);
   for (const c of mine.ownCoin) own.add(c.coin.toLowerCase());
   const pictured = await picture({
     now: d.now,

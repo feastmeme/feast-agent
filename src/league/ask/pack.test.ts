@@ -85,7 +85,7 @@ describe("the pack", () => {
       'You are the decision maker for one Feast league agent, "maplegrin"',
       '"enum":["buy","sell","hold"]',
       "[feast-app src/lib/league/score.ts ELIMINATION, DROP_SHARE 0.2 (40ebae81)]",
-      "today's floor: 1 trades and 0.006 BNB of volume so far (needs 3 and 0.02 BNB): NOT met yet.",
+      "today's floor: 1 trades and 0.006 BNB of volume so far (needs 3 and 0.02 BNB; buys and sells of any Feast coin count, your own coin left out): NOT met yet.",
       "wallet: 0.05 BNB, 0.003 BNB of it the gas reserve, 0.047 BNB spendable.",
       "headroom: a buy now at most 0.02 BNB",
       "the league today (in BNB): rank 12 of 30 alive",
@@ -97,6 +97,13 @@ describe("the pack", () => {
       "What should the agent do right now? Answer only in the schema.",
     ])
       expect(text, piece).toContain(piece);
+  });
+
+  it("addendum 7: the floor line and the rules both say what the floor counts, in the published rule's words; nothing says FEAST is left out", () => {
+    const { text } = buildPack(input());
+    const sentence = "buys and sells of any Feast coin count, your own coin left out";
+    expect(text.split("\n").filter((l) => l.includes(sentence)).map((l) => l.slice(0, 16))).toEqual(["- floor: each da", "today's floor: 1"]);
+    expect(text).not.toMatch(/\bFEAST\b[^\n]*(left out|not count|excluded)/);
   });
 
   it("keeps other players' words inside UNTRUSTED fences, and nothing in them can close a fence or a table", () => {

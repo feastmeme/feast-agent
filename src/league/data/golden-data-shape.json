@@ -30,6 +30,7 @@
         "text": "string",
         "untrusted": "boolean"
       },
+      "openingCapBinding": "null",
       "openingCapBnb": "null",
       "own": "boolean",
       "picked": "boolean",

@@ -8,7 +8,8 @@ import { dayCount, dayLine, dayView, leftOut, nextDinner } from "./floor.ts";
 
 /**
  * The day's count (task 975): dinner to dinner (21:00 UTC+8 = 13:00 UTC), every buy and every sale one trade, their
- * BNB the volume, the agent's own coin and FEAST left out, read from the agent's own log.
+ * BNB the volume, the agent's own coin left out and FEAST counted (addendum 7: as the settlement engine counts it),
+ * read from the agent's own log.
  */
 
 const OWN = "0x00000000000000000000000000000000000b0d1e";
@@ -44,7 +45,7 @@ describe("nextDinner: the first 13:00 UTC strictly after now", () => {
 });
 
 describe("dayCount", () => {
-  it("a buy and a sale are one trade each, their BNB the volume; the own coin and FEAST left out; refusals, failures and intents not counted", () => {
+  it("a buy and a sale are one trade each, their BNB the volume; the own coin left out, a FEAST fill counted; refusals, failures and intents not counted", () => {
     const h = home();
     const t = DINNER - 5 * 60 * MIN;
     log(h, t, "intent.queued", { kind: "buy", coin: C1, bnb: 0.006 });
@@ -54,9 +55,9 @@ describe("dayCount", () => {
     log(h, t + 4, "buy.filled", { coin: OWN, bnbInWei: WEI(0.01) });
     log(h, t + 5, "buy.filled", { coin: FEAST, bnbInWei: WEI(0.01) });
     log(h, t + 30 * MIN, "sell.filled", { coin: C1, bnbOutWei: WEI(0.00588) });
-    const count = dayCount(h, "demo", t + 31 * MIN, [OWN, FEAST]);
-    expect(count).toMatchObject({ startsAt: DINNER - 24 * 60 * MIN, endsAt: DINNER, trades: 2, passed: false });
-    expect(count.volumeBnb).toBeCloseTo(0.01188, 9);
+    const count = dayCount(h, "demo", t + 31 * MIN, leftOut(h, OWN));
+    expect(count).toMatchObject({ startsAt: DINNER - 24 * 60 * MIN, endsAt: DINNER, trades: 3, passed: true });
+    expect(count.volumeBnb).toBeCloseTo(0.02188, 9);
   });
 
   it("a late fill counts by its coin; a fill with no coin is not counted; yesterday's fills are not counted", () => {
@@ -93,10 +94,21 @@ describe("dayCount", () => {
     expect(dayCount(h, "demo", DINNER - 1, []).trades).toBe(2);
   });
 
-  it("leftOut: the agent's launch, FL enter's coin and FEAST, lowercase", () => {
+  it("leftOut: the agent's launch and FL enter's coin, lowercase; never FEAST", () => {
     const h = home();
     writeJsonAtomic(join(agentPaths(h, "league-entry").dir, "entry.json"), { agentId: "maplegrin", bodyCoin: OWN.toUpperCase().replace("0X", "0x"), launchTx: null });
-    expect([...leftOut(h, null, FEAST)].sort()).toEqual([OWN, FEAST].sort());
+    expect([...leftOut(h, null)]).toEqual([OWN]);
+    expect([...leftOut(h, C2)].sort()).toEqual([OWN, C2].sort());
+    expect(leftOut(h, null).has(FEAST)).toBe(false);
+  });
+
+  it("addendum 7: FEAST alone meets the floor, as the settlement engine counts it", () => {
+    const h = home();
+    const t = DINNER - 3 * 60 * MIN;
+    log(h, t, "buy.filled", { coin: FEAST, bnbInWei: WEI(0.01) });
+    log(h, t + 15 * MIN, "sell.filled", { coin: FEAST, bnbOutWei: WEI(0.0098) });
+    log(h, t + 30 * MIN, "buy.filled", { coin: FEAST, bnbInWei: WEI(0.006) });
+    expect(dayCount(h, "demo", t + 31 * MIN, leftOut(h, OWN))).toMatchObject({ trades: 3, passed: true });
   });
 
   it("its view and its line", () => {

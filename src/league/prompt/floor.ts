@@ -12,9 +12,11 @@ import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES, DINNER_HOUR_UTC } from "./co
  * 21:00 UTC+8 (13:00 UTC) to the next.
  *
  * It is read from the agent's own log (`buy.filled` and `sell.filled`, a late fill's included), so a restart in the
- * middle of a day keeps the count. A refusal, a failure or an intent is never a trade. FEAST is left out too: whether
- * the page prices its volume is not verified (C13). It sees this machine's runtime only, so it can only be lower than
- * the page's count, never higher: `steady` may trade more than it needs, never less.
+ * middle of a day keeps the count. A refusal, a failure or an intent is never a trade. Buys and sells of any Feast coin
+ * count, FEAST's included: only the agent's own coin is left out, as the published rule and the settlement engine's
+ * `dayActivity` count it (addendum 7; until then FEAST was left out here too, and the count fell short of the engine's).
+ * It sees this machine's runtime only, so it can only be lower than the page's count, never higher: `steady` may
+ * trade more than it needs, never less.
  */
 
 const HOUR = 3_600_000;
@@ -60,7 +62,7 @@ export function tailLines(path: string): string[] {
 
 /**
  * The day's count for agent `name` at `now`: its fills in `[nextDinner(now) − 24 h, nextDinner(now))`, the coins in
- * `own` (lowercase addresses: its own coin, and FEAST) left out.
+ * `own` (lowercase addresses: its own coin, `leftOut`) left out.
  */
 export function dayCount(home: string, name: string, now: number, own: Iterable<string>): DayCount {
   const endsAt = nextDinner(now);
@@ -90,10 +92,10 @@ export function dayCount(home: string, name: string, now: number, own: Iterable<
   return { startsAt, endsAt, trades, volumeWei, volumeBnb, passed: passesFloor(trades, volumeBnb) };
 }
 
-/** The coins the count leaves out for an agent: its launch, the coin FL enter made or found for this wallet, and FEAST. */
-export function leftOut(home: string, launched: string | null | undefined, feast: string | null | undefined): Set<string> {
+/** The coins the count leaves out for an agent: its own, that is its launch and the coin FL enter made or found for this wallet. FEAST counts. */
+export function leftOut(home: string, launched: string | null | undefined): Set<string> {
   const body = readJson<{ bodyCoin?: unknown }>(join(agentPaths(home, ENTRY_AGENT).dir, "entry.json"))?.bodyCoin;
-  return new Set([launched, typeof body === "string" ? body : null, feast].filter((c): c is string => typeof c === "string" && c.length > 0).map((c) => c.toLowerCase()));
+  return new Set([launched, typeof body === "string" ? body : null].filter((c): c is string => typeof c === "string" && c.length > 0).map((c) => c.toLowerCase()));
 }
 
 export type DayView = { startsAt: string; endsAt: string; trades: number; volumeBnb: number; floor: { trades: number; volumeBnb: number }; passed: boolean };

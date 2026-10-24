@@ -11,6 +11,7 @@ import { BawError, type Signer } from "./baw.ts";
 import { bookView, clearPause, emptyBook, pendingBuysWei, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
+import { autopilotLine } from "./enter/copy.ts";
 import { Executor } from "./executor.ts";
 import { backstopExits } from "./exits.ts";
 import { Backoff } from "./feed/backoff.ts";
@@ -128,6 +129,9 @@ type Loaded = {
 const SLEPT_MS = 10 * 60_000;
 
 const PRIORITY: Record<Intent["kind"], number> = { sell: 0, arm: 1, claim: 2, launch: 3, buy: 4 };
+
+/** Why the floor keeper (an autopilot) is on. */
+type KeeperWhy = "asks failing" | "host silent" | "floor guard";
 
 export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
   const clock = deps.now ?? Date.now;
@@ -337,7 +341,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       // Task 975: the day's trades and volume from this agent's log, as the page counts them; null when unreadable.
       day: () => {
         try {
-          return dayCount(deps.home, deps.name, clock(), leftOut(deps.home, book.launched?.coin, feast));
+          return dayCount(deps.home, deps.name, clock(), leftOut(deps.home, book.launched?.coin));
         } catch {
           return null;
         }
@@ -969,7 +973,9 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null, feed: feed ? feed.mode : null, pollMs: deps.pollMs ?? 5_000, startJitterMs, ...(waits ? { waitForSeason: true, opensAt: gate.opensAt === null ? null : new Date(gate.opensAt).toISOString() } : {}) });
     if (!gate.open) notify("season", gate.opensAt === null ? "waiting for the season: it trades nothing until feast.meme announces the start" : `waiting for the season: it trades nothing before ${utc8(gate.opensAt)} (UTC+8)`);
     if (agent.track === "prompt") {
-      notify("started", `prompt mode; your agent decides; ${agent.preset && agent.autopilot ? `autopilot ${agent.preset} after ${agent.autopilot.idleMinutes} min of silence` : "no autopilot"}`);
+      // Addendum 7: with the asks on, the unified line says what runs; without them, league-v5's first cut is still true.
+      if (askMode()) notify("started", `prompt mode; ${autopilotLine({ preset: agent.preset!, idleMinutes: agent.autopilot!.idleMinutes, ask: agent.ask! }, "en")}`);
+      else notify("started", `prompt mode; your agent decides; ${agent.preset && agent.autopilot ? `autopilot ${agent.preset} after ${agent.autopilot.idleMinutes} min of silence` : "no autopilot"}`);
     } else {
       const passed = checkPassed ? `; warm-up passed by FL script check (sha ${agent.script!.sha256.slice(0, 6)}…${agent.script!.sha256.slice(-4)})` : "";
       notify("started", `${agent.track === "preset" ? `preset ${agent.preset}` : "script"} running; tick ${agent.tickSeconds} s${warmup() ? `; warm-up: ${warmup()!.remaining} trades at ${warmup()!.sizeBnb} BNB` : passed}`);
@@ -992,6 +998,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     };
     // The autopilot's state, said once each way: on after the host's silence, off when it acts.
     let autopilotOn = false;
+    /** Why the floor keeper is on (null while off): its switch says each change once (addendum 7). */
+    let autopilotWhy: KeeperWhy | null = null;
     /**
      * The loop's rest between passes (task 975, addendum 3). A rest that ends more than 10 minutes late means the
      * machine slept (or the process was suspended): nothing traded meanwhile. It is logged and told once, so
@@ -1018,11 +1026,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       const row = (fields: Partial<JournalRow> & { result: string }): JournalRow => ({ at: new Date(startedAt).toISOString(), pack: pack.digest, promptSha: input.prompt.sha256, action: "none", coin: null, symbol: null, amountBnb: null, fraction: null, reason: "", ...fields });
       const failed = (cause: string) => {
         askState = { ...askState, streak: askState.streak + 1, cause: askState.streak === 0 ? cause : askState.cause, promptSha: input.prompt.sha256, last: { at: startedAt, action: "none", reason: "", result: `error: ${cause}` } };
-        if (askState.streak === 2) {
-          askState = { ...askState, floorKeeperSince: clock() };
-          // The streak's first cause: what started it, in plain words.
-          notify("ask", `${host} could not be reached: ${askState.cause ?? cause}; trading on the floor keeper until it answers`);
-        }
+        // The takeover is said once, by the floor keeper's own switch, with the streak's first cause (addendum 7).
+        if (askState.streak === 2) askState = { ...askState, floorKeeperSince: clock() };
         writeAskState(deps.home, deps.name, askState);
         appendJournal(deps.home, deps.name, row({ result: `error: ${cause}` }));
         log("ask", { pack: pack.digest, result: "error", cause, streak: askState.streak });
@@ -1032,7 +1037,6 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       const checked = validateAnswer(call.answer, pack);
       if (!checked.ok) return failed(`invalid answer: ${checked.why}`);
       const d = checked.decision;
-      if (askState.streak >= 2) notify("ask", `${host} answers again: the floor keeper steps back`);
       askState = { ...askState, streak: 0, cause: null, floorKeeperSince: null, memo: d.memo || askState.memo, promptSha: input.prompt.sha256 };
       const decided = { action: d.action, coin: d.coin, symbol: d.symbol, amountBnb: d.amountBnb, fraction: d.fraction, reason: d.reason };
       const finish = (result: string) => {
@@ -1104,17 +1108,29 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
       if (gate.open && agent.track === "prompt" && agent.preset && agent.autopilot) {
         const on = silent();
+        const why: KeeperWhy | null = !on ? null : keeper() ? (askMode() ? "asks failing" : "host silent") : "floor guard";
+        const was: KeeperWhy | null = autopilotWhy;
+        const keeperName = `the floor keeper (${agent.preset})`;
+        const host = askMode() ? hostShown(agent.ask!.with) : null;
+        const toDinner = () => `${Math.round((nextDinner(now) - now) / 60_000)} min to dinner and the day's floor is unmet`;
+        // One notice for each takeover, each recovery and each change of reason; none from the ask itself.
         if (on !== autopilotOn) {
           autopilotOn = on;
           if (on) nextStrategyTick = 0;
           const minutes = agent.autopilot.idleMinutes;
-          const why = !on ? null : keeper() ? (askMode() ? "asks failing" : "host silent") : "floor guard";
           log(on ? "autopilot.on" : "autopilot.off", { preset: agent.preset, idleMinutes: minutes, silentMs: silentFor(), ...(why ? { why } : {}) });
-          if (why === "floor guard") notify("autopilot", `${Math.round((nextDinner(now) - now) / 60_000)} min to dinner and the day's floor is unmet: the floor keeper (${agent.preset}) fills it`);
-          else if (why === "asks failing") notify("autopilot", `the floor keeper (${agent.preset}) trades until ${hostShown(agent.ask!.with)} answers again`);
-          else if (!on && askMode()) notify("autopilot", `the floor keeper (${agent.preset}) steps back; its own positions keep their exits`);
+          if (why === "floor guard") notify("autopilot", `${toDinner()}: ${keeperName} fills it`);
+          else if (why === "asks failing") notify("autopilot", `${host} could not be reached: ${askState.cause ?? "no answer"}; ${keeperName} trades until it answers again`);
+          else if (!on && askMode() && was === "asks failing" && askState.streak === 0) notify("autopilot", `${host} answers again: ${keeperName} steps back; its own positions keep their exits`);
+          else if (!on && askMode()) notify("autopilot", `${keeperName} steps back; its own positions keep their exits`);
           else notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : keepsExits ? `your agent traded: autopilot ${agent.preset} opens nothing new; its own positions keep their exits` : `your agent acted: autopilot ${agent.preset} steps back`);
+        } else if (on && why !== was) {
+          // On all along, for another reason now: the asks failed while the dinner guard held it, or they answer again.
+          log("autopilot.why", { preset: agent.preset, from: was, why });
+          if (why === "asks failing") notify("autopilot", `${host} could not be reached: ${askState.cause ?? "no answer"}; ${keeperName} trades until it answers again`);
+          else if (why === "floor guard") notify("autopilot", `${was === "asks failing" && host ? `${host} answers again, but ` : ""}${toDinner()}: ${keeperName} keeps filling it`);
         }
+        autopilotWhy = why;
       }
       // Task 975, addendum 4: the ask, once the host has been silent an interval since its last trade and the last ask.
       // The first ask waits for the market's first read (at most 2 minutes from the start), so its pack has coins in it.

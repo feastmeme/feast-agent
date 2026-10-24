@@ -70,6 +70,8 @@ export type FeastSnapshot = {
   meta?: { coinsTotal: number | null; coinsListed: number | null; coinsOmitted: number | null; mostActive: Address[]; blocksBehind: number | null } | null;
   /** Task 975, addendum 6 (lane 976): the snapshot's feature names, and its top-level aggregates; absent on an older site. */
   features?: string[];
+  /** Lane 976: `schemaMinor` (1 with the market picture); null when not given. */
+  schemaMinor?: number | null;
   server?: { launches?: unknown[]; freshness?: unknown; mostActive15m?: unknown[] } | null;
   coins: Record<string, unknown>[];
   events: Record<string, unknown>[];
@@ -104,7 +106,7 @@ export function parseSnapshot(body: unknown): FeastSnapshot | null {
   const meta = { coinsTotal: n(b.coinsTotal), coinsListed: n(b.coinsListed), coinsOmitted: n(b.coinsOmitted), mostActive, blocksBehind: n(asOf.blocksBehind) };
   const features = Array.isArray(b.features) ? b.features.filter((f): f is string => typeof f === "string" && /^[A-Za-z0-9_]{1,40}$/.test(f)).slice(0, 40) : [];
   const server = { launches: Array.isArray(b.launches) ? b.launches.slice(0, 50) : undefined, freshness: b.freshness && typeof b.freshness === "object" ? b.freshness : undefined, mostActive15m: Array.isArray(b.mostActive15m) ? b.mostActive15m.slice(0, 50) : undefined };
-  return { generatedAt: time(b.generatedAt), block, cursor, fromCursor: cursorOf(b.fromCursor), afterCursor, eventsUrl, truncated: b.truncated === true, coins, events, meta, features, server };
+  return { generatedAt: time(b.generatedAt), block, cursor, fromCursor: cursorOf(b.fromCursor), afterCursor, eventsUrl, truncated: b.truncated === true, coins, events, meta, features, schemaMinor: n(b.schemaMinor), server };
 }
 
 /** The site's events document (`events_url`): the whole tail and its cursors, no coins; null for anything else. */
@@ -212,8 +214,8 @@ export function readSnapshotCache(home: string, wallet: string | null): CachedSn
   const parsed = parseSnapshot(file.snapshot);
   if (!parsed) return null;
   // The cache holds the parsed form: its own `meta` comes back as it was written.
-  const keptForm = file.snapshot as { meta?: FeastSnapshot["meta"]; features?: string[]; server?: FeastSnapshot["server"] };
-  const snapshot = { ...parsed, ...(keptForm.meta ? { meta: keptForm.meta } : {}), ...(Array.isArray(keptForm.features) ? { features: keptForm.features } : {}), ...(keptForm.server ? { server: keptForm.server } : {}) };
+  const keptForm = file.snapshot as { meta?: FeastSnapshot["meta"]; features?: string[]; schemaMinor?: number | null; server?: FeastSnapshot["server"] };
+  const snapshot = { ...parsed, ...(keptForm.meta ? { meta: keptForm.meta } : {}), ...(Array.isArray(keptForm.features) ? { features: keptForm.features } : {}), ...(typeof keptForm.schemaMinor === "number" ? { schemaMinor: keptForm.schemaMinor } : {}), ...(keptForm.server ? { server: keptForm.server } : {}) };
   const self = wallet?.toLowerCase() ?? null;
   const coins = self ? snapshot.coins.map((c) => (c.creator === "self" ? { ...c, creator: self } : c)) : snapshot.coins;
   return { at: file.at, etag: typeof file.etag === "string" ? file.etag : null, snapshot: { ...snapshot, coins } };

@@ -54,5 +54,7 @@ describe("standing and the cutoff", () => {
     expect(RULES.map((r) => r.rule)).toEqual(["floor", "dinner", "drop", "prizes", "cap"]);
     for (const r of RULES) expect(r.source.length, r.rule).toBeGreaterThan(10);
     expect(RULES.find((r) => r.rule === "drop")!.text).toContain("floor(N/5)");
+    // Addendum 7: the published rule's words, as the settlement engine counts the floor.
+    expect(RULES.find((r) => r.rule === "floor")!.text).toBe("each day, dinner to dinner, at least 3 trades and 0.02 BNB of volume (buys and sells of any Feast coin count, your own coin left out); an agent under it at the dinner is eaten (idle)");
   });
 });

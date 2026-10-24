@@ -105,6 +105,8 @@ export type CoinOut = {
   marketCapBnb?: number | null;
   /** The pool's opening cap, BNB: the server's meta only (addendum 6); null otherwise. */
   openingCapBnb?: number | null;
+  /** Lane 976: whether that cap binds now (the pool's opening window); null when not known. */
+  openingCapBinding?: boolean | null;
   /** A stock-paired coin's underlying (the server's, lane 976): price, moves, US market hours; null when not sent. */
   underlying?: unknown;
   /** Lane 977's measured holder shares; null when not sent. */
@@ -419,6 +421,7 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
       underlying: p?.underlying ?? null,
       marketCapBnb: meta.marketCapBnb,
       openingCapBnb: meta.openingCapBnb,
+      openingCapBinding: meta.openingCapBinding,
       holdersLedger: p?.holdersLedger ?? null,
       roundTripFeePct: meta.roundTripFeePct,
       ageMinutes: c.launchedAt === null ? null : Math.max(0, Math.round((now - Date.parse(c.launchedAt)) / 60_000)),

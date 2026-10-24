@@ -428,6 +428,10 @@ describe("task 975, addenda 4 and 5: the ask loop and the data it decides by", (
     expect(section9).toContain("Pass their answer as `--every N` (2–120) on `FL enter`. The model is your own default: do not ask.");
   });
 
+  it("addendum 7: SKILL §9 says each ask costs real quota, the rehearsal's figures, --ask-model and a longer interval on Pro", () => {
+    expect(section9).toContain("Each ask costs real quota on the host's default model: a rehearsal measured 0.12–0.22 USD per ask on Claude Code's default model (about 16 s each), and 12–18 s and about 17k input tokens per ask on Codex. If the player asks about the cost, a cheaper model can be chosen with `--ask-model <name>`, and a Pro-tier plan should use a longer interval");
+  });
+
   it("SKILL §3 says the runtime asks you on a timer, what the pack holds, and to leave your future self a note", () => {
     expect(section3).toContain("**The runtime asks you, on a timer.**");
     expect(section3).toContain("before you end a session, write what your future self should know into `strategy.md` (with the player) or an `FL note`");
@@ -470,5 +474,27 @@ describe("task 975, addendum 6: at scale", () => {
     const log = read("docs/CHANGELOG.md");
     const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
     for (const word of ["field=1", "features", "exitImpactPctEstimate", "Retry-After", "feast_rl", "30–60 s"]) expect(v5, word).toContain(word);
+  });
+});
+
+describe("task 975, addendum 7: the rehearsal's fixes", () => {
+  const ASKING = "Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.";
+  it("FL status's floor line and the runtime's start notice say the unified line in ask mode, not league-v5's first cut", async () => {
+    const { autopilotLine } = await import("./enter/copy.ts");
+    expect(autopilotLine({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: "claude" } }, "en")).toBe(ASKING);
+    const cli = read("src/league/cli.ts");
+    const runtime = read("src/league/runtime.ts");
+    // Each first-cut line sits behind the ask mode's branch, which says the unified line.
+    expect(cli.indexOf("autopilotLine({ preset: mine.autopilot.preset")).toBeGreaterThan(0);
+    expect(cli.indexOf("autopilotLine({ preset: mine.autopilot.preset")).toBeLessThan(cli.indexOf("the backup takes over after"));
+    expect(runtime.indexOf('if (askMode()) notify("started", `prompt mode; ${autopilotLine(')).toBeGreaterThan(0);
+    expect(runtime.indexOf('if (askMode()) notify("started"')).toBeLessThan(runtime.indexOf("min of silence"));
+  });
+
+  it("what the floor counts, in the published rule's words; no copy says FEAST is left out", async () => {
+    const { FLOOR_COUNTS, RULES } = await import("./data/standing.ts");
+    expect(FLOOR_COUNTS).toBe("buys and sells of any Feast coin count, your own coin left out");
+    expect(RULES.find((r) => r.rule === "floor")!.text).toContain(FLOOR_COUNTS);
+    for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md", "docs/CHANGELOG.md", "docs/prompts/default-s1.en.md", "src/league/ask/pack.ts", "src/league/data/standing.ts", "src/league/prompt/floor.ts"]) expect(read(file), file).not.toMatch(/(own coin|\bFEAST\b)[^.\n]*(and FEAST|FEAST[^.\n]*left out)|FEAST is left out|FEAST trades do not count/);
   });
 });

@@ -36,7 +36,7 @@ const WBNB = MAINNET.contracts.wrappedNative.toLowerCase();
 
 export type Flow = { buys: number; sells: number; buyBnb: number; sellBnb: number; netBnb: number; largestBnb: number };
 export type Windows = { change: { m5: number | null; m15: number | null; h1: number | null; h24: number | null }; volume: { m5: number | null; m15: number | null; h1: number | null } };
-export type CoinMeta = { type: "bnb" | "stock-paired"; quoteSymbol: string; underlyingTicker: string | null; marketCapBnb: number | null; openingCapBnb: number | null; roundTripFeePct: number };
+export type CoinMeta = { type: "bnb" | "stock-paired"; quoteSymbol: string; underlyingTicker: string | null; marketCapBnb: number | null; openingCapBnb: number | null; /** Lane 976: whether the opening window still caps a wallet's buy; null when not known (the local path). */ openingCapBinding: boolean | null; roundTripFeePct: number };
 
 export type MarketMeta = { generatedAt: string | null; ageSeconds: number | null; blocksBehind: number | null; coinsTotal: number | null; coinsListed: number | null; coinsOmitted: number | null; mostActive: Address[]; freshness?: Record<string, unknown> | null };
 
@@ -155,6 +155,7 @@ export function coinMeta(coin: Pick<SnapshotCoin, "quote" | "quoteSymbol" | "pri
     marketCapBnb: coin.priceBnb === null ? null : round(coin.priceBnb * COIN_SUPPLY, 4),
     // The pool's opening cap needs the pools route: only the server's meta gives it.
     openingCapBnb: null,
+    openingCapBinding: null,
     roundTripFeePct: round(roundTrip, 4)!,
   };
 }
@@ -202,10 +203,29 @@ export type PictureDeps = {
 
 // --- the server's picture (task 975, addendum 6; lane 976, lane 977): used when `features` names it -------------
 
-/** The snapshot's own feature names, as the contract binds them; a field is read only when its name is listed. */
+/** The fields of the server's picture the runtime reads. */
 export const FEATURES = ["windows", "flow2m", "impact", "meta", "underlying", "holdersLedger", "launches", "freshness", "mostActive15m"] as const;
 export type Feature = (typeof FEATURES)[number];
-export const hasFeature = (snapshot: Pick<FeastSnapshot, "features"> | null, f: Feature) => Boolean(snapshot?.features?.includes(f));
+/**
+ * The snapshot's `features` as lane 976 implements them (docs/api/snapshot.md, the contract; addendum 7): six flags,
+ * not the field names. `flow` gates the rows' `flow2m`, `clock` the market-hours fields of `underlying`; `meta`,
+ * `underlying`'s mark and `mostActive15m` have no flag and come with the market part, which is there when any flag
+ * but `freshness` is. A build whose market picture failed says `["freshness"]` alone: no server picture then.
+ */
+export const SNAPSHOT_FLAGS = ["windows", "flow", "impact", "launches", "freshness", "clock"] as const;
+const FLAG_OF: Partial<Record<Feature, (typeof SNAPSHOT_FLAGS)[number]>> = { windows: "windows", flow2m: "flow", impact: "impact", launches: "launches", freshness: "freshness" };
+const WITH_MARKET: readonly Feature[] = ["meta", "underlying", "mostActive15m"];
+const marketPart = (features: readonly string[]) => features.some((f) => f !== "freshness" && (SNAPSHOT_FLAGS as readonly string[]).includes(f));
+/** Whether the snapshot carries `f`: by the contract's flag, or (the fallback, addendum 6's reading) by the field's own name. */
+export const hasFeature = (snapshot: Pick<FeastSnapshot, "features"> | null, f: Feature) => {
+  const features = snapshot?.features ?? [];
+  if (features.includes(f)) return true;
+  const flag = FLAG_OF[f];
+  if (flag) return features.includes(flag);
+  return WITH_MARKET.includes(f) && marketPart(features);
+};
+/** `underlying`'s market-hours fields: under the `clock` flag (or the field-name fallback). */
+const hasClock = (snapshot: Pick<FeastSnapshot, "features"> | null) => Boolean(snapshot?.features?.includes("clock") || snapshot?.features?.includes("underlying"));
 
 const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
@@ -214,7 +234,8 @@ const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (
 export function serverWindows(raw: unknown): Windows | null {
   const w = obj(raw);
   if (!w) return null;
-  const at = (k: string) => obj(w[k]);
+  // The contract's keys ("5m", "15m", "1h", "24h"), or addendum 6's (m5, m15, h1, h24).
+  const at = (k: string) => obj(w[{ m5: "5m", m15: "15m", h1: "1h", h24: "24h" }[k]!]) ?? obj(w[k]);
   return {
     change: { m5: n(at("m5")?.changePct), m15: n(at("m15")?.changePct), h1: n(at("h1")?.changePct), h24: n(at("h24")?.changePct) },
     volume: { m5: n(at("m5")?.volumeBnb), m15: n(at("m15")?.volumeBnb), h1: n(at("h1")?.volumeBnb) },
@@ -226,11 +247,15 @@ export function serverFlow(raw: unknown): Flow | null {
   if (!f) return null;
   const buyBnb = n(f.buyBnb) ?? 0;
   const sellBnb = n(f.sellBnb) ?? 0;
-  return { buys: n(f.buys) ?? 0, sells: n(f.sells) ?? 0, buyBnb, sellBnb, netBnb: n(f.netBnb) ?? round(buyBnb - sellBnb)!, largestBnb: n(f.largestBnb) ?? 0 };
+  return { buys: n(f.buys) ?? 0, sells: n(f.sells) ?? 0, buyBnb, sellBnb, netBnb: n(f.netBnb) ?? round(buyBnb - sellBnb)!, largestBnb: n(f.largestTradeBnb) ?? n(f.largestBnb) ?? 0 };
 }
 
-/** The server's impact table, `[size BNB, impact %]` per side, sizes ascending; accepted as `{ "0.01": 1.2 }` or `[{ bnb, pct }]`. */
-export type ImpactTable = { buy: [number, number][]; sell: [number, number][]; roundTripFeePct: number | null };
+/**
+ * The server's impact table, `[size BNB, impact %]` per side, sizes ascending; accepted as `{ "0.01": 1.2 }` or
+ * `[{ bnb, pct }]`; a size the pool refuses (null) is left out. `asOf` is when it was quoted and `movedPct` the coin's
+ * price move since (the contract re-quotes past 0.5% or 5 minutes).
+ */
+export type ImpactTable = { buy: [number, number][]; sell: [number, number][]; roundTripFeePct: number | null; asOf: string | null; movedPct: number | null };
 export function serverImpact(raw: unknown): ImpactTable | null {
   const i = obj(raw);
   if (!i) return null;
@@ -245,7 +270,8 @@ export function serverImpact(raw: unknown): ImpactTable | null {
     else if (obj(v)) for (const [k, pct] of Object.entries(obj(v)!)) if (Number.isFinite(Number(k)) && n(pct) !== null) pairs.push([Number(k), n(pct)!]);
     return pairs.sort((a, b) => a[0] - b[0]);
   };
-  return { buy: side(i.buy), sell: side(i.sell), roundTripFeePct: n(i.roundTripFeePct) };
+  const asOf = typeof i.asOf === "string" && Number.isFinite(Date.parse(i.asOf)) ? new Date(Date.parse(i.asOf)).toISOString() : null;
+  return { buy: side(i.buy), sell: side(i.sell), roundTripFeePct: n(i.roundTripFeePct), asOf, movedPct: n(i.movedPct) };
 }
 
 /** An impact at `size` from a table: exact, or linear between the two nearest sizes; null outside the table's sizes. */
@@ -261,11 +287,11 @@ export function interpolate(table: [number, number][], size: number): number | n
 }
 
 export type Underlying = { priceBnb: number | null; change1hPct: number | null; change24hPct: number | null; usMarketOpen: boolean | null; nextOpenAt: string | null; nextCloseAt: string | null };
-export function serverUnderlying(raw: unknown): Underlying | null {
+export function serverUnderlying(raw: unknown, clock = true): Underlying | null {
   const u = obj(raw);
   if (!u) return null;
-  const iso = (v: unknown) => (typeof v === "string" && Number.isFinite(Date.parse(v)) ? new Date(Date.parse(v)).toISOString() : null);
-  return { priceBnb: n(u.priceBnb), change1hPct: n(u.change1hPct), change24hPct: n(u.change24hPct), usMarketOpen: typeof u.usMarketOpen === "boolean" ? u.usMarketOpen : null, nextOpenAt: iso(u.nextOpenAt), nextCloseAt: iso(u.nextCloseAt) };
+  const iso = (v: unknown) => (clock && typeof v === "string" && Number.isFinite(Date.parse(v)) ? new Date(Date.parse(v)).toISOString() : null);
+  return { priceBnb: n(u.priceBnb), change1hPct: n(u.change1hPct), change24hPct: n(u.change24hPct), usMarketOpen: clock && typeof u.usMarketOpen === "boolean" ? u.usMarketOpen : null, nextOpenAt: iso(u.nextOpenAt), nextCloseAt: iso(u.nextCloseAt) };
 }
 
 /** Lane 977's ledger of holders: measured shares, server-computed. */
@@ -344,7 +370,7 @@ export async function picture(deps: PictureDeps): Promise<Picture> {
     const local = coinMeta(withPrice);
     const sm = from.meta === "server" ? obj(raw?.meta) : null;
     const meta: CoinMeta = sm
-      ? { type: sm.type === "stock-paired" || sm.type === "stock" ? "stock-paired" : "bnb", quoteSymbol: local.quoteSymbol, underlyingTicker: local.underlyingTicker, marketCapBnb: n(sm.marketCapBnb) ?? local.marketCapBnb, openingCapBnb: n(sm.openingCapBnb), roundTripFeePct: n(sm.roundTripFeePct) ?? local.roundTripFeePct }
+      ? { type: sm.type === "stock-paired" || sm.type === "stock" ? "stock-paired" : "bnb", quoteSymbol: local.quoteSymbol, underlyingTicker: local.underlyingTicker, marketCapBnb: n(sm.marketCapBnb) ?? local.marketCapBnb, openingCapBnb: n(sm.openingCapBnb), openingCapBinding: typeof sm.openingCapBinding === "boolean" ? sm.openingCapBinding : null, roundTripFeePct: n(sm.roundTripFeePct) ?? local.roundTripFeePct }
       : local;
     const ageMinutes = (sm ? n(sm.ageMinutes) : null) ?? (c.launchedAt === null ? null : Math.max(0, Math.round((now - c.launchedAt) / 60_000)));
     const impact = from.impact === "server" ? serverImpact(raw?.impact) : null;
@@ -356,7 +382,7 @@ export async function picture(deps: PictureDeps): Promise<Picture> {
       windows: windowsOf.get(k) ?? null,
       impactPct: impact ? interpolate(impact.buy, IMPACT_SIZE_BNB) : null,
       impactSell: impact?.sell ?? null,
-      underlying: hasFeature(snap, "underlying") ? serverUnderlying(raw?.underlying) : null,
+      underlying: hasFeature(snap, "underlying") ? serverUnderlying(raw?.underlying, hasClock(snap)) : null,
       holdersLedger: hasFeature(snap, "holdersLedger") ? serverHolders(raw?.holdersLedger) : null,
       held: held.has(k),
       own: deps.own.has(k),
@@ -369,7 +395,9 @@ export async function picture(deps: PictureDeps): Promise<Picture> {
         const a = typeof r?.coin === "string" && isAddress(r.coin, { strict: false }) ? getAddress(r.coin) : typeof r?.address === "string" && isAddress(r.address, { strict: false }) ? getAddress(r.address) : null;
         const at = typeof r?.launchedAt === "string" ? Date.parse(r.launchedAt) : Number.NaN;
         if (!a || !Number.isFinite(at)) return [];
-        return [{ coin: a, symbol: typeof r!.symbol === "string" ? r!.symbol : null, launchedAt: new Date(at).toISOString(), ageMinutes: Math.max(0, Math.round((now - at) / 60_000)), trades: n(r!.trades), volumeBnb: n(r!.volumeBnb), holders: n(r!.holders) }];
+        // The contract's figures are the launch's life so far, under `firstMinutes`; addendum 6 read them flat.
+        const f = obj(r!.firstMinutes) ?? r!;
+        return [{ coin: a, symbol: typeof r!.symbol === "string" ? r!.symbol : null, launchedAt: new Date(at).toISOString(), ageMinutes: Math.max(0, Math.round((now - at) / 60_000)), trades: n(f.trades), volumeBnb: n(f.volumeBnb), holders: n(f.holders) }];
       }).slice(0, 5)
     : null;
   const launches: Launch[] =

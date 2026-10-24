@@ -343,6 +343,9 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
     const { utc8 } = await import("../register/copy.ts");
     expect(human.stdout).toContain(`asking Claude Code every 5 min · last ask ${utc8(at)} UTC+8 → none: error: Claude Code did not answer within 120 s · failures in a row 2 · on floor keeper since ${utc8(at)} UTC+8`);
     expect(human.stdout).toContain("floor keeper: steady, when Claude Code fails twice in a row, and 20 min before dinner with the floor unmet");
+    // Addendum 7: the floor-unmet line is the unified one, not league-v5's first cut.
+    expect(human.stdout).toContain("Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.");
+    expect(human.stdout).not.toMatch(/backup takes over|min of silence/);
     const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as Record<string, unknown>;
     expect(data.ask).toMatchObject({ every: 5, with: "claude", failuresInARow: 2, floorKeeperSince: new Date(at).toISOString() });
     expect(data.headroom).toMatchObject({ maxTradeBnb: expect.any(Number), leftTodayBnb: expect.any(Number), leftSeasonBnb: expect.any(Number) });

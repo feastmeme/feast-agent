@@ -3,7 +3,7 @@ import type { Address } from "viem";
 
 import type { CoinPicture, Launch, MarketMeta } from "../data/picture.ts";
 import type { FillOut, Headroom, PositionOut } from "../data/self.ts";
-import type { Standing } from "../data/standing.ts";
+import { FLOOR_COUNTS, type Standing } from "../data/standing.ts";
 import { clean } from "../enter/copy.ts";
 import type { Limits } from "../limits.ts";
 import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES } from "../prompt/constants.ts";
@@ -141,7 +141,7 @@ export function buildPack(input: PackInput): Pack {
   const strategy = input.prompt.text === null ? "(the strategy file cannot be read)" : input.prompt.text.length > STRATEGY_MAX_CHARS ? `${input.prompt.text.slice(0, STRATEGY_MAX_CHARS)}\n(… cut at ${STRATEGY_MAX_CHARS} characters)` : input.prompt.text;
   const coinRow = (c: CoinPicture) => {
     const w = c.windows;
-    const tags = [input.own.has(c.coin.toLowerCase()) || c.own ? "your own coin" : null, held.has(c.coin.toLowerCase()) ? "held" : null, c.meta.type === "bnb" ? "WBNB pair" : `stock-paired (${shown(c.meta.quoteSymbol, 12)}${c.meta.underlyingTicker ? `, underlying ${shown(c.meta.underlyingTicker, 12)}` : ""})`].filter(Boolean).join(", ");
+    const tags = [input.own.has(c.coin.toLowerCase()) || c.own ? "your own coin" : null, held.has(c.coin.toLowerCase()) ? "held" : null, c.meta.type === "bnb" ? "WBNB pair" : `stock-paired (${shown(c.meta.quoteSymbol, 12)}${c.meta.underlyingTicker ? `, underlying ${shown(c.meta.underlyingTicker, 12)}` : ""})`, c.meta.openingCapBinding === true ? `opening cap: at most ${bnb(c.meta.openingCapBnb)} BNB a wallet` : null].filter(Boolean).join(", ");
     return `${idOf.get(c.coin.toLowerCase())} | ${shown(c.symbol)} | ${c.priceBnb === null ? "?" : c.priceBnb.toPrecision(4)} | ${bnb(c.meta.marketCapBnb)} | ${pct(w?.change.m5)} ${pct(w?.change.m15)} ${pct(w?.change.h1)} ${pct(w?.change.h24)} | ${bnb(w?.volume.m15)} ${bnb(w?.volume.h1)} ${bnb(c.volume24hBnb)} | ${c.flow2m.buys}/${c.flow2m.sells} ${bnb(c.flow2m.netBnb)} max ${bnb(c.flow2m.largestBnb)} | ${c.trades24h ?? "?"} | ${c.holders ?? "?"} | ${c.ageMinutes ?? "?"} min | ${c.impactPct === null ? "?" : `${c.impactPct}%`} | ${tags}`;
   };
   const st = input.standing;
@@ -169,7 +169,7 @@ export function buildPack(input: PackInput): Pack {
     "",
     "## Where you stand",
     `now ${utc8(input.now)} UTC+8; the league: ${input.season.state ?? "not read"}${input.season.day !== null ? `, day ${input.season.day} of 7` : ""}; trading ${input.season.open ? "open" : "not open yet"}; next dinner ${utc8(Date.parse(input.day.endsAt))} UTC+8, in ${toDinner} min.`,
-    `today's floor: ${input.day.trades} trades and ${bnb(input.day.volumeBnb)} BNB of volume so far (needs ${ACTIVITY_FLOOR_TRADES} and ${ACTIVITY_FLOOR_BNB} BNB): ${input.day.passed ? "met" : "NOT met yet"}.`,
+    `today's floor: ${input.day.trades} trades and ${bnb(input.day.volumeBnb)} BNB of volume so far (needs ${ACTIVITY_FLOOR_TRADES} and ${ACTIVITY_FLOOR_BNB} BNB; ${FLOOR_COUNTS}): ${input.day.passed ? "met" : "NOT met yet"}.`,
     ...(!input.day.passed && toDinner <= 60 ? [`FLOOR UNMET, ${toDinner} minutes left: meet it now with small round trips, or the agent is eaten at the dinner. 20 minutes before the dinner the runtime's floor keeper does it instead.`] : []),
     `wallet: ${input.wallet ? `${bnb(input.wallet.balanceBnb)} BNB, ${input.wallet.gasReserveBnb} BNB of it the gas reserve, ${bnb(input.wallet.spendableBnb)} BNB spendable` : "the balance could not be read: no buy fits"}.`,
     `headroom: a buy now at most ${cap} BNB; left today ${bnb(h.leftTodayBnb)} BNB (spent ${bnb(h.spent24hBnb)} in 24 h); left this season ${bnb(h.leftSeasonBnb)} BNB; open ${bnb(h.exposureBnb)} of ${bnb(h.exposureBnb + h.leftExposureBnb)} BNB; positions ${h.openPositions} of ${h.maxOpenPositions}; trades this hour ${h.trades1h} of ${h.maxTradesPerHour}; realized loss in 24 h ${bnb(h.realizedLoss24hBnb)} BNB (${bnb(h.leftLoss24hBnb)} left); drawdown ${bnb(h.drawdownBnb)} of ${bnb(h.maxDrawdownBnb)} BNB${h.cooldowns.length > 0 ? `; in cooldown: ${h.cooldowns.map((c) => `${idOf.get(c.coin.toLowerCase()) ?? "a coin not listed"} until ${utc8(Date.parse(c.until))}`).join(", ")}` : ""}.`,
