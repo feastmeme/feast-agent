@@ -115,6 +115,9 @@ type Loaded = {
   stop(): void;
 };
 
+/** A rest of the loop that ends this much late is the machine asleep (task 975, addendum 3). */
+const SLEPT_MS = 10 * 60_000;
+
 const PRIORITY: Record<Intent["kind"], number> = { sell: 0, arm: 1, claim: 2, launch: 3, buy: 4 };
 
 export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
@@ -939,6 +942,24 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     };
     // The autopilot's state, said once each way: on after the host's silence, off when it acts.
     let autopilotOn = false;
+    /**
+     * The loop's rest between passes (task 975, addendum 3). A rest that ends more than 10 minutes late means the
+     * machine slept (or the process was suspended): nothing traded meanwhile. It is logged and told once, so
+     * `FL status` can say "slept N minutes at <time>".
+     */
+    const rest = async () => {
+      const before = clock();
+      const loopMs = deps.loopMs ?? 1_000;
+      await sleep(loopMs);
+      const late = clock() - before - loopMs;
+      if (late > SLEPT_MS) {
+        // From when the rest should have ended: the last instant the loop was due to run.
+        const from = before + loopMs;
+        const minutes = Math.round(late / 60_000);
+        log("slept", { from: new Date(from).toISOString(), minutes });
+        notify("slept", `slept ${minutes} minutes at ${utc8(from)} UTC+8: nothing traded while it slept. Keep this machine awake for the season (or run it on a server or cloud computer).`);
+      }
+    };
 
     for (;;) {
       const now = clock();
@@ -1065,7 +1086,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             report(held.id);
           }
         }
-        await sleep(deps.loopMs ?? 1_000);
+        await rest();
         continue;
       }
       const next = queue.shift();
@@ -1074,7 +1095,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         report(next.id);
         continue;
       }
-      await sleep(deps.loopMs ?? 1_000);
+      await rest();
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

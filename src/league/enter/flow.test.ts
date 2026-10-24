@@ -184,7 +184,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
       "Registered: seat 7, and a founding seat (#7 of 100). maplegrin.ai is in Season 1.",
       "Notes session open for maplegrin.ai, season 1: your agent's notes reach feast.meme.",
       'started "maplegrin" in the background (pid 4242); FL status maplegrin',
-      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
     ]);
     expect(readSession(w.home)).toMatchObject({ token: "tok-1", season: 1, agentId: ID });
   });
@@ -734,7 +734,7 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
     expect(card.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30 });
     const out = await w.run({ yes: true });
     expect(lastLine(out.text)).toBe(
-      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. ${ON_EN} If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. ${ON_EN} Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
     );
     expect(out.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30 });
   });
@@ -777,7 +777,7 @@ describe("task 975, addendum 1: entering once the season is on, and the signing 
     const out = await w.run({ yes: true });
     // Addendum 2: once the season is on, the line ends by telling the host to trade now.
     expect(lastLine(out.text)).toBe(
-      `You're in, and maplegrin is running. ${ON_EN} If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.`,
+      `You're in, and maplegrin is running. ${ON_EN} Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.`,
     );
   });
 

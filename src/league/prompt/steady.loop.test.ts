@@ -159,3 +159,31 @@ describe("the backup takes over after 30 minutes with no trade from the host", (
     expect(w.calls).not.toContain("execute");
   }, 60_000);
 });
+
+describe("task 975, addendum 3: the machine slept", () => {
+  it("a jump of more than 10 minutes across one of the loop's rests is logged once and notified, with when and how long", async () => {
+    const { home } = setup();
+    const c = fakeClock(T0);
+    const w = marketWorld({ coins: [OWN, ...COINS].map((k, i) => ({ coin: k, symbol: `S${i}` })), now: c.now });
+    recordHostAction(home, "demo", "buy", T0);
+    // The lid closes at T0 + 5 min for 45 minutes: the loop's next rest ends 45 minutes late.
+    c.at(T0 + 5 * MIN, () => (c.clock.t += 45 * MIN));
+    await run(home, c, market(c), w, T0 + 70 * MIN);
+    const slept = lines(home).filter((l) => l.event === "slept");
+    expect(slept).toHaveLength(1);
+    expect(slept[0]).toMatchObject({ minutes: 45, from: new Date(T0 + 5 * MIN).toISOString() });
+    const { lastSleep } = await import("./host.ts");
+    expect(lastSleep(home, "demo")).toEqual({ at: T0 + 5 * MIN, minutes: 45 });
+    const notes = readFileSync(agentPaths(home, "demo").notifications, "utf8");
+    expect(notes).toContain("slept 45 minutes at 2026-10-27 14:05 UTC+8: nothing traded while it slept. Keep this machine awake");
+  }, 60_000);
+
+  it("an ordinary run logs no sleep", async () => {
+    const { home } = setup();
+    const c = fakeClock(T0);
+    const w = marketWorld({ coins: [OWN, ...COINS].map((k, i) => ({ coin: k, symbol: `S${i}` })), now: c.now });
+    recordHostAction(home, "demo", "buy", T0);
+    await run(home, c, market(c), w, T0 + 70 * MIN);
+    expect(lines(home).filter((l) => l.event === "slept")).toEqual([]);
+  }, 60_000);
+});

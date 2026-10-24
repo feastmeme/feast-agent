@@ -244,3 +244,25 @@ describe("task 975, addendum 2: FL status in season, and FL doctor's indexer", (
     }
   }, 60_000);
 });
+
+describe("task 975, addendum 3: FL status says to keep the machine awake, and when it slept", () => {
+  it("the awake line, and 'slept N minutes at <time>' from the log; --json carries slept", async () => {
+    const { env, prompt, home } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady" });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const human = await run(["status", "demo", "--no-league"], env);
+    expect(human.stdout).toContain("Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten.");
+    expect(human.stdout).not.toContain("slept ");
+    const zh = await run(["status", "demo", "--no-league", "--lang", "zh"], env);
+    expect(zh.stdout).toContain("赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。");
+    const { appendJsonl } = await import("../store.ts");
+    const from = Date.now() - 2 * 3_600_000;
+    appendJsonl(agentPaths(home, "demo").log, { at: new Date(from + 45 * 60_000).toISOString(), event: "slept", from: new Date(from).toISOString(), minutes: 45 });
+    const after = await run(["status", "demo", "--no-league"], env);
+    const { utc8 } = await import("../register/copy.ts");
+    expect(after.stdout).toContain(`slept 45 minutes at ${utc8(from)} UTC+8`);
+    const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as { slept: unknown };
+    expect(data.slept).toEqual({ at: new Date(from).toISOString(), minutes: 45 });
+  }, 60_000);
+});

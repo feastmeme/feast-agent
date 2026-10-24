@@ -305,7 +305,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
 
   it("the backup sentence, in English, in SKILL §9, setup.md and the README (the Chinese one: enter/copy.test.ts)", () => {
     expect(section9).toContain(BACKUP);
-    expect(section9).toContain(`Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. If it stops, run \`FL start <name>\`.`);
+    expect(section9).toContain(`Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start <name>\`.`);
     expect(read("skills/feast-league/references/setup.md")).toContain(BACKUP);
     expect(readme).toContain(BACKUP);
   });
@@ -400,5 +400,15 @@ describe("task 975, addendum 2: one truth across the copy", () => {
     for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "skills/feast-league/references/register.md", "README.md"]) expect(read(file), file).not.toMatch(/seat \d+ of 1,000|号席位（共 1,000）|The 1,000 seats|1,000 个席位已满|has 1,000 seats/);
     const log = read("docs/CHANGELOG.md");
     expect(log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"))).toContain("Decide and trade now");
+  });
+});
+
+describe("task 975, addendum 3: keep the machine awake", () => {
+  it("SKILL §9 says it in the owner's words, en and zh", () => {
+    const skill = read("skills/feast-league/SKILL.md");
+    const section9 = skill.slice(skill.indexOf("## 9."), skill.indexOf("### The older signed path"));
+    expect(section9).toContain("Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten.");
+    expect(section9).toContain("赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。");
+    expect(section9).toContain("slept N minutes at");
   });
 });

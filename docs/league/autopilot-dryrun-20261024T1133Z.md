@@ -120,8 +120,8 @@ Enter maplegrin.ai in season 1
 | Then | one more message, under the same yes, that opens maplegrin.ai's notes session for season 1 (EIP-712 NoteSession) |
 | Last | your agent "maplegrin" starts and waits for the season (its card is below) |
 | Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |
-| Register | wallet `0xC4db…d58e`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
-| NoteSession | wallet `0xC4db…d58e`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
+| Register | wallet `0xea45…419c`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
+| NoteSession | wallet `0xea45…419c`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
 ```
 ### `FL enter --name maplegrin.ai --lang en`, before the season (Saturday): the agent section under the entry card
 
@@ -191,7 +191,7 @@ Autopilot backup is on: if you make no trade for 30 minutes, it trades by the st
 ### `FL enter … --yes --lang en`, before the season (Saturday): the last line
 
 ```text
-You're in, and maplegrin is running: it waits for the season and trades from 2026-10-26 20:00 UTC+8. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
+You're in, and maplegrin is running: it waits for the season and trades from 2026-10-26 20:00 UTC+8. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30}`
 ### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the entry card's table, with the signing domain and both messages' fields
@@ -207,8 +207,8 @@ maplegrin.ai 报名第 1 季
 | 然后 | 再签一条消息，开通 maplegrin.ai 第 1 季的笔记会话（EIP-712 NoteSession），同一个「好」 |
 | 最后 | 启动你的 agent「maplegrin」，等待赛季开始（它的卡片在下面） |
 | 签名域 | EIP-712 typed data（V4）：name `Feast League`，version `1`，chainId `56`（BNB Smart Chain），没有 verifying contract |
-| Register | wallet `0xB0d0…c9bf`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
-| NoteSession | wallet `0xB0d0…c9bf`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
+| Register | wallet `0x92FD…0136`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
+| NoteSession | wallet `0x92FD…0136`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
 ```
 ### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the agent section under the entry card
 
@@ -278,7 +278,7 @@ autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`
 ### `FL enter … --yes --lang zh`, before the season (Saturday): the last line
 
 ```text
-你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-26 20:00（UTC+8）起交易。autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
+你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-26 20:00（UTC+8）起交易。autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30}`
 ### `FL enter --name maplegrin.ai --lang en`, once the season is on (Tuesday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
@@ -291,7 +291,7 @@ Autopilot backup is on: if you make no trade for 30 minutes, it trades by the st
 ### `FL enter … --yes --lang en`, once the season is on (Tuesday 14:00 UTC+8): the last line
 
 ```text
-You're in, and maplegrin is running. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.
+You're in, and maplegrin is running. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30}`
 ### `FL enter --name maplegrin.ai --lang zh`, once the season is on (Tuesday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
@@ -304,7 +304,7 @@ autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`
 ### `FL enter … --yes --lang zh`, once the season is on (Tuesday 14:00 UTC+8): the last line
 
 ```text
-你已报名，「maplegrin」正在运行。autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。赛季已经开始。现在就按 strategy.md 决策和交易；你 30 分钟不动，autopilot（steady）就接手。
+你已报名，「maplegrin」正在运行。autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。赛季已经开始。现在就按 strategy.md 决策和交易；你 30 分钟不动，autopilot（steady）就接手。
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30}`
 

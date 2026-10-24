@@ -222,6 +222,16 @@ export function autopilotLine(autopilot: AutopilotShown, lang: Lang): string {
 }
 
 /**
+ * The agent is a background process on this machine (task 975, addendum 3, the owner's words): asleep or stopped, it
+ * trades nothing and is eaten at the dinner. The "You're in" line and `FL status` say it.
+ */
+export function awakeLine(lang: Lang): string {
+  return lang === "zh"
+    ? "赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。"
+    : "Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten.";
+}
+
+/**
  * Once the season is on, the host is told in so many words to start (task 975, addendum 2: in the rehearsal a host
  * that was not told ended its session; told, it traded at once). The "You're in" line and `FL status` end with it.
  */
@@ -461,7 +471,7 @@ export function doneLine(lang: Lang): string {
 /** After the entry that started the agent (task 968), with its autopilot backup (task 975). */
 export function doneRunning(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown, promptFile = "strategy.md"): string {
   const zh = lang === "zh";
-  const backup = autopilot !== undefined ? `${autopilotLine(autopilot, lang)}${zh ? "" : " "}` : "";
+  const backup = `${autopilot !== undefined ? `${autopilotLine(autopilot, lang)}${zh ? "" : " "}` : ""}${awakeLine(lang)}${zh ? "" : " "}`;
   const after = zh
     ? `如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`
     : `If it stops, run \`FL start ${name}\`. A changed strategy.md needs \`FL start ${name} --prompt strategy.md\`, its new card and your yes.`;

@@ -67,6 +67,33 @@ export function lastTradeAt(home: string, name: string): number | null {
   return null;
 }
 
+/** The runtime's newest `slept` line (task 975, addendum 3): when the machine fell asleep, and for how long; null when none. */
+export function lastSleep(home: string, name: string): { at: number; minutes: number } | null {
+  const path = agentPaths(home, name).log;
+  if (!existsSync(path)) return null;
+  const size = statSync(path).size;
+  const from = Math.max(0, size - 512 * 1024);
+  const fd = openSync(path, "r");
+  const buffer = Buffer.alloc(size - from);
+  try {
+    readSync(fd, buffer, 0, buffer.length, from);
+  } finally {
+    closeSync(fd);
+  }
+  const lines = buffer.toString("utf8").split("\n");
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (!lines[i]!.includes('"slept"')) continue;
+    try {
+      const entry = JSON.parse(lines[i]!) as { event?: string; from?: string; minutes?: unknown };
+      const at = Date.parse(String(entry.from));
+      if (entry.event === "slept" && Number.isFinite(at) && typeof entry.minutes === "number") return { at, minutes: entry.minutes };
+    } catch {
+      // A torn line is skipped.
+    }
+  }
+  return null;
+}
+
 export type PromptRead = { ok: true; path: string; sha256: string; text: string } | { ok: false; error: string };
 
 /** A prompt file as the user gave it: its absolute path and the sha256 of its bytes as text. */

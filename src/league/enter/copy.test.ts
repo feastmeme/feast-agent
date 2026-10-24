@@ -41,6 +41,19 @@ describe("the entry's copy promises no reward", () => {
     for (const lang of ["en", "zh"] as const) for (const pattern of REWARD) expect(copy.autopilotLine(null, lang)).not.toMatch(pattern);
   });
 
+  it("keep the machine awake, in the owner's words (task 975, addendum 3); the You're in line says it in both branches", () => {
+    expect(copy.awakeLine("en")).toBe("Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten.");
+    expect(copy.awakeLine("zh")).toBe("赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。");
+    for (const lang of ["en", "zh"] as const)
+      for (const opens of [{ kind: "at" as const, at: Date.parse("2026-10-26T12:00:00Z") }, { kind: "open" as const }]) {
+        const line = copy.doneRunning("maplegrin", opens, lang, { preset: "steady", idleMinutes: 30 });
+        expect(line, `${lang} ${opens.kind}`).toContain(copy.awakeLine(lang));
+        for (const pattern of REWARD) expect(line).not.toMatch(pattern);
+      }
+    // Once the season is on, the instruction to trade still ends it (addendum 2).
+    expect(copy.doneRunning("maplegrin", { kind: "open" }, "en", { preset: "steady", idleMinutes: 30 }).endsWith("autopilot (steady) takes over.")).toBe(true);
+  });
+
   it("the entry no longer buys: no buy card, no today's coin, in either language", () => {
     expect(SOURCE).not.toMatch(/buyCard|today's coin|今天的币|assignment/);
   });

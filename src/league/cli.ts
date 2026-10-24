@@ -28,7 +28,7 @@ import { notesLogin, recordedAgentId } from "./notes/session.ts";
 import { checkModel, declareHost, readDeclaredHost } from "./headers.ts";
 import { PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { dayLine } from "./prompt/floor.ts";
-import { promptChanged, within } from "./prompt/host.ts";
+import { lastSleep, promptChanged, within } from "./prompt/host.ts";
 import { outcomeLine, sendRequest, waitForOutcome } from "./prompt/inbox.ts";
 import { PRESETS, PRESET_IDS } from "./presets/specs.ts";
 import { BODY_COIN_QUOTE, BODY_COIN_SPLIT, bodyCoinNames } from "./register/claims.ts";
@@ -64,7 +64,7 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
-import { tradeNowLine } from "./enter/copy.ts";
+import { awakeLine, tradeNowLine } from "./enter/copy.ts";
 import { enter, entryOneShot, readEntry } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
@@ -436,6 +436,7 @@ async function main(argv: string[]): Promise<number> {
       const mine = await selfView(home, name, { chain: holds ? chain : null, now: Date.now() }).catch(() => null);
       const bnbUsd = mine && (holds || mine.pnl.realizedBnb !== 0) ? await within(chain.bnbUsd(), 8_000) : null;
       const usdRef = typeof bnbUsd === "number" && bnbUsd > 0 ? { bnbUsd: Number(bnbUsd.toFixed(4)), at: new Date().toISOString() } : null;
+      const sleptAt = lastSleep(home, name);
       const data = {
         name,
         running: s.running,
@@ -461,6 +462,8 @@ async function main(argv: string[]): Promise<number> {
         lastActionAt: mine?.lastActionAt ?? null,
         // Task 975: the day's trades and volume, dinner to dinner, as the page counts its floor.
         day: mine?.day ?? null,
+        // Task 975, addendum 3: the newest time the machine slept under the runtime.
+        slept: sleptAt ? { at: new Date(sleptAt.at).toISOString(), minutes: sleptAt.minutes } : null,
         notifications: s.notifications,
         unread,
         league: league?.data ?? null,
@@ -494,6 +497,9 @@ async function main(argv: string[]): Promise<number> {
           `positions: ${data.positions.length ? data.positions.map((p) => `${p.symbol} ${p.costBnb} BNB${p.armed ? "" : " (exit not armed)"}`).join(", ") : "none"}`,
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...waiting,
+          // It runs on this machine: say so, and when it last slept (task 975, addendum 3).
+          ...(s.agent!.track !== "entry" ? [awakeLine(lang)] : []),
+          ...(sleptAt ? [`slept ${sleptAt.minutes} minutes at ${utc8(sleptAt.at)} UTC+8: nothing traded while it slept`] : []),
           ...(data.paused ? [`paused: ${data.paused}`] : []),
           ...(data.warmup ? [`warm-up: ${data.warmup.trades >= 5 ? "done" : `${data.warmup.trades} of 5 trades`}`] : []),
           ...selfLines,
