@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { daemon, daemonPath, unitFile, type Runner } from "./daemon.ts";
-import { beforeBoot, bootTime } from "./store.ts";
+import { bootId, otherBoot } from "./store.ts";
 
 /**
  * Task 975, addendum 8 (gap G4): FL daemon's units for macOS and Linux, and its install, status and uninstall against
@@ -104,12 +104,14 @@ describe("install, status, uninstall", () => {
 });
 
 describe("after a reboot", () => {
-  it("a lock or a pid file older than the boot is a stopped runtime's, whatever has its pid now", () => {
-    const now = Date.parse("2026-10-29T06:00:00Z");
-    const boot = bootTime(now, 3_600);
-    expect(boot).toBe(now - 3_600_000);
-    expect(beforeBoot(boot - 2 * 60_000, boot)).toBe(true);
-    expect(beforeBoot(boot + 1, boot)).toBe(false);
-    expect(beforeBoot(Number.NaN, boot)).toBe(false);
+  it("a lock or a pid file written under another boot is a stopped runtime's; an unknown boot never is (fails closed)", () => {
+    expect(otherBoot("boot-a", "boot-b")).toBe(true);
+    expect(otherBoot("boot-a", "boot-a")).toBe(false);
+    // Written before addendum 8 (no boot), or this machine's boot unreadable: believed live.
+    expect(otherBoot(undefined, "boot-a")).toBe(false);
+    expect(otherBoot("boot-a", null)).toBe(false);
+    // Read on this machine: the same each time, and the lock this process would write is of this boot.
+    expect(bootId()).toBe(bootId());
+    expect(otherBoot(bootId())).toBe(false);
   });
 });

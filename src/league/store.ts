@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
-import { homedir, uptime as osUptime } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 /**
@@ -151,26 +152,37 @@ export function pidAlive(pid: number): boolean {
 const alive = pidAlive;
 
 /**
- * When this machine last booted, ms (task 975, addendum 8): a lock or a pid file older than the boot was left by a
- * runtime the reboot ended, whatever process now has its pid.
+ * This boot's identifier (task 975, addendum 8): the kernel's own, never a time (a wall clock set forward after a
+ * lock was written must not make a live lock look old). Linux: `/proc/sys/kernel/random/boot_id`; macOS:
+ * `kern.bootsessionuuid`. Null when it cannot be read; then nothing is ever taken for stale by it.
  */
-export function bootTime(now = Date.now(), uptimeSeconds = osUptime()): number {
-  return now - uptimeSeconds * 1_000;
+let bootIdCache: string | null | undefined;
+export function bootId(): string | null {
+  if (bootIdCache !== undefined) return bootIdCache;
+  let id: string | null = null;
+  try {
+    if (process.platform === "linux") id = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    else if (process.platform === "darwin") id = execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    id = null;
+  }
+  bootIdCache = id && /^[0-9a-fA-F-]{8,64}$/.test(id) ? id : null;
+  return bootIdCache;
 }
-/** Written before this boot (a minute's slack for the clock): left by a runtime a reboot ended. */
-export const beforeBoot = (at: number, boot = bootTime()) => Number.isFinite(at) && at < boot - 60_000;
+/** Written under another boot: left by a runtime a reboot ended, whatever process now has its pid. Unknown is not. */
+export const otherBoot = (written: unknown, current: string | null = bootId()) => typeof written === "string" && current !== null && written !== current;
 
 /**
- * One runtime per wallet: the lock holds the owner's pid and agent name. A lock
- * whose process is gone, or that was written before the machine last booted, is
- * stale and is taken over; a live one refuses.
+ * One runtime per wallet: the lock holds the owner's pid, agent name and boot. A
+ * lock whose process is gone, or that was written under another boot, is stale
+ * and is taken over; a live one refuses.
  */
 export function acquireWalletLock(home: string, agent: string): { release: () => void } {
   const path = walletLockPath(home);
   mkdirSync(home, { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      writeFileSync(path, JSON.stringify({ pid: process.pid, agent, at: new Date().toISOString() }), { flag: "wx", mode: 0o600 });
+      writeFileSync(path, JSON.stringify({ pid: process.pid, agent, at: new Date().toISOString(), boot: bootId() }), { flag: "wx", mode: 0o600 });
       return {
         release: () => {
           const held = readJson<{ pid: number }>(path);
@@ -179,8 +191,8 @@ export function acquireWalletLock(home: string, agent: string): { release: () =>
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const held = readJson<{ pid: number; agent: string; at?: string }>(path);
-      if (held && alive(held.pid) && !beforeBoot(Date.parse(held.at ?? ""))) throw new Error(`the wallet is in use by agent "${held.agent}" (pid ${held.pid}); stop it first`);
+      const held = readJson<{ pid: number; agent: string; boot?: unknown }>(path);
+      if (held && alive(held.pid) && !otherBoot(held.boot)) throw new Error(`the wallet is in use by agent "${held.agent}" (pid ${held.pid}); stop it first`);
       rmSync(path, { force: true });
     }
   }
@@ -188,8 +200,8 @@ export function acquireWalletLock(home: string, agent: string): { release: () =>
 }
 
 export function walletLockHolder(home: string): { pid: number; agent: string } | null {
-  const held = readJson<{ pid: number; agent: string; at?: string }>(walletLockPath(home));
-  return held && alive(held.pid) && !beforeBoot(Date.parse(held.at ?? "")) ? { pid: held.pid, agent: held.agent } : null;
+  const held = readJson<{ pid: number; agent: string; boot?: unknown }>(walletLockPath(home));
+  return held && alive(held.pid) && !otherBoot(held.boot) ? { pid: held.pid, agent: held.agent } : null;
 }
 
 // --- the wallet ledger (L3) -------------------------------------------------------------

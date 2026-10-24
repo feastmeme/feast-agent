@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -42,7 +42,7 @@ import { healthFlag, withHealth, type Health } from "./headers.ts";
 import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
 import { freshMemory, pastEnd, sessionStep, sessionView, type SessionMemory, type SessionView } from "./session.ts";
-import { addToLedger, acquireWalletLock, agentPaths, beforeBoot, pidAlive, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
+import { addToLedger, acquireWalletLock, agentPaths, bootId, otherBoot, pidAlive, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
 import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExtras, type Snapshot, type StrategyEvent } from "./strategy.ts";
 
 /**
@@ -180,6 +180,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
   }
   mkdirSync(paths.dir, { recursive: true });
   writeFileSync(paths.pid, String(process.pid));
+  writeJsonAtomic(`${paths.pid}.boot`, { boot: bootId() });
   let loaded: Loaded | null = null;
   /** Answers every request still queued when the loop ends, so no `FL buy` waits on one that will never run. */
   let dropQueued: ((reason: string) => void) | null = null;
@@ -1405,6 +1406,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     loaded?.stop();
     lock.release();
     rmSync(paths.pid, { force: true });
+    rmSync(`${paths.pid}.boot`, { force: true });
   }
 }
 
@@ -1421,8 +1423,8 @@ export function statusOf(home: string, name: string): { agent: AgentConfig | nul
         .map((line) => JSON.parse(line) as unknown)
     : [];
   // Under a sandboxed host the probe may answer EPERM for a live runtime: that is running, not gone (task 975).
-  // A pid file from before the machine's last boot names whatever process has that pid now (addendum 8): not running.
-  const running = existsSync(paths.pid) && pidAlive(Number(readFileSync(paths.pid, "utf8").trim())) && !beforeBoot(statSync(paths.pid).mtimeMs);
+  // A pid file written under another boot names whatever process has that pid now (addendum 8): not running.
+  const running = existsSync(paths.pid) && pidAlive(Number(readFileSync(paths.pid, "utf8").trim())) && !otherBoot(readJson<{ boot?: unknown }>(`${paths.pid}.boot`)?.boot);
   return { agent, book, notifications, stop: stopReason(home, name), running };
 }
 
