@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { getAddress, isAddress, type Address } from "viem";
@@ -64,12 +64,13 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
+import { tradeNowLine } from "./enter/copy.ts";
 import { enter, entryOneShot, readEntry } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
 import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./script/check.ts";
-import { standingLines } from "./season-card.ts";
+import { standingLines, type StandingInput } from "./season-card.ts";
 import { readGate } from "./season-gate.ts";
 import { sessionView } from "./session.ts";
 import { autopilotChoice, prepareStart } from "./start.ts";
@@ -425,7 +426,10 @@ async function main(argv: string[]): Promise<number> {
       const view = s.book ? bookView(s.book, undefined, Date.now()) : null;
       const lang = langOf(values.lang);
       const unread = unreadNotifications(home, name, true);
-      const league = values["no-league"] ? null : await leagueStanding(home, lang).catch(() => null);
+      // Task 975, addendum 2: a prompt agent's own line closes the status: in season, the host is told to trade now.
+      const shownAutopilot = s.agent.preset && s.agent.autopilot ? { preset: s.agent.preset, idleMinutes: s.agent.autopilot.idleMinutes } : null;
+      const standingAgent = { track: s.agent.track, autopilot: shownAutopilot, promptFile: basename(s.agent.prompt?.path ?? "strategy.md") };
+      const league = values["no-league"] ? null : await leagueStanding(home, lang, standingAgent).catch(() => null);
       // The agent's figures in BNB (task 963), marked on the chain only when it holds something; a USDT figure is a reference.
       const holds = Object.keys(s.book?.positions ?? {}).length > 0;
       const chain = new LeagueChain(MAINNET, rpc());
@@ -495,6 +499,8 @@ async function main(argv: string[]): Promise<number> {
           ...selfLines,
           ...(unread.length > 0 ? ["new since the last status:", ...unreadShown(unread).map((n) => (typeof n === "string" ? n : noticeLine(n, lang)))] : ["latest:", ...s.notifications.slice(-8).map((n) => noticeLine(n, lang))]),
           ...(league ? ["", ...league.lines] : []),
+          // No league block (or it could not be read), and the gate says the season is open: the instruction still ends it.
+          ...(!league?.lines.length && s.agent!.track === "prompt" && gate?.state === "open" ? [tradeNowLine(shownAutopilot, standingAgent.promptFile, lang)] : []),
         ].join("\n"),
       );
       return 0;
@@ -692,7 +698,7 @@ function noticeLine(n: unknown, lang: Lang): string {
 }
 
 /** The league block of `status` (PLAN-941 §6). Best effort: it never fails `status`. */
-async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string[]; data: Record<string, unknown> }> {
+async function leagueStanding(home: string, lang: Lang, agent: StandingInput["agent"] = null): Promise<{ lines: string[]; data: Record<string, unknown> }> {
   const site = new LeagueSite(siteFromEnv(), fetch, 8_000);
   const me = await Promise.race([signerFor(home, null).address(), new Promise<null>((r) => setTimeout(() => r(null), 5_000))]).catch(() => null);
   const record = readLeagueRecord(home);
@@ -707,7 +713,7 @@ async function leagueStanding(home: string, lang: Lang): Promise<{ lines: string
   }
   const today = await site.league("today", me);
   const season = today && (today.state === "season" || today.state === "over") ? await site.league("season", me) : null;
-  const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered }, lang);
+  const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered, agent }, lang);
   // The page's own rows, without the wallet's address: printed output keeps the home's rule.
   const own = today?.me ? { earners: today.me.earners ? { ...today.me.earners, wallet: undefined } : null, backed: today.me.backed ? { ...today.me.backed, wallet: undefined } : null, eaten: today.me.eaten } : (today?.me ?? null);
   return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own } };
@@ -925,7 +931,7 @@ async function previewCheck(home: string, check: string, coinArg: string | undef
     call = prepared.value.call;
   } else if (check === "claim") {
     // The wallet's own launch, found on the board by its creator; held in memory only.
-    const response = await fetch(`${INDEXER_URL}/v1/board?limit=100`);
+    const response = await fetch(`${indexer()}/v1/board?limit=100`);
     const rows = ((await response.json()) as { data?: { coin: string; creator: string }[] }).data ?? [];
     const mine = rows.find((r) => r.creator.toLowerCase() === wallet.toLowerCase());
     if (!mine) return report({ ok: false, reason: "this wallet has launched no coin" }), 2;
@@ -964,7 +970,7 @@ async function doctor(home: string, json: boolean): Promise<number> {
     checks.push({ what: "wallet", ok: false, detail: `the baw CLI did not answer: ${(error as Error).message}` });
   }
   try {
-    const r = await fetch(`${INDEXER_URL}/api/indexer/status`);
+    const r = await fetch(`${indexer()}/api/indexer/status`);
     const body = (await r.json()) as { verdict?: string; blocksBehind?: number };
     checks.push({ what: "indexer", ok: body.verdict === "serving", detail: `${body.verdict}, ${body.blocksBehind} blocks behind` });
   } catch (error) {

@@ -374,7 +374,8 @@ describe("task 975, addendum 1: the front matter, the gate's two branches and th
 
   it("SKILL §9, setup.md and the README say both branches of the You're in line", () => {
     const before = "it waits for the season and trades from";
-    const on = "the season is on: it starts trading now (autopilot in 30 minutes if you go quiet)";
+    // Addendum 2: once the season is on, the line ends with the instruction to the host.
+    const on = "The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.";
     for (const [file, text] of [["SKILL §9", section9], ["setup.md", read("skills/feast-league/references/setup.md")], ["README.md", read("README.md")]]) {
       expect(text, file).toContain(before);
       expect(text, file).toContain(on);
@@ -387,5 +388,17 @@ describe("task 975, addendum 1: the front matter, the gate's two branches and th
     const log = read("docs/CHANGELOG.md");
     const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
     for (const word of ["the season is on: it starts trading now", "signing domain", "EPERM"]) expect(v5, word).toContain(word);
+  });
+});
+
+describe("task 975, addendum 2: one truth across the copy", () => {
+  const skill = read("skills/feast-league/SKILL.md");
+  it("SKILL tells the host to act on the season-on sentence; no doc gives a seat cap", () => {
+    expect(skill).toContain("The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.");
+    expect(skill).toContain("do it now, in this session");
+    // The seat lines carry no cap (the check card's "taken of cap" is the site's own figure, quoted as data).
+    for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "skills/feast-league/references/register.md", "README.md"]) expect(read(file), file).not.toMatch(/seat \d+ of 1,000|号席位（共 1,000）|The 1,000 seats|1,000 个席位已满|has 1,000 seats/);
+    const log = read("docs/CHANGELOG.md");
+    expect(log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"))).toContain("Decide and trade now");
   });
 });

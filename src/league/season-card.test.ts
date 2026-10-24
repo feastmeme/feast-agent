@@ -15,7 +15,7 @@ describe("the league in the status card (PLAN-941 §6)", () => {
     const season = inSeason({ boards: { earners: [row({ rank: 20 })], backed: [{ ...row(), rank: 33 }] }, counts: { earners: 150, backed: 95 } });
     expect(standingLines({ agentId: "maplegrin", seating: founding, today, season, now }, "en")).toEqual([
       "League · Season 1, day 3 of 7 · next dinner in 5 h 12 min (21:00 UTC+8)",
-      "maplegrin.ai · seat 61 of 1,000 · founding seat #42",
+      "maplegrin.ai · seat 61 · founding seat #42",
       "Top earners today: #12 of 140 (+3.20 USDT, 7 trades). Most backed today: #40 (HP 6).",
       "Season so far, Top earners: #20 of 150 (+3.20 USDT, 7 trades). Most backed: #33 (HP 6).",
       "Your agent runs its preset whatever the league says.",
@@ -46,7 +46,7 @@ describe("the league in the status card (PLAN-941 §6)", () => {
 
   it("before the season and in warm-up, and when not registered or not readable", () => {
     const soon = parseLeague(leagueWire());
-    expect(standingLines({ agentId: "maplegrin", seating: founding, today: soon, season: null, now }, "en")).toEqual(["League · Season 1 · coming soon", "maplegrin.ai · seat 61 of 1,000 · founding seat #42", "Your agent runs its preset whatever the league says."]);
+    expect(standingLines({ agentId: "maplegrin", seating: founding, today: soon, season: null, now }, "en")).toEqual(["League · Season 1 · coming soon", "maplegrin.ai · seat 61 · founding seat #42", "Your agent runs its preset whatever the league says."]);
     const warm = parseLeague(leagueWire({ state: "warm-up", boards: { earners: [row({ rank: 3 })], backed: [] }, counts: { earners: 30, backed: 0 } }));
     expect(standingLines({ agentId: "maplegrin", seating: founding, today: warm, season: null, now }, "en")).toContain("Warm-up ranks don't pay and don't eat.");
     expect(standingLines({ agentId: null, seating: null, today: soon, season: null, now }, "zh")).toEqual(["联赛 · 第 1 季 · 即将开赛", "还没报名联赛。说「报名」即可参加。", "不管联赛怎样，你的 agent 都照常跑它的策略。"]);
@@ -80,3 +80,23 @@ describe("the daily battle card (the owner's ruling, 2026-10-24)", () => {
   });
 });
 
+
+describe("task 975, addendum 2: what actually happens, for a prompt agent", () => {
+  const read = (state: "season" | "warm-up", day: number | null) => parseLeague(leagueWire({ state, season: { number: 1, day, countdownTo: "2026-10-27T13:00:00.000Z" } }))!;
+  const now = Date.parse("2026-10-27T06:00:00Z");
+  const steady = { track: "prompt" as const, autopilot: { preset: "steady", idleMinutes: 30 }, promptFile: "strategy.md" };
+
+  it("in season it ends by telling the host to trade now; before it, the host decides and the backup covers silence", () => {
+    expect(standingLines({ agentId: null, seating: null, today: read("season", 2), season: null, now, agent: steady }, "en").at(-1)).toBe("The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.");
+    expect(standingLines({ agentId: null, seating: null, today: read("season", 2), season: null, now, agent: steady }, "zh").at(-1)).toBe("赛季已经开始。现在就按 strategy.md 决策和交易；你 30 分钟不动，autopilot（steady）就接手。");
+    expect(standingLines({ agentId: null, seating: null, today: read("warm-up", null), season: null, now, agent: steady }, "en").at(-1)).toBe("Whatever the league says, the league never stops your agent: your AI decides by strategy.md, and the autopilot backup (steady) trades only after 30 minutes without its trade.");
+    expect(standingLines({ agentId: null, seating: null, today: read("warm-up", null), season: null, now, agent: { ...steady, autopilot: null } }, "en").at(-1)).toBe("Whatever the league says, the league never stops your agent: your AI decides by strategy.md, and with no autopilot backup nothing trades while it is quiet but the hard stop-loss.");
+  });
+
+  it("no line says a prompt agent runs on its own", () => {
+    for (const lang of ["en", "zh"] as const) for (const today of [read("season", 2), read("warm-up", null)]) {
+      const lines = standingLines({ agentId: null, seating: null, today, season: null, now, agent: steady }, lang).join("\n");
+      expect(lines).not.toMatch(/runs its preset|照常跑它的策略|runs by itself/);
+    }
+  });
+});

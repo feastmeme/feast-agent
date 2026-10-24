@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Address, Hex } from "viem";
 
 import { confirmAgent, loadAgent, saveAgent, type AgentConfig, type PlanInput } from "../agent.ts";
@@ -312,7 +312,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
       }
     }
     lines.push(head, ...(await startStep()));
-    return end(0, true, "done", copy.doneRunning(planned.name, opens, lang, planned.autopilot), { agent: planned.name });
+    return end(0, true, "done", copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md")), { agent: planned.name });
   }
 
   // --- the wallet and its Agent ID ------------------------------------------------------------
@@ -382,7 +382,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const agentSection = () => (planned ? copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot }, lang) : null);
   const finish = async (): Promise<EnterResult> => {
     if (planned) lines.push(...(await startStep()));
-    lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot) : copy.doneLine(lang));
+    lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md")) : copy.doneLine(lang));
     if (composed) return memeStep(composed);
     // Signed in, and the site has not given the seat yet: "registered", not done; a rerun picks it up.
     return end(0, true, record?.registered && record.registered.seat === null ? "registered" : "done", [], { agentId, season, registered: record?.registered ?? null, notes: record?.notes ?? null, agent: planned?.name ?? null });

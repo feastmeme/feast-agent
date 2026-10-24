@@ -1,3 +1,4 @@
+import { tradeNowLine, type AutopilotShown } from "./enter/copy.ts";
 import { seasonLine, seatLine, shortUsd, type Lang } from "./register/copy.ts";
 import { AGENT_ID, shownName } from "./register/message.ts";
 import type { BackedRow, EarnerRow, LeagueRead, Seating } from "./register/site.ts";
@@ -29,6 +30,8 @@ export type StandingInput = {
   site?: string;
   /** The wallet entered with `FL enter` (a body coin on record), with or without a registration. */
   entered?: boolean;
+  /** Task 975: the agent `FL status` is about; a prompt agent's closing line says what actually happens. */
+  agent?: { track: string; autopilot: AutopilotShown; promptFile: string } | null;
 };
 
 type Mine = { earner: EarnerRow | null; backed: BackedRow | null; earnerCut: boolean; backedCut: boolean; eaten: number | null };
@@ -109,6 +112,25 @@ export function standingLines(input: StandingInput, lang: Lang): string[] {
   }
   const day = input.today?.state === "season" ? input.today.season.day : null;
   if (input.site && input.agentId && day !== null && (input.seating || input.entered)) lines.push(...battleCardLines(input.site, input.agentId, day, lang));
-  lines.push(zh ? "不管联赛怎样，你的 agent 都照常跑它的策略。" : "Your agent runs its preset whatever the league says.");
+  lines.push(closingLine(input, lang));
   return lines;
+}
+
+/**
+ * The status card's last line (task 975, addendum 2). A prompt agent does not run by itself: its host decides, the
+ * autopilot backup covers the host's silence; in season the host is told to trade now. Other tracks run their preset.
+ */
+export function closingLine(input: Pick<StandingInput, "today" | "agent">, lang: Lang): string {
+  const zh = lang === "zh";
+  const agent = input.agent;
+  if (!agent || agent.track !== "prompt") return zh ? "不管联赛怎样，你的 agent 都照常跑它的策略。" : "Your agent runs its preset whatever the league says.";
+  if (input.today?.state === "season") return tradeNowLine(agent.autopilot, agent.promptFile, lang);
+  const a = agent.autopilot;
+  if (zh)
+    return a
+      ? `不管联赛怎样，联赛都不会停下你的 agent：你的 AI 按 ${agent.promptFile} 决策，autopilot 兜底（${a.preset}）只在它 ${a.idleMinutes} 分钟没有交易后才交易。`
+      : `不管联赛怎样，联赛都不会停下你的 agent：你的 AI 按 ${agent.promptFile} 决策；没有 autopilot 兜底，它不动时除了硬止损什么都不交易。`;
+  return a
+    ? `Whatever the league says, the league never stops your agent: your AI decides by ${agent.promptFile}, and the autopilot backup (${a.preset}) trades only after ${a.idleMinutes} minutes without its trade.`
+    : `Whatever the league says, the league never stops your agent: your AI decides by ${agent.promptFile}, and with no autopilot backup nothing trades while it is quiet but the hard stop-loss.`;
 }

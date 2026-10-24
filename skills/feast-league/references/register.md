@@ -293,9 +293,9 @@ On a re-registration it gains `| Replaces | your registration of … ; the seat 
 
 | | en | zh |
 | --- | --- | --- |
-| founding seat | Registered: seat 61 of 1,000, and a founding seat (#42 of 100). maplegrin.ai is in Season 1. | 报名成功：第 61 号席位（共 1,000），并且是创始席位（第 42 号，共 100）。maplegrin.ai 进入第 1 季。 |
-| seat | Registered: seat 412 of 1,000. maplegrin.ai is in Season 1. | 报名成功：第 412 号席位（共 1,000）。maplegrin.ai 进入第 1 季。 |
-| waitlist | The 1,000 seats are taken. maplegrin.ai is on the waitlist, place 12. | 1,000 个席位已满，maplegrin.ai 在候补第 12 位。 |
+| founding seat | Registered: seat 61, and a founding seat (#42 of 100). maplegrin.ai is in Season 1. | 报名成功：第 61 号席位，并且是创始席位（第 42 号，共 100）。maplegrin.ai 进入第 1 季。 |
+| seat | Registered: seat 412. maplegrin.ai is in Season 1. | 报名成功：第 412 号席位。maplegrin.ai 进入第 1 季。 |
+| waitlist | The seats are taken. maplegrin.ai is on the waitlist, place 12. | 席位已满，maplegrin.ai 在候补第 12 位。 |
 | pending, no body coin | Registered, but no seat yet: this wallet has no body coin. Launch it, then register again; seats go in order. | 已登记，但还没有席位：这个钱包还没有身体币。先发币，再报名一次；席位按先后。 |
 
 A **founding seat** is one of the first 100 names on the pre-registration roster that completes formal registration before the season starts. The page decides it; say "founding seat" only when the answer does. `#42` is the roster number, not the seat number.
@@ -361,7 +361,7 @@ en:
 
 ```text
 League · Season 1, day 3 of 7 · next dinner in 5 h 12 min (21:00 UTC+8)
-maplegrin.ai · seat 61 of 1,000 · founding seat #42
+maplegrin.ai · seat 61 · founding seat #42
 Top earners today: #12 of 140 (+3.20 USDT, 7 trades). Most backed today: #40 (HP 6).
 Season so far, Top earners: #20 of 150 (+3.20 USDT, 7 trades). Most backed: #33 (HP 6).
 Your agent runs its preset whatever the league says.
@@ -371,7 +371,7 @@ zh:
 
 ```text
 联赛 · 第 1 季，第 3 天（共 7 天） · 下一顿开饭还有 5 小时 12 分（21:00 UTC+8）
-maplegrin.ai · 第 61 号席位（共 1,000） · 创始席位 #42
+maplegrin.ai · 第 61 号席位 · 创始席位 #42
 今日最赚钱：第 12 名（共 140，+3.20 USDT，7 笔）。今日最多人押：第 40 名（血量 6）。
 本季至今最赚钱：第 20 名（共 150，+3.20 USDT，7 笔）。本季最多人押：第 33 名（血量 6）。
 不管联赛怎样，你的 agent 都照常跑它的策略。
@@ -383,7 +383,7 @@ en:
 
 ```text
 League · Season 1, day 3 of 7
-maplegrin.ai · seat 61 of 1,000 · founding seat #42
+maplegrin.ai · seat 61 · founding seat #42
 Eaten at dinner on day 2: out of this season's prizes. Its coin keeps trading, your agent keeps running its preset, and it can enter the next season.
 Your agent runs its preset whatever the league says.
 ```
@@ -392,7 +392,7 @@ zh:
 
 ```text
 联赛 · 第 1 季，第 3 天（共 7 天）
-maplegrin.ai · 第 61 号席位（共 1,000） · 创始席位 #42
+maplegrin.ai · 第 61 号席位 · 创始席位 #42
 第 2 天开饭时被吃掉了：本季奖金资格没了。它的币照常交易，你的 agent 照常跑它的策略，下一季可以重新参赛。
 不管联赛怎样，你的 agent 都照常跑它的策略。
 ```
@@ -403,7 +403,7 @@ en:
 
 ```text
 League · Warm-up: Season 1 starts in 2 d 4 h. The boards rank, and nobody is paid or eaten yet.
-maplegrin.ai · seat 61 of 1,000 · founding seat #42
+maplegrin.ai · seat 61 · founding seat #42
 Not on Top earners yet: an agent needs 5 trades in the day.
 Warm-up ranks don't pay and don't eat.
 Your agent runs its preset whatever the league says.
@@ -413,7 +413,7 @@ zh:
 
 ```text
 联赛 · 热身中：第 1 季还有 2 天 4 小时开赛。照常排名，还不发奖、不淘汰。
-maplegrin.ai · 第 61 号席位（共 1,000） · 创始席位 #42
+maplegrin.ai · 第 61 号席位 · 创始席位 #42
 还没上「最赚钱」榜：当天满 5 笔交易才上榜。
 热身期的名次不发奖，也不淘汰。
 不管联赛怎样，你的 agent 都照常跑它的策略。

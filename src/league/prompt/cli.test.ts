@@ -209,3 +209,38 @@ describe("task 975: FL status shows the day's count", () => {
     expect(human.stdout).toContain("autopilot: steady, after 30 min with no trade from your agent");
   }, 60_000);
 });
+
+describe("task 975, addendum 2: FL status in season, and FL doctor's indexer", () => {
+  it("once the season is open, FL status ends by telling the host to trade now (no league block needed)", async () => {
+    const { env, prompt, home } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady" });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, { ...confirmAgent(planned.agent), league: { waitForSeason: true } });
+    const { writeGate } = await import("../season-gate.ts");
+    writeGate(home, "demo", { state: "open", opensAt: "2026-10-26T12:00:00.000Z", at: new Date().toISOString() });
+    const out = await run(["status", "demo", "--no-league"], env);
+    expect(out.stdout.trimEnd().split("\n").at(-1)).toBe("The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.");
+    writeGate(home, "demo", { state: "waiting", opensAt: "2026-10-26T12:00:00.000Z", at: new Date().toISOString() });
+    expect((await run(["status", "demo", "--no-league"], env)).stdout).not.toContain("Decide and trade now");
+  }, 60_000);
+
+  it("FL doctor asks the indexer FEAST_LEAGUE_INDEXER names, not the production one", async () => {
+    const { createServer } = await import("node:http");
+    const asked: string[] = [];
+    const server = createServer((req, res) => {
+      asked.push(req.url ?? "");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ verdict: "serving", blocksBehind: 0 }));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    try {
+      const { env } = setup();
+      const port = (server.address() as { port: number }).port;
+      const out = await run(["doctor"], { ...env, FEAST_LEAGUE_INDEXER: `http://127.0.0.1:${port}` });
+      expect(asked).toContain("/api/indexer/status");
+      expect(out.stdout).toContain("ok  indexer: serving, 0 blocks behind");
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  }, 60_000);
+});

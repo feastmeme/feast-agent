@@ -181,7 +181,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
     expect(w.starts).toEqual([{ name: ID, noJitter: false }]);
     expect(loadAgent(w.home, ID)).toMatchObject({ track: "prompt", league: { waitForSeason: true }, confirmed: { at: expect.any(String) } });
     expect(out.text.split("\n").slice(-4)).toEqual([
-      "Registered: seat 7 of 1,000, and a founding seat (#7 of 100). maplegrin.ai is in Season 1.",
+      "Registered: seat 7, and a founding seat (#7 of 100). maplegrin.ai is in Season 1.",
       "Notes session open for maplegrin.ai, season 1: your agent's notes reach feast.meme.",
       'started "maplegrin" in the background (pid 4242); FL status maplegrin',
       `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
@@ -775,15 +775,18 @@ describe("task 975, addendum 1: entering once the season is on, and the signing 
     expect(card.text).toContain(`The season is on: it starts trading now (autopilot in 30 minutes if you go quiet).\n${ON_EN}`);
     expect(card.text).not.toMatch(/waits for the season|Starts now and waits/);
     const out = await w.run({ yes: true });
+    // Addendum 2: once the season is on, the line ends by telling the host to trade now.
     expect(lastLine(out.text)).toBe(
-      `You're in, and maplegrin is running: the season is on: it starts trading now (autopilot in 30 minutes if you go quiet). ${ON_EN} If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+      `You're in, and maplegrin is running. ${ON_EN} If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.`,
     );
   });
 
   it("the season on, zh; and with --no-autopilot no autopilot is promised", async () => {
     const zh = world({ page: { league: ON }, now: TUESDAY });
     expect((await zh.run({ lang: "zh" })).text).toContain("赛季已经开始：它现在就开始交易（你 30 分钟不动，autopilot 就接手）。");
-    expect(lastLine((await zh.run({ lang: "zh", yes: true })).text)).toContain("你已报名，「maplegrin」正在运行：赛季已经开始，它现在就开始交易（你 30 分钟不动，autopilot 就接手）。");
+    const zhDone = lastLine((await zh.run({ lang: "zh", yes: true })).text)!;
+    expect(zhDone.startsWith("你已报名，「maplegrin」正在运行。")).toBe(true);
+    expect(zhDone.endsWith("赛季已经开始。现在就按 strategy.md 决策和交易；你 30 分钟不动，autopilot（steady）就接手。")).toBe(true);
     const off = world({ page: { league: ON }, now: TUESDAY });
     const card = await off.run({ noAutopilot: true });
     expect(card.text).toContain("The season is on: it starts trading now.\n");
@@ -833,5 +836,28 @@ describe("task 975, addendum 1: the entry card's last row follows the gate", () 
     const text = (await on.run()).text;
     expect(text).toContain('your agent "maplegrin" starts and, the season being on, trades now (its card is below)');
     expect(text).not.toContain("waits for the season");
+  });
+});
+
+describe("task 975, addendum 2: once the season is on, the You're in line tells the host to trade now", () => {
+  const ON = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-27T13:00:00.000Z" } });
+  const TUESDAY = Date.parse("2026-10-27T06:00:00Z");
+
+  it("it ends with the instruction, naming the prompt file it trades by and the preset; with --no-autopilot it says nothing covers silence", async () => {
+    const w = world({ page: { league: ON }, now: TUESDAY });
+    writeFileSync(join(w.cwd, "mine.md"), "Momentum, small.\n");
+    await w.run({ prompt: join(w.cwd, "mine.md"), autopilot: "momentum", idleMinutes: 45 });
+    const out = await w.run({ prompt: join(w.cwd, "mine.md"), autopilot: "momentum", idleMinutes: 45, yes: true });
+    expect(lastLine(out.text)!.endsWith("The season is on. Decide and trade now by mine.md; if you go quiet for 45 minutes, autopilot (momentum) takes over.")).toBe(true);
+    const off = world({ page: { league: ON }, now: TUESDAY });
+    await off.run({ noAutopilot: true });
+    const quiet = await off.run({ noAutopilot: true, yes: true });
+    expect(lastLine(quiet.text)!.endsWith("The season is on. Decide and trade now by strategy.md; with no autopilot backup, nothing trades while you are quiet but the hard stop-loss.")).toBe(true);
+  });
+
+  it("before the season it does not: the line still says it waits", async () => {
+    const w = world();
+    await w.run();
+    expect(lastLine((await w.run({ yes: true })).text)).not.toContain("Decide and trade now");
   });
 });

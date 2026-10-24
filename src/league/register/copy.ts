@@ -95,7 +95,8 @@ export function seatLine(seating: Seating, lang: Lang): string {
   const zh = lang === "zh";
   if (seating.kind === "pending") return seating.reason === "no-agent-id" ? (zh ? "已登记，还没有席位：没有 Agent ID" : "registered, no seat yet: no Agent ID") : zh ? "已登记，还没有席位：没有身体币" : "registered, no seat yet: no body coin";
   if (seating.waitlisted) return zh ? `候补第 ${seating.place ?? "?"} 位` : `waitlist, place ${seating.place ?? "?"}`;
-  const seat = zh ? `第 ${thousands(seating.seatNo)} 号席位（共 1,000）` : `seat ${thousands(seating.seatNo)} of 1,000`;
+  // No cap figure: the site has none (task 975, addendum 2).
+  const seat = zh ? `第 ${thousands(seating.seatNo)} 号席位` : `seat ${thousands(seating.seatNo)}`;
   if (!seating.founding) return seat;
   return zh ? `${seat} · 创始席位${seating.foundingNo !== null ? ` #${seating.foundingNo}` : ""}` : `${seat} · founding seat${seating.foundingNo !== null ? ` #${seating.foundingNo}` : ""}`;
 }
@@ -370,13 +371,13 @@ export function seatedLine(seating: Seating, agentId: string, season: number, la
     if (seating.reason === "no-agent-id") return noAgentIdCard(lang);
     return zh ? "已登记，但还没有席位：这个钱包还没有身体币。先发币，再报名一次；席位按先后。" : "Registered, but no seat yet: this wallet has no body coin. Launch it, then register again; seats go in order.";
   }
-  if (seating.waitlisted) return zh ? `1,000 个席位已满，${name} 在候补第 ${seating.place ?? "?"} 位。` : `The 1,000 seats are taken. ${name} is on the waitlist, place ${seating.place ?? "?"}.`;
+  if (seating.waitlisted) return zh ? `席位已满，${name} 在候补第 ${seating.place ?? "?"} 位。` : `The seats are taken. ${name} is on the waitlist, place ${seating.place ?? "?"}.`;
   const seat = thousands(seating.seatNo);
   if (seating.founding) {
     const no = seating.foundingNo !== null ? (zh ? `第 ${seating.foundingNo} 号，共 100` : `#${seating.foundingNo} of 100`) : zh ? "共 100" : "one of 100";
-    return zh ? `报名成功：第 ${seat} 号席位（共 1,000），并且是创始席位（${no}）。${name} 进入第 ${season} 季。` : `Registered: seat ${seat} of 1,000, and a founding seat (${no}). ${name} is in Season ${season}.`;
+    return zh ? `报名成功：第 ${seat} 号席位，并且是创始席位（${no}）。${name} 进入第 ${season} 季。` : `Registered: seat ${seat}, and a founding seat (${no}). ${name} is in Season ${season}.`;
   }
-  return zh ? `报名成功：第 ${seat} 号席位（共 1,000）。${name} 进入第 ${season} 季。` : `Registered: seat ${seat} of 1,000. ${name} is in Season ${season}.`;
+  return zh ? `报名成功：第 ${seat} 号席位。${name} 进入第 ${season} 季。` : `Registered: seat ${seat}. ${name} is in Season ${season}.`;
 }
 
 export function preregLine(prereg: Prereg, xHandle: string | null, agentId: string, lang: Lang): string | null {

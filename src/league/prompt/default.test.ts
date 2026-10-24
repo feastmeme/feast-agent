@@ -116,3 +116,15 @@ describe("agents planned before league-v5", () => {
     expect(loadAgent(home, "demo")).toMatchObject({ preset: "steady", autopilot: { idleMinutes: 30 }, confirmed: null });
   });
 });
+
+describe("addendum 2: the default card never says nothing trades", () => {
+  it("planned as FL start --prompt plans it, the card names the preset and its minutes, and no 'none'", () => {
+    const { promptPath } = setup();
+    const choice = autopilotChoice({});
+    const planned = planAgent({ name: "demo", promptPath, preset: choice.ok ? choice.preset : undefined });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    const card = renderCard(planned.agent);
+    expect(card).toContain("Autopilot backup: on. If your agent makes no FL buy or FL sell for 30 min, the steady preset");
+    expect(card).not.toMatch(/Autopilot: none|Nothing trades on its own/);
+  });
+});

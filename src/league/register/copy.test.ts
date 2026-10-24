@@ -93,7 +93,7 @@ describe("the cards (PLAN-941 §1)", () => {
     expect(checkCard(view, "zh")).toContain("下一步：先发身体币（一笔交易），再签名报名（不花 gas）。");
     const seated = { ...view, plan: { kind: "coin" as const, coin: COIN, why: "fixed" as const, others: [], launchedAt: null }, coin: { coin: COIN, symbol: "MAPLEGRIN" }, keptSeating: { kind: "seated" as const, seatNo: 61, founding: true, foundingNo: 42, waitlisted: false, place: null } };
     expect(checkCard(seated, "en")).toContain("| Body coin | MAPLEGRIN · 0x0000…feed, fixed for this season |");
-    expect(checkCard(seated, "en")).toContain("| Registration | seat 61 of 1,000 · founding seat #42 |");
+    expect(checkCard(seated, "en")).toContain("| Registration | seat 61 · founding seat #42 |");
   });
 
   it("D: the registration card, with the replaced registration and a pending one", () => {
@@ -110,9 +110,9 @@ describe("the cards (PLAN-941 §1)", () => {
   });
 
   it("F: every seat says what it is", () => {
-    expect(seatedLine({ kind: "seated", seatNo: 61, founding: true, foundingNo: 42, waitlisted: false, place: null }, "maplegrin", 1, "en")).toBe("Registered: seat 61 of 1,000, and a founding seat (#42 of 100). maplegrin.ai is in Season 1.");
-    expect(seatedLine({ kind: "seated", seatNo: 412, founding: false, foundingNo: null, waitlisted: false, place: null }, "maplegrin", 1, "zh")).toBe("报名成功：第 412 号席位（共 1,000）。maplegrin.ai 进入第 1 季。");
-    expect(seatedLine({ kind: "seated", seatNo: 1_012, founding: false, foundingNo: null, waitlisted: true, place: 12 }, "maplegrin", 1, "en")).toBe("The 1,000 seats are taken. maplegrin.ai is on the waitlist, place 12.");
+    expect(seatedLine({ kind: "seated", seatNo: 61, founding: true, foundingNo: 42, waitlisted: false, place: null }, "maplegrin", 1, "en")).toBe("Registered: seat 61, and a founding seat (#42 of 100). maplegrin.ai is in Season 1.");
+    expect(seatedLine({ kind: "seated", seatNo: 412, founding: false, foundingNo: null, waitlisted: false, place: null }, "maplegrin", 1, "zh")).toBe("报名成功：第 412 号席位。maplegrin.ai 进入第 1 季。");
+    expect(seatedLine({ kind: "seated", seatNo: 1_012, founding: false, foundingNo: null, waitlisted: true, place: 12 }, "maplegrin", 1, "en")).toBe("The seats are taken. maplegrin.ai is on the waitlist, place 12.");
     expect(seatedLine({ kind: "pending", reason: "no-body-coin" }, "maplegrin", 1, "en")).toContain("seats go in order");
   });
 

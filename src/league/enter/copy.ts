@@ -221,6 +221,21 @@ export function autopilotLine(autopilot: AutopilotShown, lang: Lang): string {
   return zh ? "autopilot 兜底已关：除了硬止损，只有你的 agent 自己交易；去掉 `--no-autopilot` 重新规划即可再开。" : "Autopilot backup is off: only your agent trades, besides the hard stop-loss; plan again without `--no-autopilot` to turn it back on.";
 }
 
+/**
+ * Once the season is on, the host is told in so many words to start (task 975, addendum 2: in the rehearsal a host
+ * that was not told ended its session; told, it traded at once). The "You're in" line and `FL status` end with it.
+ */
+export function tradeNowLine(autopilot: AutopilotShown, promptFile: string, lang: Lang): string {
+  const zh = lang === "zh";
+  if (autopilot)
+    return zh
+      ? `赛季已经开始。现在就按 ${promptFile} 决策和交易；你 ${autopilot.idleMinutes} 分钟不动，autopilot（${autopilot.preset}）就接手。`
+      : `The season is on. Decide and trade now by ${promptFile}; if you go quiet for ${autopilot.idleMinutes} minutes, autopilot (${autopilot.preset}) takes over.`;
+  return zh
+    ? `赛季已经开始。现在就按 ${promptFile} 决策和交易；没有 autopilot 兜底，你不动时除了硬止损什么都不交易。`
+    : `The season is on. Decide and trade now by ${promptFile}; with no autopilot backup, nothing trades while you are quiet but the hard stop-loss.`;
+}
+
 export type StrategyShown = { kind: "default"; path: string } | { kind: "existing"; path: string } | { kind: "given"; path: string };
 
 export function strategyLine(view: StrategyShown, name: string, lang: Lang): string {
@@ -444,14 +459,17 @@ export function doneLine(lang: Lang): string {
 }
 
 /** After the entry that started the agent (task 968), with its autopilot backup (task 975). */
-export function doneRunning(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown): string {
+export function doneRunning(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown, promptFile = "strategy.md"): string {
   const zh = lang === "zh";
-  const when =
-    opens.kind === "open" ? seasonOn(lang, autopilot ?? undefined, false) : opens.kind === "at" ? (zh ? `它等待赛季开始，从 ${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
   const backup = autopilot !== undefined ? `${autopilotLine(autopilot, lang)}${zh ? "" : " "}` : "";
-  return zh
-    ? `你已报名，「${name}」正在运行：${when}。${backup}如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`
-    : `You're in, and ${name} is running: ${when}. ${backup}If it stops, run \`FL start ${name}\`. A changed strategy.md needs \`FL start ${name} --prompt strategy.md\`, its new card and your yes.`;
+  const after = zh
+    ? `如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`
+    : `If it stops, run \`FL start ${name}\`. A changed strategy.md needs \`FL start ${name} --prompt strategy.md\`, its new card and your yes.`;
+  // The season on: the line ends by telling the host to trade now (addendum 2).
+  if (opens.kind === "open") return zh ? `你已报名，「${name}」正在运行。${backup}${after}${tradeNowLine(autopilot ?? null, promptFile, lang)}` : `You're in, and ${name} is running. ${backup}${after} ${tradeNowLine(autopilot ?? null, promptFile, lang)}`;
+  const when =
+    opens.kind === "at" ? (zh ? `它等待赛季开始，从 ${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
+  return zh ? `你已报名，「${name}」正在运行：${when}。${backup}${after}` : `You're in, and ${name} is running: ${when}. ${backup}${after}`;
 }
 
 export function alreadyEntered(view: { agentId: string; coin: string | null; notes: string | null; season?: number | null; seat?: number | null }, lang: Lang): string {
