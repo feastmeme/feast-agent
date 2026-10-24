@@ -42,16 +42,22 @@ export function askArgv(w: "claude" | "codex", o: { cwd: string; schemaPath: str
   if (w === "claude")
     return {
       command: "claude",
-      args: ["-p", "--output-format", "json", "--max-turns", "1", "--tools", "", "--no-session-persistence", "--json-schema", JSON.stringify(ANSWER_SCHEMA), ...(o.model ? ["--model", o.model] : [])],
+      // No tools, no MCP server, no slash command or skill, one turn: the pack's untrusted text has nothing to drive.
+      args: ["-p", "--output-format", "json", "--max-turns", "1", "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--json-schema", JSON.stringify(ANSWER_SCHEMA), ...(o.model ? ["--model", o.model] : [])],
     };
   // The prompt is read from stdin: no positional argument (codex exec reads stdin when none is given).
   return { command: "codex", args: ["exec", "--json", "-s", "read-only", "--skip-git-repo-check", "--ephemeral", "-C", o.cwd, "--output-schema", o.schemaPath, "-o", o.lastMessagePath, ...(o.model ? ["-m", o.model] : [])] };
 }
 
-/** The child's environment: the parent's, without `CLAUDECODE`, so a runtime started inside a Claude Code session can still call `claude -p`. */
+/**
+ * The child's environment: the parent's, without `CLAUDECODE` (so a runtime started inside a Claude Code session can
+ * still call `claude -p`), and without the runtime's own settings (`FEAST_*`, `LEAGUE_*`, `BAW*`: an RPC URL may carry
+ * a key, and the child needs none of them). Everything else stays: the player's login may live in any of it.
+ */
 export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out = { ...env };
   delete out.CLAUDECODE;
+  for (const key of Object.keys(out)) if (/^(FEAST_|LEAGUE_|BAW)/.test(key)) delete out[key];
   return out;
 }
 

@@ -1,0 +1,258 @@
+{
+  "asOf": "string",
+  "coins": [
+    {
+      "ageMinutes": "number",
+      "bodyCoin": "boolean",
+      "change": {
+        "h1": "null",
+        "h24": "null",
+        "m15": "null",
+        "m5": "number"
+      },
+      "coin": "string",
+      "creator": "string",
+      "flow2m": {
+        "buyBnb": "number",
+        "buys": "number",
+        "largestBnb": "number",
+        "netBnb": "number",
+        "sellBnb": "number",
+        "sells": "number"
+      },
+      "holders": "number",
+      "impactPct": "null",
+      "lastTradeAt": "string",
+      "launchedAt": "string",
+      "marketCapBnb": "number",
+      "name": {
+        "text": "string",
+        "untrusted": "boolean"
+      },
+      "own": "boolean",
+      "picked": "boolean",
+      "priceBnb": "number",
+      "quote": {
+        "address": "string",
+        "symbol": {
+          "text": "string",
+          "untrusted": "boolean"
+        }
+      },
+      "quoteSymbol": "string",
+      "roundTripFeePct": "number",
+      "symbol": {
+        "text": "string",
+        "untrusted": "boolean"
+      },
+      "trades24h": "number",
+      "type": "string",
+      "underlying": "null",
+      "volume": {
+        "h1": "number",
+        "m15": "number",
+        "m5": "number"
+      },
+      "volume24hBnb": "number"
+    }
+  ],
+  "launches": [],
+  "league": {
+    "arena": [
+      {
+        "bodyCoin": "null",
+        "danger": "boolean",
+        "eaten": "boolean",
+        "model": "string",
+        "name": {
+          "text": "string",
+          "untrusted": "boolean"
+        },
+        "note": "null",
+        "pnlBnb": "number",
+        "seasonBnb": "number",
+        "trades": "number",
+        "viewer": "boolean",
+        "wallet": "string"
+      }
+    ],
+    "boards": {
+      "backed": [],
+      "earners": []
+    },
+    "counts": {
+      "backed": "number",
+      "earners": "number"
+    },
+    "dinner": "null",
+    "idleRule": {
+      "asOf": "string",
+      "floorBnb": "number",
+      "floorTrades": "number",
+      "text": "string"
+    },
+    "me": "null",
+    "nextDinnerAt": "string",
+    "rules": [
+      {
+        "rule": "string",
+        "source": "string",
+        "text": "string"
+      }
+    ],
+    "season": {
+      "day": "number",
+      "number": "number"
+    },
+    "standing": {
+      "alive": "number",
+      "cutoff": {
+        "bottom": "number",
+        "cutoffPnlBnb": "null",
+        "me": "string",
+        "passing": "number",
+        "toSafetyBnb": "null"
+      },
+      "danger": [],
+      "gapDownBnb": "null",
+      "gapUpBnb": "null",
+      "pnlBnb": "number",
+      "rank": "number"
+    },
+    "startsAt": "null",
+    "state": "string",
+    "timeLeft": "string",
+    "window": "null"
+  },
+  "market": {
+    "ageSeconds": "number",
+    "blocksBehind": "number",
+    "coinsListed": "number",
+    "coinsOmitted": "number",
+    "coinsTotal": "number",
+    "generatedAt": "string",
+    "mostActive": [
+      "string"
+    ]
+  },
+  "missing": [],
+  "note": "string",
+  "ok": "boolean",
+  "partial": "boolean",
+  "problems": [],
+  "quietCoins": "number",
+  "requests": {
+    "thisCall": "number"
+  },
+  "self": {
+    "agent": "string",
+    "autopilot": {
+      "active": "boolean",
+      "idleMinutes": "number",
+      "preset": "string"
+    },
+    "avgGasBnb": "number",
+    "capital": {
+      "budgetBnb": "number",
+      "capBnb": "number",
+      "leftBnb": "number",
+      "spentBnb": "number"
+    },
+    "day": {
+      "endsAt": "string",
+      "floor": {
+        "trades": "number",
+        "volumeBnb": "number"
+      },
+      "passed": "boolean",
+      "startsAt": "string",
+      "trades": "number",
+      "volumeBnb": "number"
+    },
+    "headroom": {
+      "cooldowns": [],
+      "drawdownBnb": "number",
+      "exposureBnb": "number",
+      "leftExposureBnb": "number",
+      "leftLoss24hBnb": "number",
+      "leftSeasonBnb": "number",
+      "leftTodayBnb": "number",
+      "maxDrawdownBnb": "number",
+      "maxOpenPositions": "number",
+      "maxTradeBnb": "number",
+      "maxTradesPerHour": "number",
+      "minTradeBnb": "number",
+      "openPositions": "number",
+      "realizedLoss24hBnb": "number",
+      "spent24hBnb": "number",
+      "trades1h": "number"
+    },
+    "lastAction": "null",
+    "lastActionAt": "null",
+    "lastTradeAt": "string",
+    "otherBooks": [],
+    "ownCoin": [],
+    "paused": "null",
+    "pnl": {
+      "gasBnb": "number",
+      "realizedBnb": "number",
+      "unmarked": "number",
+      "unrealizedBnb": "number"
+    },
+    "positions": [
+      {
+        "ageMinutes": "number",
+        "armed": "boolean",
+        "coin": "string",
+        "coins": "number",
+        "costBnb": "number",
+        "exitImpactPct": "number",
+        "markBnb": "number",
+        "openedAt": "string",
+        "peakPnlPct": "number",
+        "pnlBnb": "number",
+        "pnlPct": "number",
+        "symbol": {
+          "text": "string",
+          "untrusted": "boolean"
+        }
+      }
+    ],
+    "preset": "string",
+    "prompt": {
+      "changed": "boolean",
+      "path": "string",
+      "sha256": "string"
+    },
+    "recentFills": [
+      {
+        "at": "string",
+        "bnb": "number",
+        "coin": "string",
+        "filledOut": "string",
+        "gasBnb": "number",
+        "quotedOut": "string",
+        "side": "string",
+        "slippagePct": "number",
+        "txHash": "null"
+      }
+    ],
+    "running": "boolean",
+    "stop": "null",
+    "track": "string",
+    "wallet": {
+      "balanceBnb": "number",
+      "gasReserveBnb": "number",
+      "spendableBnb": "number"
+    }
+  },
+  "source": "string",
+  "units": "string",
+  "untrusted": [
+    "string"
+  ],
+  "usdRef": {
+    "at": "string",
+    "bnbUsd": "number"
+  }
+}

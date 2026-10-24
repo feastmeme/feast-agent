@@ -139,7 +139,7 @@ export function buildPack(input: PackInput): Pack {
   const strategy = input.prompt.text === null ? "(the strategy file cannot be read)" : input.prompt.text.length > STRATEGY_MAX_CHARS ? `${input.prompt.text.slice(0, STRATEGY_MAX_CHARS)}\n(… cut at ${STRATEGY_MAX_CHARS} characters)` : input.prompt.text;
   const coinRow = (c: CoinPicture) => {
     const w = c.windows;
-    const tags = [input.own.has(c.coin.toLowerCase()) || c.own ? "your own coin" : null, held.has(c.coin.toLowerCase()) ? "held" : null, c.meta.type === "bnb" ? "WBNB pair" : `stock-paired (${c.meta.quoteSymbol}${c.meta.underlying ? `, underlying ${c.meta.underlying}` : ""})`].filter(Boolean).join(", ");
+    const tags = [input.own.has(c.coin.toLowerCase()) || c.own ? "your own coin" : null, held.has(c.coin.toLowerCase()) ? "held" : null, c.meta.type === "bnb" ? "WBNB pair" : `stock-paired (${shown(c.meta.quoteSymbol, 12)}${c.meta.underlying ? `, underlying ${shown(c.meta.underlying, 12)}` : ""})`].filter(Boolean).join(", ");
     return `${idOf.get(c.coin.toLowerCase())} | ${shown(c.symbol)} | ${c.priceBnb === null ? "?" : c.priceBnb.toPrecision(4)} | ${bnb(c.meta.marketCapBnb)} | ${pct(w?.change.m5)} ${pct(w?.change.m15)} ${pct(w?.change.h1)} ${pct(w?.change.h24)} | ${bnb(w?.volume.m15)} ${bnb(w?.volume.h1)} ${bnb(c.volume24hBnb)} | ${c.flow2m.buys}/${c.flow2m.sells} ${bnb(c.flow2m.netBnb)} max ${bnb(c.flow2m.largestBnb)} | ${c.trades24h ?? "?"} | ${c.holders ?? "?"} | ${c.ageMinutes ?? "?"} min | ${c.impactPct === null ? "?" : `${c.impactPct}%`} | ${tags}`;
   };
   const st = input.standing;

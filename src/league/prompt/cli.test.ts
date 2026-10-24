@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { confirmAgent, planAgent, saveAgent } from "../agent.ts";
 import { runAgent } from "../runtime.ts";
-import { agentPaths, writeStop } from "../store.ts";
+import { agentPaths, writeJsonAtomic, writeStop } from "../store.ts";
 import { tradeWorld } from "./fakes.ts";
 
 /**
@@ -264,5 +264,94 @@ describe("task 975, addendum 3: FL status says to keep the machine awake, and wh
     expect(after.stdout).toContain(`slept 45 minutes at ${utc8(from)} UTC+8`);
     const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as { slept: unknown };
     expect(data.slept).toEqual({ at: new Date(from).toISOString(), minutes: 45 });
+  }, 60_000);
+});
+
+describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote, through the binary", () => {
+  it("--ask-with claude plans the ask loop under the card; --every keeps 2–120; --no-autopilot with --every is refused; a model's name is never a flag", async () => {
+    const { env, prompt, home } = setup();
+    const { loadAgent } = await import("../agent.ts");
+    const ok = await run(["plan", "asker", "--prompt", prompt, "--ask-with", "claude", "--every", "10"], env);
+    expect(ok.code).toBe(0);
+    expect(ok.stdout).toContain("Ask loop: every 10 min with no FL buy or FL sell from your agent, the runtime asks Claude Code (`claude -p`, on your own login, its default model) what to do now");
+    expect(ok.stdout).toContain("Floor keeper: the steady preset (Steady floor keeper) trades only when Claude Code cannot be reached twice in a row, and 20 minutes before dinner while the day's floor is unmet");
+    expect(loadAgent(home, "asker")).toMatchObject({ preset: "steady", ask: { every: 10, with: "claude", model: null } });
+    for (const bad of ["1", "121", "abc"]) {
+      const out = await run(["plan", `bad${bad}`, "--prompt", prompt, "--ask-with", "codex", "--every", bad], env);
+      expect(out.code, bad).toBe(2);
+      expect(out.stdout, bad).toContain("--every is 2–120 whole minutes");
+    }
+    const both = await run(["plan", "both", "--prompt", prompt, "--no-autopilot", "--every", "5"], env);
+    expect(both.code).toBe(2);
+    expect(both.stdout.trim()).toBe("--every and --ask-with go with the autopilot: --no-autopilot means no asks and no floor keeper");
+    expect((await run(["plan", "evil", "--prompt", prompt, "--ask-with", "claude", "--ask-model", "--dangerously-skip-permissions"], env)).code).not.toBe(0);
+    // Grok and other hosts are asked by nobody: the floor keeper as in league-v5.
+    expect(loadAgent(home, "both")).toBeNull();
+    const other = await run(["plan", "other", "--prompt", prompt], env);
+    expect(other.stdout).toContain("Autopilot backup: on. If your agent makes no FL buy or FL sell for 30 min");
+    expect(loadAgent(home, "other")).toMatchObject({ ask: { every: 5, with: "none" } });
+  }, 60_000);
+
+  it("FL every changes the interval without a new card; out of range, or an agent with no ask loop, refused", async () => {
+    const { env, prompt, home } = setup();
+    const { loadAgent } = await import("../agent.ts");
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "codex", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const out = await run(["every", "demo", "15"], env);
+    expect(out.code).toBe(0);
+    expect(out.stdout.trim()).toBe('"demo" asks Codex every 15 min from now on');
+    expect(loadAgent(home, "demo")).toMatchObject({ ask: { every: 15 }, confirmed: { at: expect.any(String) } });
+    expect((await run(["every", "demo", "200"], env)).code).toBe(2);
+    expect((await run(["every", "maple", "10"], env)).code).not.toBe(0);
+  }, 60_000);
+
+  it("FL ask --print prints the pack and sends nothing to any AI; FL ask into an agent that is not running says how; FL quote with no chain says so in one line", async () => {
+    const { env, prompt, home } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "claude", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    // A claude on PATH that would write down that it was called: it must not be.
+    const { mkdirSync: mk, writeFileSync: wf, chmodSync: ch, existsSync: ex } = await import("node:fs");
+    const bin = join(home, "..", "bin");
+    mk(bin, { recursive: true });
+    const touched = join(home, "..", "claude-was-called");
+    wf(join(bin, "claude"), `#!/bin/sh\ntouch ${JSON.stringify(touched)}\n`);
+    ch(join(bin, "claude"), 0o755);
+    const printed = await run(["ask", "demo", "--print"], { ...env, PATH: `${bin}:${process.env.PATH ?? ""}` });
+    expect(printed.code).toBe(0);
+    expect(printed.stdout).toContain('You are the decision maker for one Feast league agent, "demo"');
+    expect(printed.stdout).toContain("Ride coins whose volume is growing.");
+    expect(printed.stdout.trimEnd().endsWith("What should the agent do right now? Answer only in the schema.")).toBe(true);
+    expect(ex(touched)).toBe(false);
+    const asked = await run(["ask", "demo"], env);
+    expect(asked.code).toBe(1);
+    expect(asked.stderr).toContain('"demo" is not running: FL start demo first');
+    const quote = await run(["quote", "--coin", "FEAST", "--bnb", "0.01"], env);
+    expect(quote.code).toBe(1);
+    expect(quote.stdout.trim()).toMatch(/^no quote: /);
+  }, 90_000);
+
+  it("FL status says how the asks go and carries them, the wallet and the headroom in --json", async () => {
+    const { env, prompt, home } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "claude", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const at = Date.now() - 3 * 60_000;
+    writeJsonAtomic(join(agentPaths(home, "demo").dir, "ask-state.json"), { lastAskAt: at, streak: 2, floorKeeperSince: at, cause: "Claude Code did not answer within 120 s", memo: "m", promptSha: null, last: { at, action: "none", reason: "", result: "error: Claude Code did not answer within 120 s" } });
+    const human = await run(["status", "demo", "--no-league"], env);
+    const { utc8 } = await import("../register/copy.ts");
+    expect(human.stdout).toContain(`asking Claude Code every 5 min · last ask ${utc8(at)} UTC+8 → none: error: Claude Code did not answer within 120 s · failures in a row 2 · on floor keeper since ${utc8(at)} UTC+8`);
+    expect(human.stdout).toContain("floor keeper: steady, when Claude Code fails twice in a row, and 20 min before dinner with the floor unmet");
+    const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as Record<string, unknown>;
+    expect(data.ask).toMatchObject({ every: 5, with: "claude", failuresInARow: 2, floorKeeperSince: new Date(at).toISOString() });
+    expect(data.headroom).toMatchObject({ maxTradeBnb: expect.any(Number), leftTodayBnb: expect.any(Number), leftSeasonBnb: expect.any(Number) });
+    expect(data).toHaveProperty("wallet");
+  }, 60_000);
+
+  it("--help names the ask loop and its commands", async () => {
+    const { env } = setup();
+    const out = await run(["--help"], env);
+    for (const word of ["[--every N] [--ask-with claude|codex|none] [--ask-model <name>]", "every <name> <minutes>", "ask <name> [--print] [--json]", "quote --coin <0x…|FEAST> --bnb <n> [--sell]"]) expect(out.stdout, word).toContain(word);
   }, 60_000);
 });

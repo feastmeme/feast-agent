@@ -132,7 +132,8 @@ export function coinMeta(coin: Pick<SnapshotCoin, "quote" | "quoteSymbol" | "pri
   const roundTrip = (1 - (1 - HOOK_FEE) ** 2 * (1 - POOL_FEE) ** 2) * 100;
   return {
     type: q === WBNB ? "bnb" : "stock",
-    quoteSymbol: q === WBNB ? "WBNB" : stock?.symbol ?? coin.quoteSymbol ?? "?",
+    // Only the address book's names (WBNB, the listed stocks): never the snapshot's own text for a quote it does not know.
+    quoteSymbol: q === WBNB ? "WBNB" : stock?.symbol ?? "?",
     underlying: (stock as { underlying?: string } | undefined)?.underlying ?? null,
     marketCapBnb: coin.priceBnb === null ? null : round(coin.priceBnb * COIN_SUPPLY, 4),
     roundTripFeePct: round(roundTrip, 4)!,

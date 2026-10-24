@@ -868,3 +868,19 @@ describe("task 975, addendum 2: once the season is on, the You're in line tells 
     expect(lastLine((await w.run({ yes: true })).text)).not.toContain("Decide and trade now");
   });
 });
+
+describe("task 975, addendum 4: FL enter under Claude Code plans the ask loop", () => {
+  it("every 5 minutes by default, --every 10 when asked; the card's ask and floor keeper lines; the You're in line says the three facts", async () => {
+    process.env.FEAST_LEAGUE_MODEL = "claude";
+    const w = world();
+    const card = await w.run({ every: 10 });
+    expect(loadAgent(w.home, ID)).toMatchObject({ preset: "steady", ask: { every: 10, with: "claude", model: null } });
+    expect(card.text).toContain("Ask loop: every 10 min with no FL buy or FL sell from your agent, the runtime asks Claude Code (`claude -p`");
+    expect(card.text).toContain("Floor keeper: the steady preset (Steady floor keeper) trades only when Claude Code cannot be reached twice in a row");
+    expect(card.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30, ask: { every: 10, with: "claude" } });
+    const out = await w.run({ every: 10, yes: true });
+    expect(lastLine(out.text)).toContain("Every 10 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake");
+    const off = world();
+    expect(await off.run({ noAutopilot: true, every: 5 })).toMatchObject({ code: 2, text: "--every and --ask-with go with the autopilot: --no-autopilot means no asks and no floor keeper" });
+  });
+});

@@ -1014,7 +1014,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         askState = { ...askState, streak: askState.streak + 1, cause: askState.streak === 0 ? cause : askState.cause, promptSha: input.prompt.sha256, last: { at: startedAt, action: "none", reason: "", result: `error: ${cause}` } };
         if (askState.streak === 2) {
           askState = { ...askState, floorKeeperSince: clock() };
-          notify("ask", `${host} could not be reached: ${cause}; trading on the floor keeper until it answers`);
+          // The streak's first cause: what started it, in plain words.
+          notify("ask", `${host} could not be reached: ${askState.cause ?? cause}; trading on the floor keeper until it answers`);
         }
         writeAskState(deps.home, deps.name, askState);
         appendJournal(deps.home, deps.name, row({ result: `error: ${cause}` }));
