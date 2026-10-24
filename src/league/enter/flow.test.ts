@@ -11,7 +11,7 @@ import { loadAgent, saveAgent } from "../agent.ts";
 import { BawSigner } from "../baw.ts";
 import { emptyBook, serializeBook } from "../book.ts";
 import { readSession, sessionPath } from "../notes/session.ts";
-import { fakeBaw } from "../register/fakes.ts";
+import { fakeBaw, leagueWire } from "../register/fakes.ts";
 import { agentIdUnreadable, noAgentIdCard, noAnswerLine, refusalLine, signingLine, walletNotReady } from "../register/copy.ts";
 import { LeagueSite } from "../register/site.ts";
 import { prepareStart } from "../start.ts";
@@ -761,5 +761,77 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
     const none = world();
     await none.run({ noStart: true });
     expect(loadAgent(none.home, ID)).toBeNull();
+  });
+});
+
+describe("task 975, addendum 1: entering once the season is on, and the signing domain on the card", () => {
+  const ON = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-27T13:00:00.000Z" } });
+  const TUESDAY = Date.parse("2026-10-27T06:00:00Z");
+  const ON_EN = "Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off.";
+
+  it("the season on: the card and the You're in line say it starts trading now, never that it waits (en)", async () => {
+    const w = world({ page: { league: ON }, now: TUESDAY });
+    const card = await w.run();
+    expect(card.text).toContain(`The season is on: it starts trading now (autopilot in 30 minutes if you go quiet).\n${ON_EN}`);
+    expect(card.text).not.toMatch(/waits for the season|Starts now and waits/);
+    const out = await w.run({ yes: true });
+    expect(lastLine(out.text)).toBe(
+      `You're in, and maplegrin is running: the season is on: it starts trading now (autopilot in 30 minutes if you go quiet). ${ON_EN} If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+    );
+  });
+
+  it("the season on, zh; and with --no-autopilot no autopilot is promised", async () => {
+    const zh = world({ page: { league: ON }, now: TUESDAY });
+    expect((await zh.run({ lang: "zh" })).text).toContain("赛季已经开始：它现在就开始交易（你 30 分钟不动，autopilot 就接手）。");
+    expect(lastLine((await zh.run({ lang: "zh", yes: true })).text)).toContain("你已报名，「maplegrin」正在运行：赛季已经开始，它现在就开始交易（你 30 分钟不动，autopilot 就接手）。");
+    const off = world({ page: { league: ON }, now: TUESDAY });
+    const card = await off.run({ noAutopilot: true });
+    expect(card.text).toContain("The season is on: it starts trading now.\n");
+    expect(card.text).not.toContain("autopilot in 30 minutes");
+  });
+
+  it("before the season: it waits, and the line names the opening", async () => {
+    const w = world();
+    expect((await w.run()).text).toContain(`Starts now and waits for the season: it trades nothing before ${OPENS}.`);
+    expect(lastLine((await w.run({ yes: true })).text)).toContain(`it waits for the season and trades from ${OPENS}`);
+  });
+
+  it("the entry card names the signing domain and every field of both messages, and they are what the wallet is asked to sign", async () => {
+    const w = world();
+    const card = await w.run();
+    expect(card.text).toContain('| Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |');
+    expect(card.text).toContain(`| Register | wallet \`${w.wallet}\`, name \`maplegrin\`, strategy \`""\` (empty), copies \`0x0000000000000000000000000000000000000000\`, issuedAt: the moment it signs (Unix seconds) |`);
+    expect(card.text).toContain(`| NoteSession | wallet \`${w.wallet}\`, agentId \`maplegrin\`, season \`1\`, nonce: 32 random bytes drawn when it signs |`);
+    await w.run({ yes: true });
+    const typed = w.calls
+      .filter((c) => c[0] === "sign-message" && c[1] === "preview")
+      .map((c) => JSON.parse((JSON.parse(c[c.indexOf("--message") + 1]!) as { params: [string, string] }).params[1]) as { domain: Record<string, unknown>; primaryType: string; message: Record<string, unknown> });
+    expect(typed.map((t) => t.primaryType)).toEqual(["Register", "NoteSession"]);
+    for (const t of typed) expect(t.domain).toEqual({ name: "Feast League", version: "1", chainId: 56 });
+    expect(Object.keys(typed[0]!.message).sort()).toEqual(["copies", "issuedAt", "name", "strategy", "wallet"]);
+    expect(typed[0]!.message).toMatchObject({ wallet: w.wallet, name: ID, strategy: "", copies: "0x0000000000000000000000000000000000000000" });
+    expect(Object.keys(typed[1]!.message).sort()).toEqual(["agentId", "nonce", "season", "wallet"]);
+    expect(typed[1]!.message).toMatchObject({ wallet: w.wallet, agentId: ID });
+    expect(String(typed[1]!.message.season)).toBe("1");
+  });
+
+  it("zh: the same rows in Chinese; the notes card (seated, notes not yet open) names the NoteSession's", async () => {
+    const zh = world();
+    const card = await zh.run({ lang: "zh" });
+    expect(card.text).toContain("| 签名域 | EIP-712 typed data（V4）：name `Feast League`，version `1`，chainId `56`（BNB Smart Chain），没有 verifying contract |");
+    expect(card.text).toContain(`| NoteSession | wallet \`${zh.wallet}\`，agentId \`maplegrin\`，season \`1\`，nonce：签名时随机生成的 32 字节 |`);
+    const notes = copy.notesCard({ agentId: ID, season: 1, wallet: zh.wallet }, "en");
+    expect(notes).toContain("| Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |");
+    expect(notes).toContain(`| NoteSession | wallet \`${zh.wallet}\`, agentId \`maplegrin\`, season \`1\`, nonce: 32 random bytes drawn when it signs |`);
+  });
+});
+
+describe("task 975, addendum 1: the entry card's last row follows the gate", () => {
+  it("before: starts and waits; on: starts and trades now", async () => {
+    expect((await world().run()).text).toContain('your agent "maplegrin" starts and waits for the season (its card is below)');
+    const on = world({ page: { league: leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: "2026-10-27T13:00:00.000Z" } }) }, now: Date.parse("2026-10-27T06:00:00Z") });
+    const text = (await on.run()).text;
+    expect(text).toContain('your agent "maplegrin" starts and, the season being on, trades now (its card is below)');
+    expect(text).not.toContain("waits for the season");
   });
 });

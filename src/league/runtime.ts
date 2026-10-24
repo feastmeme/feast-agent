@@ -31,7 +31,7 @@ import { GATE_READ_MS, seasonClosedLine, tradingOpens, writeGate } from "./seaso
 import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
 import { freshMemory, pastEnd, sessionStep, sessionView, type SessionMemory, type SessionView } from "./session.ts";
-import { addToLedger, acquireWalletLock, agentPaths, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
+import { addToLedger, acquireWalletLock, agentPaths, pidAlive, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
 import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExtras, type Snapshot, type StrategyEvent } from "./strategy.ts";
 
 /**
@@ -1103,15 +1103,8 @@ export function statusOf(home: string, name: string): { agent: AgentConfig | nul
         .slice(-20)
         .map((line) => JSON.parse(line) as unknown)
     : [];
-  let running = false;
-  if (existsSync(paths.pid)) {
-    try {
-      process.kill(Number(readFileSync(paths.pid, "utf8")), 0);
-      running = true;
-    } catch {
-      running = false;
-    }
-  }
+  // Under a sandboxed host the probe may answer EPERM for a live runtime: that is running, not gone (task 975).
+  const running = existsSync(paths.pid) && pidAlive(Number(readFileSync(paths.pid, "utf8").trim()));
   return { agent, book, notifications, stop: stopReason(home, name), running };
 }
 

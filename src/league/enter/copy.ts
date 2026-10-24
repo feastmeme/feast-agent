@@ -1,5 +1,5 @@
 import { short, utc8, type Lang } from "../register/copy.ts";
-import { shownName } from "../register/message.ts";
+import { LEAGUE_CHAIN_ID, LEAGUE_DOMAIN, shownName, ZERO_ADDRESS } from "../register/message.ts";
 
 /**
  * Every word `FL enter` shows a person, in English and Chinese (task 961). The
@@ -134,7 +134,36 @@ export function refusedLine(limit: string, message: string, lang: Lang): string 
 // --- the notes session -----------------------------------------------------------------
 
 /** The notes card, when feast.meme already keeps this wallet's Register: entering is this one signature. */
-export function notesCard(view: { agentId: string; season: number }, lang: Lang): string {
+/**
+ * What the wallet is asked to sign, field by field (task 975, addendum 1): the EIP-712 domain and every field of the
+ * Register and NoteSession messages, as `register/message.ts` and `notes/message.ts` build them, so a careful host can
+ * match the card against the wallet's preview. The Agent ID is the chain's (checked), the wallet the one read.
+ */
+function signingRows(view: { wallet: string; agentId: string; season: number; register: boolean; notes: boolean }, lang: Lang): [string, string][] {
+  const zh = lang === "zh";
+  const rows: [string, string][] = [
+    zh
+      ? ["签名域", `EIP-712 typed data（V4）：name \`${LEAGUE_DOMAIN.name}\`，version \`${LEAGUE_DOMAIN.version}\`，chainId \`${LEAGUE_CHAIN_ID}\`（BNB Smart Chain），没有 verifying contract`]
+      : ["Domain", `EIP-712 typed data (V4): name \`${LEAGUE_DOMAIN.name}\`, version \`${LEAGUE_DOMAIN.version}\`, chainId \`${LEAGUE_CHAIN_ID}\` (BNB Smart Chain), no verifying contract`],
+  ];
+  if (view.register)
+    rows.push([
+      "Register",
+      zh
+        ? `wallet \`${view.wallet}\`，name \`${view.agentId}\`，strategy \`""\`（空），copies \`${ZERO_ADDRESS}\`，issuedAt：签名那一刻（Unix 秒）`
+        : `wallet \`${view.wallet}\`, name \`${view.agentId}\`, strategy \`""\` (empty), copies \`${ZERO_ADDRESS}\`, issuedAt: the moment it signs (Unix seconds)`,
+    ]);
+  if (view.notes)
+    rows.push([
+      "NoteSession",
+      zh
+        ? `wallet \`${view.wallet}\`，agentId \`${view.agentId}\`，season \`${view.season}\`，nonce：签名时随机生成的 32 字节`
+        : `wallet \`${view.wallet}\`, agentId \`${view.agentId}\`, season \`${view.season}\`, nonce: 32 random bytes drawn when it signs`,
+    ]);
+  return rows;
+}
+
+export function notesCard(view: { agentId: string; season: number; wallet?: string }, lang: Lang): string {
   const zh = lang === "zh";
   const who = shownName(view.agentId);
   return [
@@ -145,6 +174,7 @@ export function notesCard(view: { agentId: string; season: number }, lang: Lang)
       [zh ? "签名" : "Signs", zh ? `你的钱包，为 ${who}，第 ${view.season} 季` : `your wallet, for ${who}, season ${view.season}`],
       [zh ? "用途" : "Why", zh ? "feast.meme 只收为本季签过名的钱包发来的笔记（FL note）" : "feast.meme takes your agent's notes (FL note) from a wallet that signed for the season"],
       [zh ? "保存" : "Kept", zh ? "会话的令牌，存在这台电脑上（notes-session.json）；从不保存私钥" : "the session's token, in this home (notes-session.json); never a key"],
+      ...(view.wallet ? signingRows({ wallet: view.wallet, agentId: view.agentId, season: view.season, register: false, notes: true }, lang) : []),
     ]),
     "",
     zh ? "你说「好」之后，钱包会请你签这一条消息。" : "Your wallet asks for this one signature as soon as you say yes.",
@@ -162,10 +192,18 @@ const opensText = (opens: OpensShown, lang: Lang) => {
   return zh ? "feast.meme 宣布开赛的时刻" : "feast.meme announces the start";
 };
 
-/** Under the entry card: the agent's own card, and when it starts trading. */
-export function waitingLine(opens: OpensShown, lang: Lang): string {
+/** Once the season is on (task 975, addendum 1): it trades now, and when the backup would take over. */
+const seasonOn = (lang: Lang, autopilot: AutopilotShown | undefined, sentence: boolean) => {
   const zh = lang === "zh";
-  if (opens.kind === "open") return zh ? "现在就启动：赛季已经开始，它马上开始交易。" : "Starts now: the season is open, so it trades from the start.";
+  const later = autopilot ? (zh ? `（你 ${autopilot.idleMinutes} 分钟不动，autopilot 就接手）` : ` (autopilot in ${autopilot.idleMinutes} minutes if you go quiet)`) : "";
+  if (zh) return `赛季已经开始${sentence ? "：" : "，"}它现在就开始交易${later}`;
+  return `${sentence ? "The" : "the"} season is on: it starts trading now${later}`;
+};
+
+/** Under the entry card: the agent's own card, and when it starts trading; before the season and once it is on, apart. */
+export function waitingLine(opens: OpensShown, lang: Lang, autopilot?: AutopilotShown): string {
+  const zh = lang === "zh";
+  if (opens.kind === "open") return `${seasonOn(lang, autopilot ?? undefined, true)}${zh ? "。" : "."}`;
   if (opens.kind === "at") return zh ? `现在就启动，等待赛季开始：${opensText(opens, lang)}之前它不做任何交易。` : `Starts now and waits for the season: it trades nothing before ${opensText(opens, lang)}.`;
   return zh ? "现在就启动，等待赛季开始：在 feast.meme 宣布开赛之前，它不做任何交易。" : "Starts now and waits for the season: it trades nothing until feast.meme announces the start.";
 }
@@ -196,7 +234,7 @@ export function strategyLine(view: StrategyShown, name: string, lang: Lang): str
 }
 
 /** The entry card: the Register signature, the notes signature, and the agent's start, under one yes. */
-export function entryCard(view: { agentId: string; season: number; notes: boolean; agent: string | null }, lang: Lang): string {
+export function entryCard(view: { agentId: string; season: number; notes: boolean; agent: string | null; wallet?: string; seasonOn?: boolean }, lang: Lang): string {
   const zh = lang === "zh";
   const who = shownName(view.agentId);
   const rows: [string, string][] = [
@@ -205,7 +243,14 @@ export function entryCard(view: { agentId: string; season: number; notes: boolea
     [zh ? "发送到" : "Sent to", zh ? "feast.meme（/api/league/register）" : "feast.meme (/api/league/register)"],
   ];
   if (view.notes) rows.push([zh ? "然后" : "Then", zh ? `再签一条消息，开通 ${who} 第 ${view.season} 季的笔记会话（EIP-712 NoteSession），同一个「好」` : `one more message, under the same yes, that opens ${who}'s notes session for season ${view.season} (EIP-712 NoteSession)`]);
-  if (view.agent) rows.push([zh ? "最后" : "Last", zh ? `启动你的 agent「${view.agent}」，等待赛季开始（它的卡片在下面）` : `your agent "${view.agent}" starts and waits for the season (its card is below)`]);
+  if (view.agent)
+    rows.push([
+      zh ? "最后" : "Last",
+      view.seasonOn
+        ? zh ? `启动你的 agent「${view.agent}」，赛季已经开始，它现在就交易（它的卡片在下面）` : `your agent "${view.agent}" starts and, the season being on, trades now (its card is below)`
+        : zh ? `启动你的 agent「${view.agent}」，等待赛季开始（它的卡片在下面）` : `your agent "${view.agent}" starts and waits for the season (its card is below)`,
+    ]);
+  if (view.wallet) rows.push(...signingRows({ wallet: view.wallet, agentId: view.agentId, season: view.season, register: true, notes: view.notes }, lang));
   const count = view.notes ? 2 : 1;
   return [
     zh ? `${who} 报名第 ${view.season} 季` : `Enter ${who} in season ${view.season}`,
@@ -220,7 +265,7 @@ export function entryCard(view: { agentId: string; season: number; notes: boolea
 
 /** The agent's part of a card: the strategy, its card, when it trades, and its autopilot backup. */
 export function agentSection(view: { strategy: StrategyShown; name: string; card: string; opens: OpensShown; autopilot?: AutopilotShown }, lang: Lang): string {
-  return [strategyLine(view.strategy, view.name, lang), "", view.card, "", waitingLine(view.opens, lang), ...(view.autopilot !== undefined ? [autopilotLine(view.autopilot, lang)] : [])].join("\n");
+  return [strategyLine(view.strategy, view.name, lang), "", view.card, "", waitingLine(view.opens, lang, view.autopilot), ...(view.autopilot !== undefined ? [autopilotLine(view.autopilot, lang)] : [])].join("\n");
 }
 
 export function keptUnreadable(reason: string, lang: Lang): string {
@@ -402,7 +447,7 @@ export function doneLine(lang: Lang): string {
 export function doneRunning(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown): string {
   const zh = lang === "zh";
   const when =
-    opens.kind === "open" ? (zh ? "赛季已经开始，它现在就交易" : "the season is open, so it trades now") : opens.kind === "at" ? (zh ? `它等待赛季开始，从 ${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
+    opens.kind === "open" ? seasonOn(lang, autopilot ?? undefined, false) : opens.kind === "at" ? (zh ? `它等待赛季开始，从 ${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
   const backup = autopilot !== undefined ? `${autopilotLine(autopilot, lang)}${zh ? "" : " "}` : "";
   return zh
     ? `你已报名，「${name}」正在运行：${when}。${backup}如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`

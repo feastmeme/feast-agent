@@ -91,7 +91,8 @@ function cliCards(): void {
 }
 
 async function enterCards(): Promise<void> {
-  for (const lang of ["en", "zh"] as const) {
+  const ON = leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: new Date(DINNER).toISOString() } });
+  for (const [lang, seasonOn] of [["en", false], ["zh", false], ["en", true], ["zh", true]] as const) {
     const root = tmpRoot();
     const home = join(root, "home");
     const cwd = join(root, "work");
@@ -99,7 +100,7 @@ async function enterCards(): Promise<void> {
     // A key made for this run only, never printed: the fake wallet signs with it, nothing else does.
     const account = privateKeyToAccount(generatePrivateKey());
     const { runner } = fakeBaw({ account });
-    const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: "maplegrin" }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } } });
+    const site = new FakeEnterSite({ wallet: account.address, agentId: { agentId: "maplegrin" }, avatar: { status: 200 }, session: { status: 201, body: { token: "tok-dry", expiresAt: "2026-11-02T13:00:00.000Z", season: 1 } }, ...(seasonOn ? { league: ON } : {}) });
     const deps = {
       home,
       signer: new BawSigner(runner),
@@ -107,7 +108,7 @@ async function enterCards(): Promise<void> {
       site: new LeagueSite(ENTER_SITE, site.fetch),
       indexer: ENTER_INDEXER,
       fetch: site.fetch,
-      now: () => Date.parse("2026-10-24T13:00:00Z"),
+      now: () => (seasonOn ? at8("14:00") : Date.parse("2026-10-24T13:00:00Z")),
       notesDev: false,
       signOptions: { pollMs: 1, sleep: async () => {} },
       cwd,
@@ -119,10 +120,18 @@ async function enterCards(): Promise<void> {
     const card = await enter(deps, { name: "maplegrin.ai", yes: false, lang });
     const text = card.text;
     const from = text.indexOf(lang === "zh" ? "策略：" : "Strategy:");
-    say(`### \`FL enter --name maplegrin.ai --lang ${lang}\`: the agent section under the entry card\n`);
-    block(text.slice(from, text.lastIndexOf("\n\n")));
+    const when = seasonOn ? "once the season is on (Tuesday 14:00 UTC+8)" : "before the season (Saturday)";
+    if (!seasonOn) {
+      say(`### \`FL enter --name maplegrin.ai --lang ${lang}\`, ${when}: the entry card's table, with the signing domain and both messages' fields\n`);
+      block(text.slice(0, text.indexOf("\n\n", text.indexOf("| --- | --- |"))));
+      say(`### \`FL enter --name maplegrin.ai --lang ${lang}\`, ${when}: the agent section under the entry card\n`);
+      block(text.slice(from, text.lastIndexOf("\n\n")));
+    } else {
+      say(`### \`FL enter --name maplegrin.ai --lang ${lang}\`, ${when}: the last row of the entry card, and the lines under the agent's card\n`);
+      block([...text.split("\n").filter((l) => l.startsWith(lang === "zh" ? "| 最后 |" : "| Last |")), ...text.slice(from, text.lastIndexOf("\n\n")).split("\n").slice(-2)].join("\n"));
+    }
     const done = await enter(deps, { name: "maplegrin.ai", yes: true, lang });
-    say(`### \`FL enter … --yes --lang ${lang}\`: the last line\n`);
+    say(`### \`FL enter … --yes --lang ${lang}\`, ${when}: the last line\n`);
     block(done.text.split("\n").at(-1)!);
     say(`\`FL enter --json\`'s \`autopilot\`: \`${JSON.stringify(done.data.autopilot)}\``);
   }

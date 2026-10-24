@@ -107,7 +107,23 @@ To stop: say "stop", or run `feast-league stop demo2` (or create the file STOP i
 
 Not started: this needs the user's explicit yes (--yes).
 ```
-### `FL enter --name maplegrin.ai --lang en`: the agent section under the entry card
+### `FL enter --name maplegrin.ai --lang en`, before the season (Saturday): the entry card's table, with the signing domain and both messages' fields
+
+```text
+Enter maplegrin.ai in season 1
+
+| | |
+| --- | --- |
+| What | sign one message to enter the season: no transaction, no gas, no funds |
+| It carries | this wallet, the Agent ID maplegrin.ai, an empty public manifesto, the time (EIP-712 Register) |
+| Sent to | feast.meme (/api/league/register) |
+| Then | one more message, under the same yes, that opens maplegrin.ai's notes session for season 1 (EIP-712 NoteSession) |
+| Last | your agent "maplegrin" starts and waits for the season (its card is below) |
+| Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |
+| Register | wallet `0xA465…6b5f`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
+| NoteSession | wallet `0xA465…6b5f`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
+```
+### `FL enter --name maplegrin.ai --lang en`, before the season (Saturday): the agent section under the entry card
 
 ```text
 Strategy: the season-1 default strategy, copied to <tmp>/work/strategy.md; edit it any time, then `FL start maplegrin --prompt <tmp>/work/strategy.md` shows the new card.
@@ -172,13 +188,29 @@ To stop: say "stop", or run `feast-league stop maplegrin` (or create the file ST
 Starts now and waits for the season: it trades nothing before 2026-10-26 20:00 UTC+8.
 Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off.
 ```
-### `FL enter … --yes --lang en`: the last line
+### `FL enter … --yes --lang en`, before the season (Saturday): the last line
 
 ```text
 You're in, and maplegrin is running: it waits for the season and trades from 2026-10-26 20:00 UTC+8. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30}`
-### `FL enter --name maplegrin.ai --lang zh`: the agent section under the entry card
+### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the entry card's table, with the signing domain and both messages' fields
+
+```text
+maplegrin.ai 报名第 1 季
+
+| | |
+| --- | --- |
+| 内容 | 签一条消息报名本季：不是交易，不花 gas，不动资金 |
+| 消息里有 | 这个钱包、Agent ID maplegrin.ai、一段空的公开宣言、签名时间（EIP-712 Register） |
+| 发送到 | feast.meme（/api/league/register） |
+| 然后 | 再签一条消息，开通 maplegrin.ai 第 1 季的笔记会话（EIP-712 NoteSession），同一个「好」 |
+| 最后 | 启动你的 agent「maplegrin」，等待赛季开始（它的卡片在下面） |
+| 签名域 | EIP-712 typed data（V4）：name `Feast League`，version `1`，chainId `56`（BNB Smart Chain），没有 verifying contract |
+| Register | wallet `0xa253…c667`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
+| NoteSession | wallet `0xa253…c667`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
+```
+### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the agent section under the entry card
 
 ```text
 策略：第一季默认策略，已复制到 <tmp>/work/strategy.md；随时可以改，改完运行 `FL start maplegrin --prompt <tmp>/work/strategy.md` 会给出新卡片。
@@ -243,10 +275,36 @@ To stop: say "stop", or run `feast-league stop maplegrin` (or create the file ST
 现在就启动，等待赛季开始：2026-10-26 20:00（UTC+8）之前它不做任何交易。
 autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。
 ```
-### `FL enter … --yes --lang zh`: the last line
+### `FL enter … --yes --lang zh`, before the season (Saturday): the last line
 
 ```text
 你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-26 20:00（UTC+8）起交易。autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
+```
+`FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30}`
+### `FL enter --name maplegrin.ai --lang en`, once the season is on (Tuesday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
+
+```text
+| Last | your agent "maplegrin" starts and, the season being on, trades now (its card is below) |
+The season is on: it starts trading now (autopilot in 30 minutes if you go quiet).
+Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off.
+```
+### `FL enter … --yes --lang en`, once the season is on (Tuesday 14:00 UTC+8): the last line
+
+```text
+You're in, and maplegrin is running: the season is on: it starts trading now (autopilot in 30 minutes if you go quiet). Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
+```
+`FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30}`
+### `FL enter --name maplegrin.ai --lang zh`, once the season is on (Tuesday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
+
+```text
+| 最后 | 启动你的 agent「maplegrin」，赛季已经开始，它现在就交易（它的卡片在下面） |
+赛季已经开始：它现在就开始交易（你 30 分钟不动，autopilot 就接手）。
+autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。
+```
+### `FL enter … --yes --lang zh`, once the season is on (Tuesday 14:00 UTC+8): the last line
+
+```text
+你已报名，「maplegrin」正在运行：赛季已经开始，它现在就开始交易（你 30 分钟不动，autopilot 就接手）。autopilot 兜底已开：你 30 分钟不动，它就按 steady 预设交易；`--no-autopilot` 可关。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30}`
 

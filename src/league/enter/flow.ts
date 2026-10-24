@@ -476,7 +476,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
       const digest = sha256(JSON.stringify({ stage: notesNeeded ? "notes" : "start", agentId, season, start: planned?.shape ?? null }));
       const stage: Stage = notesNeeded ? "notes" : "start";
       if (!yesFor(stage, digest)) {
-        const card = [notesNeeded ? copy.notesCard({ agentId, season }, lang) : copy.startCard(lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
+        const card = [notesNeeded ? copy.notesCard({ agentId, season, wallet }, lang) : copy.startCard(lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
         return ask(stage, digest, card, { season, seat: mine.seatNo });
       }
     }
@@ -487,7 +487,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   // --- the entry card: the Register signature, the notes, the start, under one yes ---------------------------
   const digest = sha256(JSON.stringify({ stage: "register", agentId, season, notes: dev ? "dev" : season, start: planned?.shape ?? null }));
   if (!yesFor("register", digest)) {
-    const card = [copy.entryCard({ agentId, season, notes: !dev, agent: planned?.name ?? null }, lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
+    const card = [copy.entryCard({ agentId, season, notes: !dev, agent: planned?.name ?? null, wallet, seasonOn: opens.kind === "open" }, lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
     return ask("register", digest, card, { season, agent: planned?.name ?? null, opens: opens.kind === "at" ? new Date(opens.at).toISOString() : opens.kind });
   }
   confirmEntry();

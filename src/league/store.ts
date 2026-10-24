@@ -134,7 +134,13 @@ export function removeStop(path: string): void {
 
 // --- the wallet lock ----------------------------------------------------------------------
 
-function alive(pid: number): boolean {
+/**
+ * A process with this pid exists. EPERM means it does, but this process may not signal it (a host's sandbox, such as
+ * Codex's seatbelt, or another user's process): alive, never "gone" (task 975, from the host rehearsal). A pid that is
+ * not a positive whole number is no process (0 or a negative would name a process group).
+ */
+export function pidAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -142,6 +148,7 @@ function alive(pid: number): boolean {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
+const alive = pidAlive;
 
 /**
  * One runtime per wallet: the lock holds the owner's pid and agent name. A lock

@@ -13,6 +13,11 @@ import { PRESET_IDS } from "./presets/specs.ts";
 
 const ROOT = join(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
+/** The skill's description as the front matter holds it: a double-quoted YAML string (e489fd9), unquoted here. */
+const descriptionOf = (skill: string) => {
+  const raw = /^description: (.*)$/m.exec(skill)![1]!;
+  return raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
+};
 const walk = (dir: string): string[] =>
   readdirSync(join(ROOT, dir)).flatMap((name) => {
     const path = join(dir, name);
@@ -59,7 +64,7 @@ describe("the skill, the setup, the release notes", () => {
   it("SKILL.md puts prompt mode first and names its commands; the description stays within 1024 characters", () => {
     const skill = read("skills/feast-league/SKILL.md");
     for (const word of ["FL data", "FL note", "--prompt", "--autopilot", "FL script check"]) expect(skill, word).toContain(word);
-    const description = /^description: (.*)$/m.exec(skill)![1]!;
+    const description = descriptionOf(skill);
     expect(description.length).toBeLessThanOrEqual(1024);
     const routing = skill.slice(skill.indexOf("## 2."), skill.indexOf("## 3."));
     expect(routing.indexOf("prompt mode")).toBeGreaterThan(-1);
@@ -131,7 +136,7 @@ describe("one command enters and runs the agent (task 968)", () => {
   const section9 = skill.slice(skill.indexOf("## 9."), skill.indexOf("### The older signed path"));
 
   it("the description stays within 1024 characters and names the one-command entry and the meme", () => {
-    const description = /^description: (.*)$/m.exec(skill)![1]!;
+    const description = descriptionOf(skill);
     expect(description.length).toBeLessThanOrEqual(1024);
     expect(description).toMatch(/one command enters the league and runs the agent/);
     expect(description).toMatch(/meme/);
@@ -341,7 +346,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
   });
 
   it("the description stays within 1024 characters and names the steady backup and six presets", () => {
-    const description = /^description: (.*)$/m.exec(skill)![1]!;
+    const description = descriptionOf(skill);
     expect(description.length).toBeLessThanOrEqual(1024);
     expect(description).toContain("a steady autopilot backup keeps the daily floor after 30 minutes without your trade, unless turned off");
     expect(description).toContain("one of six presets");
@@ -353,5 +358,34 @@ describe("the autopilot backup and the two headers (task 975)", () => {
       expect(read(file), file).not.toMatch(/\(60 by default\)|60 minutes by default|silent for 60 minutes/);
       expect(read(file), file).not.toMatch(/24 hours before a dinner/);
     }
+  });
+});
+
+describe("task 975, addendum 1: the front matter, the gate's two branches and the signing domain", () => {
+  const skill = read("skills/feast-league/SKILL.md");
+  const section9 = skill.slice(skill.indexOf("## 9."), skill.indexOf("### The older signed path"));
+
+  it("the description is a double-quoted YAML string with no quote or backslash inside, and stays within 1024 characters", () => {
+    const raw = /^description: (.*)$/m.exec(skill)![1]!;
+    expect(raw.startsWith('"') && raw.endsWith('"')).toBe(true);
+    expect(raw.slice(1, -1)).not.toMatch(/["\\]/);
+    expect(raw.length).toBeLessThanOrEqual(1024);
+  });
+
+  it("SKILL §9, setup.md and the README say both branches of the You're in line", () => {
+    const before = "it waits for the season and trades from";
+    const on = "the season is on: it starts trading now (autopilot in 30 minutes if you go quiet)";
+    for (const [file, text] of [["SKILL §9", section9], ["setup.md", read("skills/feast-league/references/setup.md")], ["README.md", read("README.md")]]) {
+      expect(text, file).toContain(before);
+      expect(text, file).toContain(on);
+    }
+    expect(section9).toContain("The season is on: it starts trading now (autopilot in 30 minutes if you go quiet).");
+  });
+
+  it("SKILL §9 names the card's signing rows; the CHANGELOG's league-v5 says both fixes", () => {
+    expect(section9).toContain("EIP-712 typed data (V4), name `Feast League`, version `1`, chainId `56`, no verifying contract");
+    const log = read("docs/CHANGELOG.md");
+    const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
+    for (const word of ["the season is on: it starts trading now", "signing domain", "EPERM"]) expect(v5, word).toContain(word);
   });
 });
