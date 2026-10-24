@@ -19,7 +19,8 @@ import { AGENT_ID, nextIssuedAt } from "../register/message.ts";
 import type { KeptAgent, LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { tradingOpens } from "../season-gate.ts";
-import { autopilotChoice, prepareStart, shapeOf } from "../start.ts";
+import { askChoice, autopilotChoice, prepareStart, shapeOf } from "../start.ts";
+import { modelHint } from "../headers.ts";
 import { agentPaths, appendJsonl, readJson, removeStop, walletLockHolder, writeJsonAtomic, writeStop } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
 import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.ts";
@@ -104,6 +105,10 @@ export type EnterInput = {
   autopilot?: string;
   /** Task 975: no autopilot backup (by default the agent gets `steady`). */
   noAutopilot?: boolean;
+  /** Task 975, addendum 4: the ask loop: every N minutes (default 5), with which host's CLI, which model. */
+  every?: number;
+  askWith?: string;
+  askModel?: string;
   idleMinutes?: number;
   noJitter?: boolean;
   meme?: MemeInput;
@@ -200,6 +205,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const startWanted = !input.noStart && !input.memeOnly;
   const choice = autopilotChoice({ autopilot: input.autopilot, noAutopilot: input.noAutopilot });
   if (!choice.ok) return end(2, false, "plan", choice.error);
+  const asked = askChoice({ noAutopilot: input.noAutopilot, every: input.every, askWith: input.askWith, askModel: input.askModel, host: modelHint() });
+  if (!asked.ok) return end(2, false, "plan", asked.error);
   let agentName: string | null = null;
   if (startWanted) {
     if (input.agent !== undefined) {
@@ -260,14 +267,14 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
       promptPath = file.path;
       strategy = { kind: file.copied ? "default" : "existing", path: file.path };
     }
-    const planInput: PlanInput = { name, promptPath, preset: choice.preset, idleMinutes: input.idleMinutes, params: {}, limits: {} };
+    const planInput: PlanInput = { name, promptPath, preset: choice.preset, idleMinutes: input.idleMinutes, ...(asked.ask ? { ask: asked.ask } : {}), params: {}, limits: {} };
     const checked = prepareStart(deps.home, name, { plan: planInput, yes: false, confirm: true, now: new Date(now()) });
     if (checked.kind === "not-planned") return end(2, false, "plan", copy.notPlanned(checked.errors, lang), { errors: checked.errors });
     if (checked.kind === "running") return end(2, false, "running", copy.runningOtherCard(name, lang), { agent: name });
     if (checked.kind === "refused") return end(2, false, "start", copy.startRefused(checked.why, lang), { agent: name });
     if (checked.kind === "no-agent") return end(2, false, "plan", copy.notPlanned(["no agent was planned"], lang));
     const agent = checked.agent;
-    const autopilot = agent.preset && agent.autopilot ? { preset: agent.preset, idleMinutes: agent.autopilot.idleMinutes } : null;
+    const autopilot = agent.preset && agent.autopilot ? { preset: agent.preset, idleMinutes: agent.autopilot.idleMinutes, ...(agent.ask ? { ask: { every: agent.ask.every, with: agent.ask.with } } : {}) } : null;
     return { name, agent, card: checked.kind === "needs-yes" ? checked.card : renderCard(agent), shape: shapeOf(agent), needsYes: checked.kind === "needs-yes", strategy, autopilot };
   };
   /** Planned once, where its card is needed: after the wallet is read on a first entry, at once on a rerun. */

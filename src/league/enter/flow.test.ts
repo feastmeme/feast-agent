@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getAddress, type Address } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { coinPicture } from "../../sdk/metadata.ts";
 import { loadAgent, saveAgent } from "../agent.ts";
@@ -37,9 +37,16 @@ const OPENS = "2026-10-26 20:00 UTC+8";
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 let dirs: string[] = [];
+// The host's hint decides the ask loop's default (task 975, addendum 4): "other" here, so nothing is asked unless a test says so.
+const hostBefore = process.env.FEAST_LEAGUE_MODEL;
+beforeEach(() => {
+  process.env.FEAST_LEAGUE_MODEL = "other";
+});
 afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs = [];
+  if (hostBefore === undefined) delete process.env.FEAST_LEAGUE_MODEL;
+  else process.env.FEAST_LEAGUE_MODEL = hostBefore;
 });
 
 type WorldOptions = { connected?: boolean; devMode?: boolean; page?: Partial<FakeSiteOptions>; chain?: Partial<FakeChainOptions>; shot?: Partial<FakeShotOptions>; now?: number; notesDev?: boolean; retry?: boolean; confirm?: Parameters<typeof fakeBaw>[0]["confirm"] };
@@ -731,12 +738,12 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
     expect(loadAgent(w.home, ID)).toMatchObject({ track: "prompt", preset: "steady", autopilot: { idleMinutes: 30 } });
     expect(card.text).toContain("Autopilot backup: on. If your agent makes no FL buy or FL sell for 30 min, the steady preset (Steady floor keeper)");
     expect(card.text).toContain(`Starts now and waits for the season: it trades nothing before ${OPENS}.\n${ON_EN}`);
-    expect(card.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30 });
+    expect(card.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: "none" } });
     const out = await w.run({ yes: true });
     expect(lastLine(out.text)).toBe(
       `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. ${ON_EN} Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
     );
-    expect(out.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30 });
+    expect(out.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: "none" } });
   });
 
   it("zh: the entry card says it in Chinese, and so does the done line", async () => {

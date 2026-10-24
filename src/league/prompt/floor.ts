@@ -43,7 +43,7 @@ const weiOf = (value: unknown): bigint | null => {
 };
 
 /** The log's tail, as lines; the first (possibly torn) line is dropped when the file is longer than the tail. */
-function tailLines(path: string): string[] {
+export function tailLines(path: string): string[] {
   if (!existsSync(path)) return [];
   const size = statSync(path).size;
   const from = Math.max(0, size - TAIL_BYTES);

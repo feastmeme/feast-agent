@@ -51,6 +51,11 @@ export class MarketFeed {
   /** A snapshot whose inline tail was cut short of the position: the whole tail is read at the next slot (task 966). */
   private pendingTail: FeastSnapshot | null = null;
 
+  /** The snapshot held now (task 975, addendum 5: the ask's pack reads its coins and its events tail); null in the legacy mode. */
+  held(): FeastSnapshot | null {
+    return this.mode === "snapshot" ? this.client.held : null;
+  }
+
   constructor(private readonly d: FeedDeps) {
     this.indexer = (d.indexer ?? INDEXER_URL).replace(/\/+$/, "");
     this.client = new SnapshotClient({ site: d.site, fetch: d.fetch, now: d.now, random: d.random, pollSeconds: d.pollSeconds, timeoutMs: d.timeoutMs, log: d.log, onStale: d.onStale, cache: d.cache });

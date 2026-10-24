@@ -376,6 +376,10 @@ function steady(): Strategy {
       const dinner = nextDinner(now);
       const day = extras?.day?.() ?? null;
       const rush = p.rushMinutes > 0 && dinner - now <= p.rushMinutes * MINUTE && day !== null && !day.passed;
+      // Task 975, addendum 4: the floor guard (20 minutes before the dinner, the floor unmet): 2 minutes apart, no buy
+      // after dinner − 10, flat by dinner − 5.
+      const guard = extras?.guard?.() === true;
+      const fast = guard ? 2 : rush ? 3 : null;
       const { mine, held } = mineHeld(api, state);
       const stops = bag<Record<string, number>>(state, "stops", {});
       for (const k of Object.keys(stops)) if (mine[k] === undefined) delete stops[k];
@@ -391,7 +395,7 @@ function steady(): Strategy {
       for (const position of held) {
         const k = lc(position.coin);
         const boughtAt = mine[k]!;
-        const stopAt = Math.min(stops[k] ?? boughtAt + p.timeStopMinutes * MINUTE, rush ? boughtAt + 3 * MINUTE : Number.POSITIVE_INFINITY);
+        const stopAt = Math.min(stops[k] ?? boughtAt + p.timeStopMinutes * MINUTE, fast !== null ? boughtAt + fast * MINUTE : Number.POSITIVE_INFINITY);
         const sold = bracket(api, state, position, {
           label: "steady",
           stopLossPct: p.stopLossPct,
@@ -410,9 +414,9 @@ function steady(): Strategy {
       const projectedTrades = day.trades + held.length;
       const projectedVolume = day.volumeBnb + held.reduce((sum, h) => sum + (h.markBnb ?? h.costBnb), 0);
       if (projectedTrades >= p.minDailyTrades && projectedVolume >= p.minDailyVolumeBnb) return;
-      if (buys.length >= p.maxEntriesPerDay || held.length >= p.maxPositions || dinner - now < 15 * MINUTE) return;
+      if (buys.length >= p.maxEntriesPerDay || held.length >= p.maxPositions || dinner - now < (guard ? 10 : 15) * MINUTE) return;
       const last = typeof state.lastBuy === "number" ? state.lastBuy : 0;
-      if (now - last < (rush ? 3 : p.spacingMinutes) * MINUTE) return;
+      if (now - last < (fast ?? p.spacingMinutes) * MINUTE) return;
 
       const own = api.read.launched()?.coin.toLowerCase() ?? null;
       const feast = api.read.coin("FEAST")?.coin.toLowerCase() ?? null;
@@ -438,7 +442,7 @@ function steady(): Strategy {
       if (api.buy({ coin: pick.coin, bnb: p.buyBnb, reason })) {
         const k = lc(pick.coin);
         mine[k] = now;
-        stops[k] = now + (rush ? 3 : p.timeStopMinutes) * MINUTE;
+        stops[k] = now + (fast ?? p.timeStopMinutes) * MINUTE;
         today[k] = now;
         delete bag<Record<string, boolean>>(state, "tookProfit", {})[k];
         buys.push(now);

@@ -126,6 +126,12 @@ export function closingLine(input: Pick<StandingInput, "today" | "agent">, lang:
   if (!agent || agent.track !== "prompt") return zh ? "不管联赛怎样，你的 agent 都照常跑它的策略。" : "Your agent runs its preset whatever the league says.";
   if (input.today?.state === "season") return tradeNowLine(agent.autopilot, agent.promptFile, lang);
   const a = agent.autopilot;
+  if (a?.ask && a.ask.with !== "none") {
+    const host = a.ask.with === "claude" ? "Claude Code" : a.ask.with === "codex" ? "Codex" : a.ask.with;
+    return zh
+      ? `不管联赛怎样，联赛都不会停下你的 agent：你的 AI 按 ${agent.promptFile} 决策；它 ${a.ask.every} 分钟没有交易，运行时就问一次 ${host}；${host} 联系不上，或开饭前 20 分钟门槛未达，floor keeper（${a.preset}）兜底。`
+      : `Whatever the league says, the league never stops your agent: your AI decides by ${agent.promptFile}; every ${a.ask.every} minutes without its trade the runtime asks ${host}, and the floor keeper (${a.preset}) covers it when ${host} can't be reached or the floor is unmet 20 minutes before dinner.`;
+  }
   if (zh)
     return a
       ? `不管联赛怎样，联赛都不会停下你的 agent：你的 AI 按 ${agent.promptFile} 决策，autopilot 兜底（${a.preset}）只在它 ${a.idleMinutes} 分钟没有交易后才交易。`

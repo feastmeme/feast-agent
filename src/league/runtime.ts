@@ -25,6 +25,12 @@ import { PRESETS } from "./presets/specs.ts";
 import { SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
 import { dayCount, leftOut } from "./prompt/floor.ts";
 import { autopilotGate, lastHostAction, promptChanged, recordHostAction } from "./prompt/host.ts";
+import { callHost, hostShown, type HostCall } from "./ask/host.ts";
+import { appendJournal, readAskState, writeAskState, type AskState } from "./ask/journal.ts";
+import { gatherPack } from "./ask/gather.ts";
+import { validateAnswer, type JournalRow, type Pack } from "./ask/pack.ts";
+import { impacts } from "./quote.ts";
+import { nextDinner } from "./prompt/floor.ts";
 import { sessionNotice, utc8 } from "./register/copy.ts";
 import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { GATE_READ_MS, seasonClosedLine, tradingOpens, writeGate } from "./season-gate.ts";
@@ -104,6 +110,8 @@ export type RuntimeDeps = {
   seasonRead?: () => Promise<LeagueRead | null>;
   /** `--no-jitter`: the gate opens without the start jitter. */
   noJitter?: boolean;
+  /** Task 975, addendum 4: the host's headless CLI (default `callHost`; tests pass a fake). */
+  askHost?: (o: Parameters<typeof callHost>[0]) => Promise<HostCall>;
 };
 
 type Loaded = {
@@ -317,6 +325,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
 
     // A prompt agent's autopilot stands by while its host trades (set below, with the strategy).
     let standingBy = () => false;
+    // Task 975, addendum 4: the floor guard, 20 minutes before the dinner with the day's floor unmet (set below).
+    let guarding = () => false;
     const extras: PresetExtras = {
       claimAndBuyBack: (coin: Address, options) => {
         const intent: Intent = { id: `claim-${clock()}`, kind: "claim", coin, reason: options.reason, source: "preset", createdAt: clock(), claim: { buybackPct: options.buybackPct, minClaimBnb: options.minClaimBnb } };
@@ -332,6 +342,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         }
       },
       standingBy: () => standingBy(),
+      guard: () => guarding(),
     };
 
     const warmup = () =>
@@ -366,7 +377,15 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     type Outcome = { outcome: "filled" | "refused" | "failed" | "unknown" | "stale" | "nothing" | "dropped"; [k: string]: unknown };
     const outcomes = new Map<string, Outcome>();
     const requested = new Map<string, string>();
+    // Task 975, addendum 4: the ask's own trade, journaled with what became of it; its intents are not the host's.
+    const askIds = new Set<string>();
+    let askOutcome: { id: string; done: (outcome: Outcome) => void } | null = null;
     const settle = (intent: Intent, outcome: Outcome) => {
+      if (askOutcome?.id === intent.id) {
+        const done = askOutcome.done;
+        askOutcome = null;
+        done(outcome);
+      }
       if (requested.has(intent.id)) outcomes.set(intent.id, outcome);
     };
     const report = (intentId: string) => {
@@ -377,6 +396,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       outcomes.delete(intentId);
     };
     dropQueued = (reason: string) => {
+      if (askOutcome) {
+        const done = askOutcome.done;
+        askOutcome = null;
+        done({ outcome: "dropped", reason });
+      }
       for (const intentId of [...requested.keys()]) {
         if (!outcomes.has(intentId)) outcomes.set(intentId, { outcome: "dropped", reason });
         report(intentId);
@@ -593,7 +617,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (verdict.forced) log("warmup.forced", { id: intent.id, forced: verdict.forced });
       const approved = verdict.intent;
       // Task 975 (the coordinator's ruling C6): only the host's trade holds the autopilot back, an FL buy or FL sell the guard let through.
-      if (agent!.track === "prompt" && approved.source === "manual" && (approved.kind === "buy" || approved.kind === "sell")) recordHostAction(deps.home, deps.name, approved.kind, clock());
+      if (agent!.track === "prompt" && approved.source === "manual" && !askIds.has(approved.id) && (approved.kind === "buy" || approved.kind === "sell")) recordHostAction(deps.home, deps.name, approved.kind, clock());
 
       if (approved.kind === "buy") {
         const coin = approved.coin!;
@@ -769,6 +793,9 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           }
           book = clearPause(book);
           save();
+        } else if (request?.type === "ask") {
+          // `FL ask <name>` into a running agent: one ask now.
+          askNow = true;
         } else if (request?.type === "reload") {
           const next = loadAgent(deps.home, deps.name);
           if (next?.confirmed) {
@@ -819,7 +846,26 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     // Prompt mode: the host's silence, from its last FL buy or FL sell (or the user's yes, if it has not traded).
     const silentFor = () => clock() - Math.max(lastHostAction(deps.home, deps.name)?.at ?? 0, Date.parse(agent!.confirmed?.at ?? "") || 0);
     const idleMs = () => (agent!.autopilot?.idleMinutes ?? 0) * 60_000;
-    const silent = () => agent!.track === "prompt" && agent!.autopilot !== null && agent!.autopilot !== undefined && agent!.preset !== null && silentFor() >= idleMs();
+    // Task 975, addendum 4: with the ask loop on, the preset is the floor keeper. It trades when the asks have failed
+    // twice in a row, or 20 minutes before the dinner with the day's floor unmet; with no asks (`--ask-with none`) it
+    // takes over after the host's silence, as in league-v5.
+    const askMode = () => agent!.track === "prompt" && Boolean(agent!.preset && agent!.autopilot) && Boolean(agent!.ask) && agent!.ask!.with !== "none";
+    const everyMs = () => (agent!.ask?.every ?? 5) * 60_000;
+    let askState: AskState = readAskState(deps.home, deps.name);
+    let askNow = false;
+    let asking = false;
+    const guardCache = { at: Number.NEGATIVE_INFINITY, on: false };
+    guarding = () => {
+      if (agent!.preset !== "steady" || !agent!.autopilot) return false;
+      const now = clock();
+      if (now - guardCache.at < 30_000) return guardCache.on;
+      const day = extras.day!();
+      guardCache.at = now;
+      guardCache.on = now >= nextDinner(now) - 20 * 60_000 && day !== null && !day.passed;
+      return guardCache.on;
+    };
+    const keeper = () => (askMode() ? askState.streak >= 2 && silentFor() >= everyMs() : silentFor() >= idleMs());
+    const silent = () => agent!.track === "prompt" && agent!.autopilot !== null && agent!.autopilot !== undefined && agent!.preset !== null && (keeper() || guarding());
     const keepsExits = agent.track === "prompt" && agent.preset !== null && Boolean(agent.autopilot) && PRESETS[agent.preset]?.keepsExits === true;
     if (agent.track === "prompt" && !agent.preset) {
       // No autopilot: no strategy. The loop only enforces: the inbox, the preflight, L6, L8, the unresolved check, the notes.
@@ -947,6 +993,64 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
      * machine slept (or the process was suspended): nothing traded meanwhile. It is logged and told once, so
      * `FL status` can say "slept N minutes at <time>".
      */
+    /**
+     * One ask (task 975, addendum 4): the pack from the live book, the board and the disk; the host's answer, checked
+     * against it; at most one intent, through the same road as `FL buy` and `FL sell` (the guard, the executor, the
+     * book). Its outcome is journaled when it settles. A failed call or an invalid answer counts toward the streak.
+     */
+    const askTick = async (startedAt: number) => {
+      const ask = agent!.ask!;
+      askState = { ...askState, lastAskAt: startedAt };
+      writeAskState(deps.home, deps.name, askState);
+      save();
+      // The pack (addenda 4 and 5): the book this runtime just saved, the snapshot the feed holds, the league, candles, impacts.
+      const gathered = await gatherPack({ home: deps.home, agent: agent!, now: startedAt, wallet, chain, snapshot: feed?.held() ?? null, fetch: deps.fetch ?? fetch, site: deps.site ?? siteFromEnv(), gate: { opensAt: gate.opensAt, open: gate.open }, feast, impacts: impacts(executor, chain) });
+      const pack: Pack = gathered.pack;
+      const input = gathered.input;
+      log("ask.pack", { pack: pack.digest, chars: pack.text.length, coins: pack.ids.size, requests: gathered.requests });
+      const host = hostShown(ask.with);
+      const row = (fields: Partial<JournalRow> & { result: string }): JournalRow => ({ at: new Date(startedAt).toISOString(), pack: pack.digest, promptSha: input.prompt.sha256, action: "none", coin: null, symbol: null, amountBnb: null, fraction: null, reason: "", ...fields });
+      const failed = (cause: string) => {
+        askState = { ...askState, streak: askState.streak + 1, cause: askState.streak === 0 ? cause : askState.cause, promptSha: input.prompt.sha256, last: { at: startedAt, action: "none", reason: "", result: `error: ${cause}` } };
+        if (askState.streak === 2) {
+          askState = { ...askState, floorKeeperSince: clock() };
+          notify("ask", `${host} could not be reached: ${cause}; trading on the floor keeper until it answers`);
+        }
+        writeAskState(deps.home, deps.name, askState);
+        appendJournal(deps.home, deps.name, row({ result: `error: ${cause}` }));
+        log("ask", { pack: pack.digest, result: "error", cause, streak: askState.streak });
+      };
+      const call = await (deps.askHost ?? callHost)({ with: ask.with as "claude" | "codex", pack: pack.text, home: deps.home, name: deps.name, model: ask.model });
+      if (!call.ok) return failed(call.cause);
+      const checked = validateAnswer(call.answer, pack);
+      if (!checked.ok) return failed(`invalid answer: ${checked.why}`);
+      const d = checked.decision;
+      if (askState.streak >= 2) notify("ask", `${host} answers again: the floor keeper steps back`);
+      askState = { ...askState, streak: 0, cause: null, floorKeeperSince: null, memo: d.memo || askState.memo, promptSha: input.prompt.sha256 };
+      const decided = { action: d.action, coin: d.coin, symbol: d.symbol, amountBnb: d.amountBnb, fraction: d.fraction, reason: d.reason };
+      const finish = (result: string) => {
+        askState = { ...askState, last: { at: startedAt, action: d.action, reason: d.reason, result } };
+        writeAskState(deps.home, deps.name, askState);
+        appendJournal(deps.home, deps.name, row({ ...decided, result }));
+        log("ask", { pack: pack.digest, action: d.action, coin: d.coin, amountBnb: d.amountBnb, fraction: d.fraction, result });
+      };
+      if (d.action === "hold") return finish("hold");
+      const request: IntentRequest = d.action === "buy" ? { kind: "buy", coin: d.coin, bnb: d.amountBnb, reason: `ask: ${d.reason}` } : { kind: "sell", coin: d.coin, fraction: d.fraction, reason: `ask: ${d.reason}` };
+      const normal = normalizeIntent(request, { snapshot: { feast, now: clock(), limits: agent!.limits }, source: "manual", slippagePct: Math.min(3, agent!.limits.maxSlippagePct), ttlMs: 120_000 });
+      if ("error" in normal) return finish(`invalid: ${normal.error}`);
+      askIds.add(normal.intent.id);
+      askOutcome = {
+        id: normal.intent.id,
+        done: (o) => {
+          const why = (k: string) => (typeof o[k] === "string" ? String(o[k]).slice(0, 160) : "");
+          finish(
+            o.outcome === "filled" ? "filled" : o.outcome === "refused" ? `rejected: ${why("limit")} ${why("message")}`.trim() : o.outcome === "failed" ? `failed: ${why("stage")}: ${why("reason")}` : o.outcome === "nothing" ? "dropped: nothing to sell" : o.outcome === "stale" ? "dropped: it expired before it ran" : o.outcome === "unknown" ? "unknown: its outcome is not known yet" : `dropped: ${why("reason")}`,
+          );
+        },
+      };
+      enqueue([normal.intent]);
+    };
+
     const rest = async () => {
       const before = clock();
       const loopMs = deps.loopMs ?? 1_000;
@@ -997,8 +1101,23 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           autopilotOn = on;
           if (on) nextStrategyTick = 0;
           const minutes = agent.autopilot.idleMinutes;
-          log(on ? "autopilot.on" : "autopilot.off", { preset: agent.preset, idleMinutes: minutes, silentMs: silentFor() });
-          notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : keepsExits ? `your agent traded: autopilot ${agent.preset} opens nothing new; its own positions keep their exits` : `your agent acted: autopilot ${agent.preset} steps back`);
+          const why = !on ? null : keeper() ? (askMode() ? "asks failing" : "host silent") : "floor guard";
+          log(on ? "autopilot.on" : "autopilot.off", { preset: agent.preset, idleMinutes: minutes, silentMs: silentFor(), ...(why ? { why } : {}) });
+          if (why === "floor guard") notify("autopilot", `${Math.round((nextDinner(now) - now) / 60_000)} min to dinner and the day's floor is unmet: the floor keeper (${agent.preset}) fills it`);
+          else if (why === "asks failing") notify("autopilot", `the floor keeper (${agent.preset}) trades until ${hostShown(agent.ask!.with)} answers again`);
+          else if (!on && askMode()) notify("autopilot", `the floor keeper (${agent.preset}) steps back; its own positions keep their exits`);
+          else notify("autopilot", on ? `your agent has been silent for ${minutes} min: autopilot ${agent.preset} trades until it acts` : keepsExits ? `your agent traded: autopilot ${agent.preset} opens nothing new; its own positions keep their exits` : `your agent acted: autopilot ${agent.preset} steps back`);
+        }
+      }
+      // Task 975, addendum 4: the ask, once the host has been silent an interval since its last trade and the last ask.
+      if (gate.open && !warming && askMode() && !asking && !askOutcome) {
+        const since = Math.max(lastHostAction(deps.home, deps.name)?.at ?? 0, askState.lastAskAt ?? 0, Date.parse(agent.confirmed?.at ?? "") || 0);
+        if (askNow || now - since >= everyMs()) {
+          askNow = false;
+          asking = true;
+          void askTick(now)
+            .catch((error: unknown) => log("ask.failed", { reason: String((error as Error).message).slice(0, 200) }))
+            .finally(() => (asking = false));
         }
       }
       // Notes are not trades: the gate lets them through.
@@ -1009,7 +1128,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
       if (feed && !warming) {
         // An autopilot listens only while it is on; when it steps back, the next read starts at the head again.
-        const wanted = agent.track !== "prompt" || autopilotOn;
+        const wanted = agent.track !== "prompt" || autopilotOn || askMode();
         if (!wanted && feedOn) feed.reset();
         feedOn = wanted;
         // A strategy that listens reads every interval; one that only reads the board, once a tick.

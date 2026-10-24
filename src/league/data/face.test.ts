@@ -99,7 +99,7 @@ describe("FL data: the JSON", () => {
     expect(data.ohlcv).toBeUndefined();
     expect(data.coins).toHaveLength(5);
     const c1 = data.coins.find((c: Json) => c.coin === C1);
-    expect(c1).toEqual({
+    expect(c1).toMatchObject({
       coin: C1,
       symbol: { untrusted: true, text: "C01" },
       name: { untrusted: true, text: "Coin 01" },
@@ -325,7 +325,7 @@ describe("FL data on the snapshot (task 967)", () => {
     expect(data.source).toBe("snapshot");
     expect(w.feast.calls.filter((c) => c.includes("/api/v1/snapshot"))).toHaveLength(1);
     expect(w.feast.calls.filter((c) => c.includes("/api/v1/pools") || c.includes("/v1/board"))).toEqual([]);
-    expect(data.coins.find((c: Json) => c.coin === C1)).toEqual({
+    expect(data.coins.find((c: Json) => c.coin === C1)).toMatchObject({
       coin: C1,
       symbol: { untrusted: true, text: "C01" },
       name: { untrusted: true, text: "Coin 01" },

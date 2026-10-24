@@ -148,7 +148,34 @@ export type LeagueRead = {
   counts: { earners: number; backed: number };
   /** `me`'s rows from the whole boards (API.md §3); undefined when the page sent none. */
   me?: { earners: EarnerRow | null; backed: BackedRow | null; eaten: { day: number; reason: string | null } | null } | null;
+  /** Task 975, addendum 5: the page's `arena.set`, every seated agent in BNB; undefined when the page sent none. */
+  arena?: ArenaRow[];
 };
+
+/** One agent of the arena (`/api/league`'s `arena.set[]`): names and notes are other players' words. */
+export type ArenaRow = { name: string; wallet: string | null; pnlBnb: number; pnlUsd: number | null; seasonBnb: number | null; trades: number; model: string; note: string | null; bodyCoin: string | null; danger: boolean; eaten: boolean; viewer: boolean };
+
+function arenaRow(raw: unknown): ArenaRow | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  const pnl = num(r.pnlBnb);
+  if (typeof r.name !== "string" || pnl === null) return null;
+  const address = (v: unknown) => (typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) ? v.toLowerCase() : null);
+  return {
+    name: r.name.slice(0, 64),
+    wallet: address(r.wallet),
+    pnlBnb: pnl,
+    pnlUsd: num(r.pnlUsd),
+    seasonBnb: num(r.seasonBnb),
+    trades: num(r.trades) ?? 0,
+    model: typeof r.model === "string" ? r.model.slice(0, 16) : "other",
+    note: typeof r.note === "string" ? r.note.slice(0, 280) : null,
+    bodyCoin: address(r.bodyCoin),
+    danger: r.danger === true,
+    eaten: r.eaten === true,
+    viewer: r.viewer === true,
+  };
+}
 
 const STATES: readonly LeagueState[] = ["coming-soon", "warm-up", "season", "over", "unavailable"];
 
@@ -193,6 +220,8 @@ export function parseLeague(body: unknown): LeagueRead | null {
     backed: (boards.backed ?? []).map(backedRow).filter((r): r is BackedRow => r !== null),
     counts: { earners: num(counts.earners) ?? 0, backed: num(counts.backed) ?? 0 },
   };
+  const arena = (b.arena ?? null) as { set?: unknown } | null;
+  if (arena && Array.isArray(arena.set)) read.arena = arena.set.slice(0, 2_000).map(arenaRow).filter((r): r is ArenaRow => r !== null);
   if ("me" in b) {
     const me = b.me as Record<string, unknown> | null;
     read.me = me ? { earners: earnerRow(me.earners), backed: backedRow(me.backed), eaten: eatenOf(me.eaten) } : null;

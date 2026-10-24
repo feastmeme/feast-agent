@@ -22,7 +22,8 @@ import { comparePosition, CURSOR_RE, decodeCursor } from "./events.ts";
  *
  * The newest good snapshot's coins and its ETag are kept in `<home>/cache/snapshot.json`, shared by the runtime
  * and `FL data`, with every occurrence of the wallet's own address written as "self" (the home's rule); "self"
- * maps back in memory only. Its events are not kept: no reader needs them.
+ * maps back in memory only. Its 120-second events tail is kept with them (task 975, addendum 5: `FL data`'s flow and
+ * launches read it), with the wallet written as "self" there too.
  */
 
 export const SNAPSHOT_PATH = "/api/v1/snapshot";
@@ -65,6 +66,8 @@ export type FeastSnapshot = {
   /** Where the whole tail is, when `events` was cut (`truncated`): a path on the site, checked (`EVENTS_PATH`); else null. */
   eventsUrl: string | null;
   truncated: boolean;
+  /** Task 975, addendum 5: what the snapshot says of itself (its coverage, its busiest, how far behind); null when it says nothing. */
+  meta?: { coinsTotal: number | null; coinsListed: number | null; coinsOmitted: number | null; mostActive: Address[]; blocksBehind: number | null } | null;
   coins: Record<string, unknown>[];
   events: Record<string, unknown>[];
 };
@@ -91,7 +94,12 @@ export function parseSnapshot(body: unknown): FeastSnapshot | null {
   // The position after the snapshot: its newest event, else (an empty tail) where the tail begins.
   const cursor = cursorOf(b.toCursor) ?? cursorOf(b.cursor) ?? afterCursor;
   const eventsUrl = typeof b.events_url === "string" && EVENTS_PATH.test(b.events_url) && !b.events_url.includes("..") ? b.events_url : null;
-  return { generatedAt: time(b.generatedAt), block, cursor, fromCursor: cursorOf(b.fromCursor), afterCursor, eventsUrl, truncated: b.truncated === true, coins, events };
+  const n = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null);
+  const board = (b.board ?? {}) as { mostActive?: unknown };
+  const asOf = (b.asOf ?? {}) as { blocksBehind?: unknown };
+  const mostActive = Array.isArray(board.mostActive) ? board.mostActive.filter((a): a is string => typeof a === "string" && isAddress(a, { strict: false })).slice(0, 20).map((a) => getAddress(a)) : [];
+  const meta = { coinsTotal: n(b.coinsTotal), coinsListed: n(b.coinsListed), coinsOmitted: n(b.coinsOmitted), mostActive, blocksBehind: n(asOf.blocksBehind) };
+  return { generatedAt: time(b.generatedAt), block, cursor, fromCursor: cursorOf(b.fromCursor), afterCursor, eventsUrl, truncated: b.truncated === true, coins, events, meta };
 }
 
 /** The site's events document (`events_url`): the whole tail and its cursors, no coins; null for anything else. */
@@ -196,8 +204,11 @@ function writeCacheFile(home: string, wallet: string, file: CacheFile): void {
 export function readSnapshotCache(home: string, wallet: string | null): CachedSnapshot | null {
   const file = readCacheFile(home);
   if (!file?.snapshot || typeof file.at !== "number") return null;
-  const snapshot = parseSnapshot(file.snapshot);
-  if (!snapshot) return null;
+  const parsed = parseSnapshot(file.snapshot);
+  if (!parsed) return null;
+  // The cache holds the parsed form: its own `meta` comes back as it was written.
+  const kept = (file.snapshot as { meta?: FeastSnapshot["meta"] }).meta;
+  const snapshot = kept ? { ...parsed, meta: kept } : parsed;
   const self = wallet?.toLowerCase() ?? null;
   const coins = self ? snapshot.coins.map((c) => (c.creator === "self" ? { ...c, creator: self } : c)) : snapshot.coins;
   return { at: file.at, etag: typeof file.etag === "string" ? file.etag : null, snapshot: { ...snapshot, coins } };
@@ -412,7 +423,8 @@ export class SnapshotClient {
     const cache = this.o.cache;
     if (!cache?.wallet || !this.snapshot) return;
     try {
-      writeCacheFile(cache.home, cache.wallet, { version: 1, at: now, etag: this.etag, snapshot: { ...this.snapshot, events: [] }, unavailableAt: null });
+      // The events tail is kept too (task 975, addendum 5): FL data's flow and launches read it; the wallet is "self" in it.
+      writeCacheFile(cache.home, cache.wallet, { version: 1, at: now, etag: this.etag, snapshot: this.snapshot, unavailableAt: null });
     } catch {
       // A cache that cannot be written never stops a read.
     }

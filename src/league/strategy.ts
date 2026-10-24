@@ -114,6 +114,8 @@ export type PresetExtras = {
   claimAndBuyBack(coin: Address, options: { buybackPct: number; minClaimBnb: number; reason: string }): string | null;
   day?(): DayCount | null;
   standingBy?(): boolean;
+  /** Task 975, addendum 4: the floor guard is on (20 minutes before the dinner, the day's floor unmet): the floor keeper's smallest, fastest moves. */
+  guard?(): boolean;
 };
 
 export type Strategy = {

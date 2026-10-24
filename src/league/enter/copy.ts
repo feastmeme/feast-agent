@@ -195,7 +195,15 @@ const opensText = (opens: OpensShown, lang: Lang) => {
 /** Once the season is on (task 975, addendum 1): it trades now, and when the backup would take over. */
 const seasonOn = (lang: Lang, autopilot: AutopilotShown | undefined, sentence: boolean) => {
   const zh = lang === "zh";
-  const later = autopilot ? (zh ? `（你 ${autopilot.idleMinutes} 分钟不动，autopilot 就接手）` : ` (autopilot in ${autopilot.idleMinutes} minutes if you go quiet)`) : "";
+  const later = !autopilot
+    ? ""
+    : asking(autopilot)
+      ? zh
+        ? `（你 ${autopilot.ask.every} 分钟不动，它就去问你的 ${hostName(autopilot.ask.with)}）`
+        : ` (it asks your ${hostName(autopilot.ask.with)} in ${autopilot.ask.every} minutes if you go quiet)`
+      : zh
+        ? `（你 ${autopilot.idleMinutes} 分钟不动，autopilot 就接手）`
+        : ` (autopilot in ${autopilot.idleMinutes} minutes if you go quiet)`;
   if (zh) return `赛季已经开始${sentence ? "：" : "，"}它现在就开始交易${later}`;
   return `${sentence ? "The" : "the"} season is on: it starts trading now${later}`;
 };
@@ -209,11 +217,24 @@ export function waitingLine(opens: OpensShown, lang: Lang, autopilot?: Autopilot
 }
 
 /** A prompt agent's autopilot backup as the entry shows it (task 975): its preset and minutes, or none. */
-export type AutopilotShown = { preset: string; idleMinutes: number } | null;
+/** Task 975, addendum 4: with `ask`, the runtime asks the host's AI every `every` minutes; the preset is the floor keeper. */
+export type AutopilotShown = { preset: string; idleMinutes: number; ask?: { every: number; with: string } | null } | null;
+
+/** The host as the copy names it. */
+const hostName = (w: string) => (w === "claude" ? "Claude Code" : w === "codex" ? "Codex" : w);
+/** The ask loop is on (a host to ask, not "none"). */
+const asking = (a: AutopilotShown): a is NonNullable<AutopilotShown> & { ask: { every: number; with: string } } => Boolean(a?.ask && a.ask.with !== "none");
 
 /** The backup in one sentence, under the agent's card and after "You're in" (the owner's ruling A, 2026-10-24). */
 export function autopilotLine(autopilot: AutopilotShown, lang: Lang): string {
   const zh = lang === "zh";
+  // Addendum 4: the three facts: it asks your AI on a timer; the floor keeper covers a failure and the dinner.
+  if (asking(autopilot)) {
+    const host = hostName(autopilot.ask.with);
+    return zh
+      ? `它每 ${autopilot.ask.every} 分钟问一次你的 ${host} 该做什么（你自己没在交易的时候）；${host} 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。`
+      : `Every ${autopilot.ask.every} minutes it asks your ${host} what to do (while you are not trading yourself); if ${host} can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.`;
+  }
   if (autopilot)
     return zh
       ? `autopilot 兜底已开：你 ${autopilot.idleMinutes} 分钟不动，它就按 ${autopilot.preset} 预设交易；\`--no-autopilot\` 可关。`
@@ -237,6 +258,10 @@ export function awakeLine(lang: Lang): string {
  */
 export function tradeNowLine(autopilot: AutopilotShown, promptFile: string, lang: Lang): string {
   const zh = lang === "zh";
+  if (asking(autopilot))
+    return zh
+      ? `赛季已经开始。现在就按 ${promptFile} 决策和交易；你 ${autopilot.ask.every} 分钟不动，运行时就去问你的 ${hostName(autopilot.ask.with)} 该做什么。`
+      : `The season is on. Decide and trade now by ${promptFile}; if you go quiet for ${autopilot.ask.every} minutes, the runtime asks your ${hostName(autopilot.ask.with)} what to do.`;
   if (autopilot)
     return zh
       ? `赛季已经开始。现在就按 ${promptFile} 决策和交易；你 ${autopilot.idleMinutes} 分钟不动，autopilot（${autopilot.preset}）就接手。`

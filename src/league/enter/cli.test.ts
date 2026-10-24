@@ -53,7 +53,7 @@ function setup() {
   const home = join(dir, "home");
   const baw = fakeBawBinary(dir);
   // Port 9 (discard) refuses at once: the chain and the page cannot be asked.
-  const env = { FEAST_LEAGUE_HOME: home, FEAST_LEAGUE_BAW: baw.path, FEAST_MAINNET_RPC_URL: "http://127.0.0.1:9", FEAST_LEAGUE_SITE: "http://127.0.0.1:9" };
+  const env = { FEAST_LEAGUE_HOME: home, FEAST_LEAGUE_MODEL: "other", FEAST_LEAGUE_BAW: baw.path, FEAST_MAINNET_RPC_URL: "http://127.0.0.1:9", FEAST_LEAGUE_SITE: "http://127.0.0.1:9" };
   return { home, env, baw };
 }
 

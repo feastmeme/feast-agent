@@ -18,6 +18,8 @@ import { duration, short, utc8 } from "../register/copy.ts";
 import { parseLeague, type LeagueRead } from "../register/site.ts";
 import { agentPaths, checkAgentName, readJson, walletLockHolder, writeJsonAtomic } from "../store.ts";
 import { candles, parseSince, quoteWeiToBnb, sqrtToBnb, type Candle } from "./ohlcv.ts";
+import { coinMeta, emptyFlow, picture, type Flow, type Picture, type Windows } from "./picture.ts";
+import { RULES, standing } from "./standing.ts";
 import { notesSection, type NotesSection } from "./notes.ts";
 import { selfView, type PositionOut, type SelfView } from "./self.ts";
 import { untrusted, UNTRUSTED_NOTE, UNTRUSTED_PATHS, type Untrusted } from "./untrusted.ts";
@@ -54,7 +56,7 @@ import { untrusted, UNTRUSTED_NOTE, UNTRUSTED_PATHS, type Untrusted } from "./un
  * dependency is injected.
  */
 
-export type FaceChain = Pick<LeagueChain, "coinInfo" | "quoteBnbE18" | "markWei" | "bnbUsd" | "agentIdOf">;
+export type FaceChain = Pick<LeagueChain, "coinInfo" | "quoteBnbE18" | "markWei" | "bnbUsd" | "agentIdOf"> & Partial<Pick<LeagueChain, "balance">>;
 
 export type FaceDeps = {
   home: string;
@@ -69,6 +71,8 @@ export type FaceDeps = {
   timeoutMs?: number;
   /** The snapshot's interval jitter (unused by one read; injected like the rest). */
   random?: () => number;
+  /** Task 975, addendum 5: price impacts from the chain's quoter (`quote.ts`): a 0.01 BNB buy, and selling a position. */
+  impacts?: { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null> };
 };
 
 /** `live`: the pools and the board, as before task 967, never the snapshot. `notes: false` (`--no-notes`): no notes read (task 968). */
@@ -92,6 +96,23 @@ export type CoinOut = {
   trades24h: number | null;
   holders: number | null;
   lastTradeAt: string | null;
+  /** Task 975, addendum 5: BNB-quoted or stock-paired, the quote spelled out, the stock's underlying ticker. */
+  type?: "bnb" | "stock";
+  quoteSymbol?: string;
+  underlying?: string | null;
+  /** The price × the fixed supply of 1,000,000,000 coins, BNB. */
+  marketCapBnb?: number | null;
+  /** The hook's 1 % and the pool's fee, each way, for a buy and its sale. */
+  roundTripFeePct?: number;
+  ageMinutes?: number | null;
+  /** The snapshot's 120-second tail: the last 2 minutes' buys and sells. */
+  flow2m?: Flow;
+  /** From 5-minute candles, for the coins picked this read (positions, the 12 busiest, the new launches). */
+  change?: Windows["change"] | null;
+  volume?: Windows["volume"] | null;
+  /** A 0.01 BNB buy's price impact, %; picked coins only, when a quoter is given. */
+  impactPct?: number | null;
+  picked?: boolean;
 };
 
 export type FaceResult = { code: 0 | 1 | 2; data: Record<string, unknown>; text: string };
@@ -145,6 +166,10 @@ const sqrtOf = (v: unknown) => (typeof v === "string" && /^\d{1,80}$/.test(v) &&
 export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceResult> {
   // Every request to feast.meme carries the host's and the release's headers; the indexer's never (task 975).
   deps = { ...deps, fetch: withHostHeaders(deps.fetch, [deps.site]) };
+  // Every request of this call, counted (task 975, addendum 5: a tick stays under about 30).
+  let requests = 0;
+  const counted = deps.fetch;
+  deps = { ...deps, fetch: ((input: string | URL | Request, init?: RequestInit) => ((requests += 1), counted(input, init))) as typeof fetch };
   const now = (deps.now ?? Date.now)();
   const home = deps.home;
   const cacheDir = join(home, "cache");
@@ -226,6 +251,7 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
   let stale: { since: string; reason: string } | null = null;
   const missing = new Set<string>();
   // --live, or a route that answered 404 in the last 10 minutes: the pools, as before.
+  let heldSnapshot: FeastSnapshot | null = null;
   const unavailable = snapshotUnavailableAt(home);
   let legacy = input.live === true || (unavailable !== null && now - unavailable >= 0 && now - unavailable < RECHECK_MS);
   if (!legacy) {
@@ -251,6 +277,7 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     if (held) {
       pools = await snapshotPools(held, deps, self, missing);
       source = "snapshot";
+      heldSnapshot = held;
     }
   }
 
@@ -351,12 +378,50 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
   const usdRef = typeof bnbUsd === "number" && Number.isFinite(bnbUsd) && bnbUsd > 0 ? { bnbUsd: Number(bnbUsd.toFixed(4)), at: new Date(now).toISOString() } : null;
 
   // --- the agent's own book ------------------------------------------------------------------------
-  const mine: SelfView | null = name ? await selfView(home, name, { chain: deps.chain, now }) : null;
+  const mine: SelfView | null = name ? await selfView(home, name, { chain: deps.chain, now, wallet, exitImpact: deps.impacts?.exit }) : null;
+
+  // --- what is moving now (task 975, addendum 5): the tail's flow, the candles, the impacts ---------------------
+  let pictured: Picture | null = null;
+  if (heldSnapshot && !rateLimited) {
+    pictured = await picture({
+      now,
+      snapshot: heldSnapshot,
+      quoteBnb: async (q) => {
+        const e18 = quoteBnb.get(q.toLowerCase()) ?? (await deps.chain.quoteBnbE18(q).catch(() => null));
+        return e18 === null || e18 === undefined ? null : Number(e18) / 1e18;
+      },
+      get,
+      site,
+      cacheDir,
+      impact: deps.impacts?.buy,
+      held: (mine?.positions ?? []).map((p) => p.coin),
+      own: new Set(coins.filter((c) => c.own).map((c) => c.coin.toLowerCase())),
+    });
+  }
+  const byCoin = new Map((pictured?.coins ?? []).map((c) => [c.coin.toLowerCase(), c]));
+  for (const c of coins) {
+    const p = byCoin.get(c.coin.toLowerCase());
+    const meta = coinMeta({ quote: c.quote.address, quoteSymbol: null, priceBnb: c.priceBnb });
+    Object.assign(c, {
+      type: meta.type,
+      quoteSymbol: meta.quoteSymbol,
+      underlying: meta.underlying,
+      marketCapBnb: meta.marketCapBnb,
+      roundTripFeePct: meta.roundTripFeePct,
+      ageMinutes: c.launchedAt === null ? null : Math.max(0, Math.round((now - Date.parse(c.launchedAt)) / 60_000)),
+      flow2m: p?.flow2m ?? emptyFlow(),
+      change: p?.windows?.change ?? null,
+      volume: p?.windows?.volume ?? null,
+      impactPct: p?.impactPct ?? null,
+      picked: p?.picked ?? false,
+    } satisfies Partial<CoinOut>);
+  }
 
   // --- the league ----------------------------------------------------------------------------------------
   let league: Record<string, unknown> | null = null;
   if (!rateLimited) {
-    const got = await get(`${site}/api/league?view=today&limit=10${wallet ? `&me=${wallet.toLowerCase()}` : ""}`);
+    // The whole field (task 975, addendum 5): `limit=100`, and the arena the page sends with it.
+    const got = await get(`${site}/api/league?view=today&limit=100${wallet ? `&me=${wallet.toLowerCase()}` : ""}`);
     const read = !("error" in got) && got.status === 200 ? parseLeague(got.body) : null;
     if (read) league = leagueOut(read, got as { body: unknown }, now, self);
     else if (!rateLimited) {
@@ -424,6 +489,11 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     ...(stale ? { stale } : {}),
     missing: [...MISSABLE.filter((f) => missing.has(f)).map((f) => `coins[].${f}`), ...(notes && !notes.available ? ["notes"] : [])],
     coins,
+    // Task 975, addendum 5: what the snapshot says of itself, the new launches, how many quiet coins were not picked.
+    market: pictured?.market ?? null,
+    launches: (pictured?.launches ?? []).map((l) => ({ ...l, symbol: l.symbol === null ? null : untrusted(l.symbol) })),
+    quietCoins: pictured?.quiet ?? null,
+    requests: { thisCall: requests },
     self: mine,
     ...(selfNote ? { selfNote } : {}),
     league,
@@ -607,6 +677,10 @@ function leagueOut(read: LeagueRead, got: { body: unknown }, now: number, self: 
         }
       : null,
     idleRule: { text: PAGE_IDLE_RULE, floorTrades: ACTIVITY_FLOOR_TRADES, floorBnb: ACTIVITY_FLOOR_BNB, asOf: "2026-10-24" },
+    // Task 975, addendum 5: the whole arena in BNB, this agent's standing and tonight's cutoff, and the rules with their sources.
+    arena: read.arena ? read.arena.slice(0, 200).map((a) => ({ name: untrusted(a.name), wallet: a.wallet ? wallet(a.wallet) : null, pnlBnb: a.pnlBnb, seasonBnb: a.seasonBnb, trades: a.trades, model: a.model, danger: a.danger, eaten: a.eaten, viewer: a.viewer, bodyCoin: a.bodyCoin, note: a.note === null ? null : untrusted(a.note) })) : null,
+    standing: read.arena ? standing(read.arena, self) : null,
+    rules: RULES,
   };
 }
 

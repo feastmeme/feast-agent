@@ -6,6 +6,7 @@ import { DEFAULT_LIMITS, loosenedBeyond, resolveLimits, type Limits } from "./li
 import { PRESETS, resolveParams, type PresetId } from "./presets/specs.ts";
 import { CAP_REFUSAL, DEFAULT_IDLE_MINUTES, IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, LEAGUE_CAP_BNB, SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
 import { readPrompt } from "./prompt/host.ts";
+import { ASK_EVERY_DEFAULT, ASK_EVERY_MAX, ASK_EVERY_MIN, ASK_WITH, type AskWith } from "./ask/host.ts";
 import { agentPaths, checkAgentName, readJson, writeJsonAtomic } from "./store.ts";
 
 /**
@@ -33,6 +34,13 @@ export type AgentConfig = {
   prompt?: { path: string; sha256: string } | null;
   /** The autopilot: the preset trades only after the host has been silent this long (prompt track only). */
   autopilot?: { idleMinutes: number } | null;
+  /**
+   * Task 975, addendum 4: the runtime asks the player's own AI what to do, every `every` minutes of the host's
+   * silence, through its headless CLI (`with`; "none": nobody is asked and the preset keeps the floor as in v5). The
+   * preset is then the floor keeper: it trades when the asks fail twice in a row, and 20 minutes before the dinner
+   * with the day's floor unmet. Prompt track with an autopilot only; null or absent: no asks.
+   */
+  ask?: { every: number; with: AskWith; model: string | null } | null;
   params: Record<string, unknown>;
   /** Which parameters came from the user's sentence (the rest are defaults). */
   given: string[];
@@ -60,6 +68,8 @@ export type PlanInput = {
   promptPath?: string;
   /** Prompt mode with an autopilot: the host's silence, in minutes, before the preset trades. */
   idleMinutes?: number;
+  /** Task 975, addendum 4: the ask loop (prompt mode with an autopilot only). */
+  ask?: { every?: number; with?: string; model?: string | null } | null;
   params?: Record<string, unknown>;
   limits?: Record<string, unknown>;
   tickSeconds?: number;
@@ -151,6 +161,7 @@ function planPrompt(input: PlanInput, limits: Limits, errors: string[], now: Dat
   let params: Record<string, unknown> = {};
   let tick = SAFETY_PASS_SECONDS;
   let autopilot: AgentConfig["autopilot"] = null;
+  let ask: AgentConfig["ask"] = null;
   if (input.preset) {
     if (!(input.preset in PRESETS)) return { ok: false, errors: [...errors, `unknown preset "${input.preset}"; the presets are ${Object.keys(PRESETS).join(", ")}`] };
     preset = input.preset as PresetId;
@@ -161,8 +172,19 @@ function planPrompt(input: PlanInput, limits: Limits, errors: string[], now: Dat
     const idle = input.idleMinutes ?? DEFAULT_IDLE_MINUTES;
     if (!Number.isInteger(idle) || idle < IDLE_MINUTES_MIN || idle > IDLE_MINUTES_MAX) errors.push(`the idle threshold is ${IDLE_MINUTES_MIN}–${IDLE_MINUTES_MAX} whole minutes (got ${idle})`);
     autopilot = { idleMinutes: idle };
+    if (input.ask) {
+      const every = input.ask.every ?? ASK_EVERY_DEFAULT;
+      const w = input.ask.with ?? "none";
+      const model = input.ask.model ?? null;
+      if (!Number.isInteger(every) || every < ASK_EVERY_MIN || every > ASK_EVERY_MAX) errors.push(`--every is ${ASK_EVERY_MIN}–${ASK_EVERY_MAX} whole minutes (got ${every})`);
+      if (!(ASK_WITH as readonly string[]).includes(w)) errors.push(`--ask-with is one of ${ASK_WITH.join(", ")}`);
+      // A model's name goes on the child's argv: a plain token, never a flag.
+      if (model !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(model)) errors.push("--ask-model is a model's name: letters, digits, dots, dashes, colons");
+      ask = { every, with: w as AskWith, model };
+    }
   } else {
     if (input.idleMinutes !== undefined) errors.push("--idle-minutes needs --autopilot <preset>: without one, nothing trades on its own");
+    if (input.ask) errors.push("--every and --ask-with go with the autopilot: --no-autopilot means no asks and no floor keeper");
     if (input.tickSeconds !== undefined) errors.push("a prompt agent without an autopilot has no tick: your agent decides when to look");
     if (Object.keys(input.params ?? {}).length > 0) errors.push("a prompt agent without an autopilot has no parameters: the prompt is the strategy");
   }
@@ -179,6 +201,7 @@ function planPrompt(input: PlanInput, limits: Limits, errors: string[], now: Dat
       script: null,
       prompt: { path: prompt.path, sha256: prompt.sha256 },
       autopilot,
+      ...(ask ? { ask } : {}),
       params,
       given: Object.keys(input.params ?? {}),
       limits,

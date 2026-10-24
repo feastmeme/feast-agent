@@ -56,7 +56,7 @@ function setup() {
   if (!planned.ok) throw new Error(planned.errors.join("; "));
   saveAgent(home, confirmAgent(planned.agent));
   const closed = "http://127.0.0.1:9";
-  const env = { FEAST_LEAGUE_HOME: home, FEAST_LEAGUE_BAW: fakeBaw(dir), FEAST_MAINNET_RPC_URL: closed, FEAST_LEAGUE_SITE: closed, FEAST_LEAGUE_INDEXER: closed };
+  const env = { FEAST_LEAGUE_HOME: home, FEAST_LEAGUE_MODEL: "other", FEAST_LEAGUE_BAW: fakeBaw(dir), FEAST_MAINNET_RPC_URL: closed, FEAST_LEAGUE_SITE: closed, FEAST_LEAGUE_INDEXER: closed };
   const prompt = join(dir, "strategy.md");
   writeFileSync(prompt, "Ride coins whose volume is growing.\nSize 0.005 BNB.\nNote why.\n");
   return { dir, home, env, prompt };

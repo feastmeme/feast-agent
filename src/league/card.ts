@@ -47,7 +47,13 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
       const back = spec.keepsExits
         ? "Once your agent trades, it opens nothing new; the take-profit, stop-loss and time stop of the positions it opened stay armed (your agent may sell them sooner with FL sell)."
         : "It steps back as soon as your agent trades; positions it opened are then your agent's to manage.";
-      lines.push(`Autopilot backup: on. If your agent makes no FL buy or FL sell for ${agent.autopilot.idleMinutes} min, the ${agent.preset} preset (${spec.title}) trades until your agent trades again: it ${spec.does}. A note or a read does not hold it back. ${back} --no-autopilot turns it off.`);
+      if (agent.ask && agent.ask.with !== "none") {
+        // Task 975, addendum 4: the runtime asks the player's own AI on a timer; the preset is the floor keeper underneath.
+        const host = agent.ask.with === "claude" ? "Claude Code" : "Codex";
+        const cli = agent.ask.with === "claude" ? "claude -p" : "codex exec";
+        lines.push(`Ask loop: every ${agent.ask.every} min with no FL buy or FL sell from your agent, the runtime asks ${host} (\`${cli}\`, on your own login, ${agent.ask.model ? `model ${agent.ask.model}` : "its default model"}) what to do now, handing it your prompt, the market, the book, the league and its own journal; it makes the one buy, sell or hold the answer names, within the hard limits below. A note or a read does not hold it back. --every N changes how often (FL every ${agent.name} N later); --ask-with none stops the asks.`);
+        lines.push(`Floor keeper: the ${agent.preset} preset (${spec.title}) trades only when ${host} cannot be reached twice in a row, and 20 minutes before dinner while the day's floor is unmet: it ${spec.does}. ${back} --no-autopilot turns off both the asks and the floor keeper.`);
+      } else lines.push(`Autopilot backup: on. If your agent makes no FL buy or FL sell for ${agent.autopilot.idleMinutes} min, the ${agent.preset} preset (${spec.title}) trades until your agent trades again: it ${spec.does}. A note or a read does not hold it back. ${back} --no-autopilot turns it off.`);
       if (agent.preset === "steady") lines.push(steadySpend(agent.params));
     } else {
       lines.push(`Autopilot backup: off (--no-autopilot). Nothing trades on its own except the hard stop-loss (L6), which never sells your own coin. The league page's rule: ${PAGE_IDLE_RULE}.`);

@@ -1,4 +1,6 @@
 import { confirmAgent, loadAgent, planAgent, saveAgent, type AgentConfig, type PlanInput } from "./agent.ts";
+import { ASK_EVERY_DEFAULT, askWithFor } from "./ask/host.ts";
+import type { Model } from "./headers.ts";
 import { DEFAULT_AUTOPILOT } from "./prompt/constants.ts";
 import { auditRefusal } from "./audit/verdict.ts";
 import { renderCard } from "./card.ts";
@@ -24,8 +26,19 @@ export function autopilotChoice(flags: { autopilot?: string; noAutopilot?: boole
   return { ok: true, preset: flags.autopilot ?? DEFAULT_AUTOPILOT };
 }
 
+/**
+ * The ask loop from its flags (task 975, addendum 4): with the autopilot, every `--every` minutes (default 5) the
+ * runtime asks the host the CLI names (`--ask-with`, default the host's hint: claude or codex, else none), with its
+ * default model unless `--ask-model`. `--no-autopilot` means no asks and no floor keeper, so the flags are refused.
+ */
+export function askChoice(flags: { noAutopilot?: boolean; every?: number; askWith?: string; askModel?: string; host: Model }): { ok: true; ask: PlanInput["ask"] } | { ok: false; error: string } {
+  const given = flags.every !== undefined || flags.askWith !== undefined || flags.askModel !== undefined;
+  if (flags.noAutopilot) return given ? { ok: false, error: "--every and --ask-with go with the autopilot: --no-autopilot means no asks and no floor keeper" } : { ok: true, ask: null };
+  return { ok: true, ask: { every: flags.every ?? ASK_EVERY_DEFAULT, with: flags.askWith ?? askWithFor(flags.host), model: flags.askModel ?? null } };
+}
+
 /** What makes a new card: the track, the prompt, the preset, the autopilot, the parameters, the limits, the tick. */
-export const shapeOf = (a: AgentConfig) => JSON.stringify([a.track, a.prompt ?? null, a.preset, a.autopilot ?? null, a.params, a.limits, a.tickSeconds]);
+export const shapeOf = (a: AgentConfig) => JSON.stringify([a.track, a.prompt ?? null, a.preset, a.autopilot ?? null, a.ask ?? null, a.params, a.limits, a.tickSeconds]);
 
 export type StartCheck =
   | { kind: "not-planned"; errors: string[] }

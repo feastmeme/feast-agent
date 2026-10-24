@@ -22,10 +22,15 @@ import { selfView } from "./data/self.ts";
 import { INDEXER_URL } from "./events.ts";
 import { refuseEarly } from "./early.ts";
 import { Executor } from "./executor.ts";
+import { impacts, quoteBuy, quoteSell } from "./quote.ts";
+import { ASK_EVERY_MAX, ASK_EVERY_MIN, hostShown } from "./ask/host.ts";
+import { gatherPack } from "./ask/gather.ts";
+import { journalPath, readAskState, readJournal } from "./ask/journal.ts";
+import { readSnapshotCache, SnapshotClient, CACHE_FRESH_MS } from "./feed/snapshot.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
 import { noteCommand } from "./notes/queue.ts";
 import { notesLogin, recordedAgentId } from "./notes/session.ts";
-import { checkModel, declareHost, readDeclaredHost } from "./headers.ts";
+import { checkModel, declareHost, modelHint, readDeclaredHost } from "./headers.ts";
 import { PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { dayLine } from "./prompt/floor.ts";
 import { lastSleep, promptChanged, within } from "./prompt/host.ts";
@@ -54,6 +59,7 @@ import {
   registerCard,
   seatedLine,
   sessionNotice,
+  short,
   signingLine,
   utc8,
   walletNotReady,
@@ -64,7 +70,7 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
-import { awakeLine, tradeNowLine } from "./enter/copy.ts";
+import { awakeLine, clean, tradeNowLine } from "./enter/copy.ts";
 import { enter, entryOneShot, readEntry } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv } from "./register/site.ts";
@@ -73,7 +79,7 @@ import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./
 import { standingLines, type StandingInput } from "./season-card.ts";
 import { readGate } from "./season-gate.ts";
 import { sessionView } from "./session.ts";
-import { autopilotChoice, prepareStart } from "./start.ts";
+import { askChoice, autopilotChoice, prepareStart } from "./start.ts";
 import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
 import type { IntentRequest } from "./strategy.ts";
 
@@ -105,6 +111,17 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   the script audit: static rules, then the model read's verdict
   script check <file.mjs> [--json] the script against a stub world, through the real guard; a pass on record with a
                                   passed audit counts as the warm-up done for that exact file
+  plan|start|enter … [--every N] [--ask-with claude|codex|none] [--ask-model <name>]
+                                  the ask loop: every N minutes (default 5, 2–120) without a buy or sell from your agent,
+                                  the runtime asks your AI's headless CLI (claude -p, codex exec; default the host's own)
+                                  what to do, and makes its one buy, sell or hold within the hard limits; the floor keeper
+                                  (steady) trades when it fails twice in a row, and 20 minutes before dinner with the floor
+                                  unmet. --ask-with none: no asks, the floor keeper after 30 min (v5)
+  every <name> <minutes>          change how often the agent is asked
+  ask <name> [--print] [--json]   one ask now, into the running agent; --print: the exact pack it would send, nothing sent
+  quote --coin <0x…|FEAST> --bnb <n> [--sell] [--fraction f] [--json]
+                                  read-only: a buy's (or with --sell a sale's) expected fill, price impact, round-trip
+                                  fees and minimum received; nothing is signed or sent
   data [<name>] [--since 24h|90m|7d|<iso>] [--coin 0x…] [--json] [--live] [--no-notes]
                                   every Feast coin in BNB, the agent's book and PnL in BNB, the league's clock and boards,
                                   and the public notes of the last 2 h with the crowd per coin; with --since, hourly
@@ -146,6 +163,7 @@ Home: $FEAST_LEAGUE_HOME (default ~/.feast-league). RPC: $FEAST_MAINNET_RPC_URL 
 Site: $FEAST_LEAGUE_SITE (default https://feast.meme). Indexer: $FEAST_LEAGUE_INDEXER (default https://indexer.feast.meme).`;
 
 const BIN = fileURLToPath(new URL("./bin.mjs", import.meta.url));
+const ZERO = "0x0000000000000000000000000000000000000000" as Address;
 
 function kv(list: string[] | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -166,6 +184,8 @@ function signerFor(home: string, name: string | null): BawSigner {
 }
 
 const rpc = () => process.env.FEAST_MAINNET_RPC_URL?.trim() || DEFAULT_MAINNET_RPC;
+/** A whole number given on the command line, else NaN (so the plan's own check says what is wrong); undefined when not given. */
+const wholeOrNaN = (v: string | undefined) => (v === undefined ? undefined : /^\d{1,6}$/.test(v.trim()) ? Number(v.trim()) : Number.NaN);
 const indexer = () => (process.env.FEAST_LEAGUE_INDEXER?.trim() || INDEXER_URL).replace(/\/+$/, "");
 const print = (json: boolean, data: unknown, human: () => string) => console.log(json ? JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2) : human());
 
@@ -228,6 +248,13 @@ async function main(argv: string[]): Promise<number> {
       prompt: { type: "string" },
       autopilot: { type: "string" },
       "no-autopilot": { type: "boolean", default: false },
+      // Task 975, addenda 4 and 5: the ask loop, FL ask and FL quote.
+      every: { type: "string" },
+      "ask-with": { type: "string" },
+      "ask-model": { type: "string" },
+      print: { type: "boolean", default: false },
+      sell: { type: "boolean", default: false },
+      fraction: { type: "string" },
       host: { type: "string" },
       "idle-minutes": { type: "string" },
       since: { type: "string" },
@@ -287,12 +314,16 @@ async function main(argv: string[]): Promise<number> {
     if (values.prompt !== undefined && values.preset !== undefined) throw new Error("with --prompt, name the fallback preset with --autopilot, not --preset");
     // Task 975: a prompt agent's autopilot backup is steady unless --autopilot names another or --no-autopilot.
     const choice = autopilotChoice({ autopilot: values.autopilot, noAutopilot: values["no-autopilot"] });
+    // Addendum 4: the ask loop rides with the autopilot (the floor keeper underneath), never on a preset or a script.
+    if ((values.every !== undefined || values["ask-with"] !== undefined || values["ask-model"] !== undefined) && values.prompt === undefined) throw new Error("--every and --ask-with are a prompt agent's: give the prompt with --prompt <strategy.md>");
+    const asked = askChoice({ noAutopilot: values["no-autopilot"], every: wholeOrNaN(values.every), askWith: values["ask-with"], askModel: values["ask-model"], host: modelHint() });
     return {
       name,
       preset: values.prompt !== undefined ? (choice.ok ? choice.preset : undefined) : values.preset,
       scriptPath: values.script,
       promptPath: values.prompt,
       idleMinutes: values["idle-minutes"] !== undefined ? Number(values["idle-minutes"]) : undefined,
+      ...(values.prompt !== undefined && asked.ok && asked.ask ? { ask: asked.ask } : {}),
       params: kv(values.set),
       limits: kv(values.limit),
       tickSeconds: values.tick ? Number(values.tick) : undefined,
@@ -301,8 +332,10 @@ async function main(argv: string[]): Promise<number> {
   };
 
   /** Both --autopilot and --no-autopilot: one line, exit 2, nothing saved (task 975). */
-  const conflict = autopilotChoice({ autopilot: values.autopilot, noAutopilot: values["no-autopilot"] });
-  if (!conflict.ok && (command === "plan" || command === "start" || command === "enter")) {
+  const both = autopilotChoice({ autopilot: values.autopilot, noAutopilot: values["no-autopilot"] });
+  const askFlags = askChoice({ noAutopilot: values["no-autopilot"], every: wholeOrNaN(values.every), askWith: values["ask-with"], askModel: values["ask-model"], host: modelHint() });
+  const conflict = !both.ok ? both : !askFlags.ok ? askFlags : null;
+  if (conflict && !conflict.ok && (command === "plan" || command === "start" || command === "enter")) {
     print(json, { ok: false, error: conflict.error }, () => conflict.error);
     return 2;
   }
@@ -427,16 +460,19 @@ async function main(argv: string[]): Promise<number> {
       const lang = langOf(values.lang);
       const unread = unreadNotifications(home, name, true);
       // Task 975, addendum 2: a prompt agent's own line closes the status: in season, the host is told to trade now.
-      const shownAutopilot = s.agent.preset && s.agent.autopilot ? { preset: s.agent.preset, idleMinutes: s.agent.autopilot.idleMinutes } : null;
+      const shownAutopilot = s.agent.preset && s.agent.autopilot ? { preset: s.agent.preset, idleMinutes: s.agent.autopilot.idleMinutes, ...(s.agent.ask ? { ask: { every: s.agent.ask.every, with: s.agent.ask.with } } : {}) } : null;
       const standingAgent = { track: s.agent.track, autopilot: shownAutopilot, promptFile: basename(s.agent.prompt?.path ?? "strategy.md") };
       const league = values["no-league"] ? null : await leagueStanding(home, lang, standingAgent).catch(() => null);
       // The agent's figures in BNB (task 963), marked on the chain only when it holds something; a USDT figure is a reference.
       const holds = Object.keys(s.book?.positions ?? {}).length > 0;
       const chain = new LeagueChain(MAINNET, rpc());
-      const mine = await selfView(home, name, { chain: holds ? chain : null, now: Date.now() }).catch(() => null);
+      const statusWallet = await within(signerFor(home, null).address(), 5_000).catch(() => null);
+      const mine = await selfView(home, name, { chain, now: Date.now(), wallet: statusWallet, marksTimeoutMs: holds ? 8_000 : 4_000 }).catch(() => null);
       const bnbUsd = mine && (holds || mine.pnl.realizedBnb !== 0) ? await within(chain.bnbUsd(), 8_000) : null;
       const usdRef = typeof bnbUsd === "number" && bnbUsd > 0 ? { bnbUsd: Number(bnbUsd.toFixed(4)), at: new Date().toISOString() } : null;
       const sleptAt = lastSleep(home, name);
+      const askState = readAskState(home, name);
+      const askNow = { lastAskAt: askState.lastAskAt === null ? null : new Date(askState.lastAskAt).toISOString(), last: askState.last ? { ...askState.last, at: new Date(askState.last.at).toISOString() } : null, failuresInARow: askState.streak, floorKeeperSince: askState.floorKeeperSince === null ? null : new Date(askState.floorKeeperSince).toISOString() };
       const data = {
         name,
         running: s.running,
@@ -462,6 +498,11 @@ async function main(argv: string[]): Promise<number> {
         lastActionAt: mine?.lastActionAt ?? null,
         // Task 975: the day's trades and volume, dinner to dinner, as the page counts its floor.
         day: mine?.day ?? null,
+        // Task 975, addenda 4 and 5: the ask loop, the wallet and the limits' headroom (one source with FL data and the pack).
+        ask: s.agent.ask ? { ...s.agent.ask, ...askNow } : null,
+        wallet: mine?.wallet ?? null,
+        headroom: mine?.headroom ?? null,
+        recentFills: mine?.recentFills ?? [],
         // Task 975, addendum 3: the newest time the machine slept under the runtime.
         slept: sleptAt ? { at: new Date(sleptAt.at).toISOString(), minutes: sleptAt.minutes } : null,
         notifications: s.notifications,
@@ -480,7 +521,13 @@ async function main(argv: string[]): Promise<number> {
             ...(mine.prompt
               ? [
                   `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: feast-league start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
-                  mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no trade from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss",
+                  ...(s.agent!.ask && s.agent!.ask.with !== "none"
+                    ? [
+                        `asking ${hostShown(s.agent!.ask.with)} every ${s.agent!.ask.every} min · last ask ${askState.last ? `${utc8(askState.last.at)} UTC+8 → ${askState.last.action}${askState.last.reason ? ` (${clean(askState.last.reason, 80)})` : ""}: ${clean(askState.last.result, 80)}` : "none yet"} · failures in a row ${askState.streak}${askState.floorKeeperSince !== null ? ` · on floor keeper since ${utc8(askState.floorKeeperSince)} UTC+8` : ""}`,
+                        mine.autopilot ? `floor keeper: ${mine.autopilot.preset}, when ${hostShown(s.agent!.ask.with)} fails twice in a row, and 20 min before dinner with the floor unmet` : "floor keeper: none",
+                      ]
+                    : [mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no trade from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss"]),
+                  ...(mine.wallet ? [`wallet: ${mine.wallet.balanceBnb} BNB, ${mine.wallet.spendableBnb} spendable (${mine.wallet.gasReserveBnb} kept for gas); left today ${mine.headroom.leftTodayBnb} BNB, this season ${mine.headroom.leftSeasonBnb} BNB`] : []),
                   `last trade ${ago(mine.lastTradeAt)}; last action by your agent ${ago(mine.lastActionAt)}`,
                   ...(mine.day ? [dayLine(mine.day, Date.now())] : []),
                   ...(mine.day && !mine.day.passed && !mine.autopilot?.active
@@ -615,8 +662,12 @@ async function main(argv: string[]): Promise<number> {
     }
     case "data": {
       const signer = signerFor(home, null);
+      const chain = new LeagueChain(MAINNET, rpc());
+      // The quoter's impacts (addendum 5), read-only: an executor that prepares and never sends; the wallet only reads.
+      const quoterWallet = await within(signer.address(), 5_000).catch(() => null);
+      const quoter = new Executor({ signer: null as never, chain, wallet: quoterWallet ?? ZERO, network: MAINNET, rpcUrl: rpc(), stopReason: () => "a quote only", log: () => {} });
       const result = await dataFace(
-        { home, site: siteFromEnv(), indexer: indexer(), fetch, chain: new LeagueChain(MAINNET, rpc()), wallet: () => signer.address() },
+        { home, site: siteFromEnv(), indexer: indexer(), fetch, chain, wallet: async () => quoterWallet, impacts: impacts(quoter, chain) },
         { name: args[0], since: values.since, coin: values.coin, live: values.live, notes: !values["no-notes"] },
       );
       print(json, result.data, () => result.text);
@@ -667,6 +718,106 @@ async function main(argv: string[]): Promise<number> {
         const s = statusOf(home, name);
         console.log(`${name}\t${s.agent?.track ?? "?"}\t${s.agent?.prompt?.path ?? s.agent?.preset ?? s.agent?.script?.path ?? ""}${s.agent?.track === "prompt" && s.agent.preset ? ` (autopilot ${s.agent.preset})` : ""}\t${s.running ? "running" : "stopped"}${s.stop ? " (stop file)" : ""}`);
       }
+      return 0;
+    }
+    case "every": {
+      // Task 975, addendum 4: how often the running agent asks its AI, without planning it again.
+      const name = notEntry(need(args[0], "an agent name"));
+      const agent = loadAgent(home, name);
+      if (!agent?.ask) throw new Error(`"${name}" has no ask loop: plan it with --prompt (and --every)`);
+      const minutes = wholeOrNaN(need(args[1], "the minutes between asks"));
+      if (minutes === undefined || !Number.isInteger(minutes) || minutes < ASK_EVERY_MIN || minutes > ASK_EVERY_MAX) {
+        const line = `every is ${ASK_EVERY_MIN}–${ASK_EVERY_MAX} whole minutes`;
+        print(json, { ok: false, error: line }, () => line);
+        return 2;
+      }
+      saveAgent(home, { ...agent, ask: { ...agent.ask, every: minutes } });
+      const paths = agentPaths(home, name);
+      mkdirSync(paths.inbox, { recursive: true });
+      writeJsonAtomic(join(paths.inbox, `${Date.now()}-reload.json`), { type: "reload" });
+      appendJsonl(paths.log, { at: new Date().toISOString(), event: "agent.changed", by: "user", ask: { every: minutes } });
+      print(json, { ok: true, every: minutes }, () => `"${name}" asks ${hostShown(agent.ask!.with)} every ${minutes} min from now on`);
+      return 0;
+    }
+    case "ask": {
+      // Task 975, addendum 4: --print shows the exact pack (nothing is sent to any AI); without it, one ask now.
+      const name = notEntry(need(args[0], "an agent name"));
+      const agent = loadAgent(home, name);
+      if (!agent || agent.track !== "prompt") throw new Error(`"${name}" is not a prompt agent`);
+      if (values.print) {
+        const signer = signerFor(home, null);
+        const wallet = await within(signer.address(), 5_000).catch(() => null);
+        const chain = new LeagueChain(MAINNET, rpc());
+        const quoter = new Executor({ signer: null as never, chain, wallet: wallet ?? ZERO, network: MAINNET, rpcUrl: rpc(), stopReason: () => "a quote only", log: () => {} });
+        const cached = readSnapshotCache(home, wallet?.toLowerCase() ?? null);
+        let snapshot = cached && Date.now() - cached.at < CACHE_FRESH_MS ? cached.snapshot : null;
+        if (!snapshot) {
+          const client = new SnapshotClient({ site: siteFromEnv(), fetch, now: Date.now, random: Math.random, timeoutMs: 15_000, cache: { home, wallet: wallet?.toLowerCase() ?? null }, seed: cached });
+          const out = await client.read();
+          snapshot = out.kind === "new" ? out.snapshot : out.kind === "same" ? client.held : (cached?.snapshot ?? null);
+        }
+        const g = readGate(home, name);
+        const opensAt = g?.opensAt ? Date.parse(g.opensAt) : null;
+        const gathered = await gatherPack({ home, agent, now: Date.now(), wallet, chain, snapshot, fetch, site: siteFromEnv(), gate: { opensAt, open: g ? g.state === "open" : !agent.league?.waitForSeason }, feast: MAINNET.platformCoin?.address ?? null, impacts: impacts(quoter, chain) });
+        print(json, { ok: true, digest: gathered.pack.digest, chars: gathered.pack.text.length, requests: gathered.requests, pack: gathered.pack.text }, () => gathered.pack.text);
+        return 0;
+      }
+      if (!agent.ask || agent.ask.with === "none") throw new Error(`"${name}" asks no AI (--ask-with none): FL ask ${name} --print shows the pack to decide on`);
+      if (!statusOf(home, name).running) throw new Error(`"${name}" is not running: FL start ${name} first (FL ask ${name} --print shows the pack)`);
+      const before = readJournal(home, name, 1_000).length;
+      const paths = agentPaths(home, name);
+      mkdirSync(paths.inbox, { recursive: true });
+      writeJsonAtomic(join(paths.inbox, `${Date.now()}-ask.json`), { type: "ask" });
+      // The answer lands in the journal; the trade, if any, after it has run.
+      for (let i = 0; i < 300; i += 1) {
+        const rows = readJournal(home, name, 1_000);
+        if (rows.length > before) {
+          const row = rows.at(-1)!;
+          print(json, { ok: true, journal: journalPath(home, name), row }, () => `asked ${hostShown(agent.ask!.with)}: ${row.action}${row.symbol ? ` ${clean(row.symbol, 24)}` : ""}${row.amountBnb !== null ? ` ${row.amountBnb} BNB` : ""}${row.fraction !== null ? ` ${row.fraction} of it` : ""} (${clean(row.reason, 140)}) → ${clean(row.result, 160)}`);
+          return row.result.startsWith("error") || row.result.startsWith("invalid") ? 1 : 0;
+        }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      print(json, { ok: false, error: "no answer within 150 s" }, () => `no answer within 150 s; FL status ${name} shows the last ask`);
+      return 1;
+    }
+    case "quote": {
+      // Task 975, addendum 5: read-only. The executor prepares the trade and never sends it; the wallet is not asked.
+      const coinArg = need(values.coin, "--coin <0x…|FEAST>");
+      const coin = coinArg.trim().toUpperCase() === "FEAST" ? MAINNET.platformCoin!.address : isAddress(coinArg, { strict: false }) ? getAddress(coinArg) : null;
+      if (!coin) throw new Error("--coin is a coin's address or FEAST");
+      const signer = signerFor(home, null);
+      const wallet = await within(signer.address(), 5_000).catch(() => null);
+      const chain = new LeagueChain(MAINNET, rpc());
+      const quoter = new Executor({ signer: null as never, chain, wallet: wallet ?? ZERO, network: MAINNET, rpcUrl: rpc(), stopReason: () => "a quote only", log: () => {} });
+      let out: Awaited<ReturnType<typeof quoteBuy>>;
+      if (values.sell) {
+        if (!wallet) throw new Error("the wallet could not be read: a sale's quote is of what it holds");
+        const held = await chain.tokenBalance(coin, wallet);
+        const fraction = values.fraction !== undefined ? Number(values.fraction) : 1;
+        if (!(fraction > 0 && fraction <= 1)) throw new Error("--fraction is above 0 and at most 1");
+        let coins = (held * BigInt(Math.round(fraction * 1_000_000))) / 1_000_000n;
+        if (values.bnb !== undefined) {
+          const perCoin = await chain.markWei(coin, 10n ** 18n);
+          coins = perCoin > 0n ? (bnbToWei(Number(values.bnb)) * 10n ** 18n) / perCoin : 0n;
+        }
+        out = await quoteSell(quoter, chain, coin, coins);
+      } else {
+        const bnb = Number(need(values.bnb, "--bnb <n>"));
+        if (!(bnb > 0)) throw new Error("--bnb is a positive amount of BNB");
+        out = await quoteBuy(quoter, coin, bnb);
+      }
+      if ("error" in out) {
+        print(json, { ok: false, error: out.error }, () => `no quote: ${out.error}`);
+        return 1;
+      }
+      const q = out;
+      print(json, { ok: true, quote: q }, () =>
+        [
+          `${q.side === "buy" ? `buy ${q.amountIn} BNB of` : `sell ${Number(q.amountIn.toPrecision(6))} coins of`} ${short(coin)}: expected ${Number(q.expectedOut.toPrecision(6))} ${q.side === "buy" ? "coins" : "BNB"}, at least ${Number(q.minOut.toPrecision(6))} at ${q.slippagePct}% slippage`,
+          `price impact ${q.impactPct === null ? "unknown" : `${q.impactPct}%`}; a round trip's fees ${q.roundTripFeePct}%; quoted by the ${q.quotedBy}. Nothing was signed or sent.`,
+        ].join("\n"),
+      );
       return 0;
     }
     case "doctor":
@@ -754,6 +905,9 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       agent: str(values.agent),
       autopilot: str(values.autopilot),
       noAutopilot: values["no-autopilot"] === true,
+      every: wholeOrNaN(str(values.every)),
+      askWith: str(values["ask-with"]),
+      askModel: str(values["ask-model"]),
       idleMinutes: idle !== undefined ? Number(idle) : undefined,
       noJitter: values["no-jitter"] === true,
       meme: concept !== undefined ? { concept, name: str(values["coin-name"]), symbol: str(values.symbol), description: str(values.description), image: str(values.image) } : undefined,
