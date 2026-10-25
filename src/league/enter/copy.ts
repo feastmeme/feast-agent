@@ -189,8 +189,8 @@ export function notesCard(view: { agentId: string; season: number; wallet?: stri
 export type OpensShown = { kind: "at"; at: number } | { kind: "open" } | { kind: "unknown" };
 
 /**
- * The opening as the cards say it (addenda 12 and 13): it is the season's start ("the season's start, Tue 10/27
- * 21:00 UTC+8"), the instant the page counts down to, never a date of the copy's own.
+ * The opening as the cards say it (addenda 12 and 13): it is the season's start ("the season's start, Ddd MM/DD
+ * HH:MM UTC+8"), the instant the page counts down to, never a date of the copy's own.
  */
 const opensText = (opens: OpensShown, lang: Lang) => {
   const zh = lang === "zh";
@@ -198,7 +198,7 @@ const opensText = (opens: OpensShown, lang: Lang) => {
   return zh ? "feast.meme 宣布开赛的时刻" : "feast.meme announces the start";
 };
 
-/** "10/27（周二）21:00", the zh form of `utc8Day`. */
+/** "MM/DD（周X）HH:MM", the zh form of `utc8Day`. */
 const utc8DayZh = (ms: number) => {
   const d = new Date(ms + 8 * 3_600_000);
   const two = (n: number) => String(n).padStart(2, "0");

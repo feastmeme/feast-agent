@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -16,6 +16,8 @@ import { auditFile, auditRefusal, recordModelVerdict } from "./audit/verdict.ts"
 import { BawError, BawSigner, execRunner } from "./baw.ts";
 import { aliveLine, markStarting, readAlive, startingNow } from "./alive.ts";
 import { manualBeat, readManual, recordManual, settleBeats } from "./manual.ts";
+import { keepSupport, supportLine, supportUrl } from "./support.ts";
+import { fit, logTail, saveReport, scrub, sendReport, type ReportBundle } from "./report.ts";
 import { daemon, daemonPath, kickDaemon, windowsLines, type Runner } from "./daemon.ts";
 import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
@@ -35,8 +37,8 @@ import { journalPath, readAskState, readJournal } from "./ask/journal.ts";
 import { readSnapshotCache, SnapshotClient, CACHE_FRESH_MS } from "./feed/snapshot.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
 import { noteCommand } from "./notes/queue.ts";
-import { notesLogin, recordedAgentId } from "./notes/session.ts";
-import { checkHost, checkModel, declareHost, hostDetailHint, modelHint, readDeclaredHost } from "./headers.ts";
+import { liveToken, notesLogin, recordedAgentId } from "./notes/session.ts";
+import { checkHost, checkModel, declareHost, hostDetailHint, modelHint, readDeclaredHost, RUNTIME_RELEASE } from "./headers.ts";
 import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES, PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { dayLine } from "./prompt/floor.ts";
 import { readStanding } from "./data/standing.ts";
@@ -182,6 +184,9 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   preview-only checks: the wallet's answer, nothing executed
   agents                          the agents on this machine
   doctor                          is everything in place?
+  report <name>                   a problem report: doctor, status, the last 200 log lines, the release, scrubbed of
+                                  addresses, keys and paths; saved as a file to paste in a chat, and sent to feast.meme
+                                  with the notes session (at most once per 10 minutes)
   login [--json]                  the wallet's sign-in: until when it is valid, and how to scan again (reads only)
   daemon <name> --install | --uninstall | --status
                                   keep the agent running across reboots and crashes: a LaunchAgent (macOS) or a
@@ -215,7 +220,23 @@ const rpc = () => process.env.FEAST_MAINNET_RPC_URL?.trim() || DEFAULT_MAINNET_R
 /** A whole number given on the command line, else NaN (so the plan's own check says what is wrong); undefined when not given. */
 const wholeOrNaN = (v: string | undefined) => (v === undefined ? undefined : /^\d{1,6}$/.test(v.trim()) ? Number(v.trim()) : Number.NaN);
 const indexer = () => (process.env.FEAST_LEAGUE_INDEXER?.trim() || INDEXER_URL).replace(/\/+$/, "");
-const print = (json: boolean, data: unknown, human: () => string) => console.log(json ? JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2) : human());
+/**
+ * Run 22 (the owner's ruling: we must see players' problems fast): a refusal or an error, the "You're in" lines and
+ * FL status end with one line naming where to get help (the page's own support link, else the league page's help).
+ * Said once, last, in human output only.
+ */
+const help = { due: false, home: null as string | null, lang: "en" as "en" | "zh", json: false };
+const helpDue = () => void (help.due = true);
+function sayHelp(stream: "out" | "err" = "out"): void {
+  if (help.json) return;
+  const line = supportLine(help.home ? supportUrl(help.home) : null, help.lang);
+  if (stream === "err") console.error(line);
+  else console.log(line);
+}
+const print = (json: boolean, data: unknown, human: () => string) => {
+  if (data && typeof data === "object" && !Array.isArray(data) && (data as { ok?: unknown }).ok === false) helpDue();
+  console.log(json ? JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2) : human());
+};
 
 function detach(home: string, name: string, extra: string[] = []): number {
   return spawnDetached(home, name, extra).pid ?? 0;
@@ -349,6 +370,9 @@ async function main(argv: string[]): Promise<number> {
   }
   const home = values.home ?? leagueHome();
   const json = values.json;
+  help.home = home;
+  help.json = json === true;
+  help.lang = langOf(values.lang);
   // Task 975 (the coordinator's ruling C8): the AI this home's agent runs on, declared once by FL enter --host; every
   // request to feast.meme names it (x-feast-host), and FL note's --model defaults to it.
   if (values.host !== undefined) {
@@ -578,6 +602,8 @@ async function main(argv: string[]): Promise<number> {
     case "status": {
       const name = agentArg(args[0]);
       beat(name);
+      // Run 22: FL status ends with where to get help.
+      helpDue();
       const s = statusOf(home, name);
       if (!s.agent) throw new Error("no such agent");
       const view = s.book ? bookView(s.book, undefined, Date.now()) : null;
@@ -1113,6 +1139,8 @@ async function main(argv: string[]): Promise<number> {
     }
     case "doctor":
       return doctor(home, json);
+    case "report":
+      return reportCommand(home, notEntry(checkAgentName(agentArg(args[0]))), json, langOf(values.lang));
     default:
       console.error(`unknown command "${command}"\n\n${HELP}`);
       return 1;
@@ -1231,6 +1259,7 @@ async function leagueStanding(home: string, lang: Lang, agent: StandingInput["ag
   // The cached field, never the uncached me= board unless the site is older (task 975, addendum 6).
   const ranked = await readStanding(site, me);
   const today = ranked.read;
+  keepSupport(home, today);
   const season = today && (today.state === "season" || today.state === "over") ? await site.league("season", me) : null;
   const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered, agent, standing: ranked.standing }, lang);
   // The page's own rows, without the wallet's address: printed output keeps the home's rule.
@@ -1285,6 +1314,8 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       memeOnly,
     },
   );
+  // Run 22: the "You're in" lines (and "Already entered") end with where to get help, as a refusal does.
+  if (["done", "entered", "registered"].includes(result.stage)) helpDue();
   print(json, { ok: result.ok, stage: result.stage, ...result.data, card: result.text }, () => result.text);
   return result.code;
 }
@@ -1480,6 +1511,55 @@ async function previewCheck(home: string, check: string, coinArg: string | undef
   return 0;
 }
 
+/** This CLI, run once more for one of its own reads (`FL report`): its JSON, else its text; never more than 60 s. */
+function selfJson(home: string, args: string[]): Promise<unknown> {
+  return new Promise((done) => {
+    execFile(process.execPath, [BIN, ...args, "--json"], { env: { ...process.env, FEAST_LEAGUE_HOME: home }, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+      try {
+        done(JSON.parse(stdout));
+      } catch {
+        done({ unreadable: true, exit: error ? ((error as { code?: unknown }).code ?? 1) : 0, said: clean(`${stdout}\n${stderr}`, 2_000) });
+      }
+    });
+  });
+}
+
+/**
+ * `FL report <name>` (run 22): doctor, status, the last 200 log lines and the release, scrubbed (addresses and hashes
+ * to 6+4, keys, tokens, the home folders), at most 64 KB; kept as a file (its path printed, to paste in a chat) and
+ * sent to feast.meme with the notes session, once per 10 minutes per agent.
+ */
+async function reportCommand(home: string, name: string, json: boolean, lang: "en" | "zh"): Promise<number> {
+  if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
+  const [doctorOut, statusOut] = await Promise.all([selfJson(home, ["doctor"]), selfJson(home, ["status", name])]);
+  const declared = readDeclaredHost(home) ?? hostDetailHint() ?? modelHint();
+  const raw: ReportBundle = { agentId: readEntry(home)?.agentId ?? readLeagueRecord(home)?.agentId ?? null, agent: name, runtime: RUNTIME_RELEASE, host: declared, doctor: doctorOut, status: statusOut, logTail: logTail(home, name), at: new Date().toISOString() };
+  const token = liveToken(home);
+  // The notes token and every endpoint the player may have keyed (the scrub also strips any URL's userinfo and query).
+  const secrets = [token ?? "", ...["FEAST_MAINNET_RPC_URL", "FEAST_MAINNET_RPC_FALLBACK", "FEAST_LEAGUE_INDEXER"].map((k) => process.env[k]?.trim() ?? "")];
+  const { json: body } = fit(scrub(raw, { homes: [{ path: home, as: "<league-home>" }, { path: homedir(), as: "~" }], secrets }));
+  const path = saveReport(home, name, body);
+  const shown = path.split(homedir()).join("~");
+  const sent = await sendReport({ home, name, site: siteFromEnv(), fetch, json: body, token });
+  const zh = lang === "zh";
+  const said =
+    sent.kind === "sent"
+      ? zh ? `已发送给 feast.meme${sent.id ? `（编号 ${sent.id}）` : ""}。` : `sent to feast.meme${sent.id ? ` (report ${sent.id})` : ""}.`
+      : sent.kind === "throttled"
+        ? zh ? `这个 agent 10 分钟内已经发过一份报告：下一份可在 ${utc8(sent.next)} UTC+8 之后发送；这份没有发送。` : `not sent: a report for this agent went less than 10 minutes ago; the next can go after ${utc8(sent.next)} UTC+8.`
+        : sent.kind === "no-session"
+          ? zh ? "没有发送：还没有笔记会话（FL note --login 开通）。" : "not sent: no notes session (FL note --login opens one)."
+          : sent.kind === "no-route"
+            ? zh ? "没有发送：feast.meme 还不接收报告。把这个文件贴到支持对话里。" : "not sent: feast.meme does not take reports yet. Paste the file into the support chat."
+            : sent.kind === "refused"
+              ? zh ? `没有发送：feast.meme 拒绝了（HTTP ${sent.status}${sent.reason ? `：${clean(sent.reason, 120)}` : ""}）。` : `not sent: feast.meme refused it (HTTP ${sent.status}${sent.reason ? `: ${clean(sent.reason, 120)}` : ""}).`
+              : zh ? `没有发送：feast.meme 没有回应（${sent.reason}）。` : `not sent: feast.meme did not answer (${sent.reason}).`;
+  const ok = sent.kind === "sent";
+  if (!ok) helpDue();
+  print(json, { ok, report: shown, bytes: Buffer.byteLength(body), sent }, () => [zh ? `报告已保存：${shown}（${Buffer.byteLength(body)} 字节，已去掉钱包地址、密钥和路径）` : `report saved: ${shown} (${Buffer.byteLength(body)} bytes; wallet addresses, keys and paths scrubbed)`, said].join("\n"));
+  return ok ? 0 : 2;
+}
+
 /** The wallet CLI the wallet skill needs (its `requiredCliVersion`), and how to get it. */
 const BAW_REQUIRED_VERSION = "1.12.0";
 const BAW_UPGRADE = "npm i -g @binance/agentic-wallet@latest";
@@ -1545,15 +1625,20 @@ async function doctor(home: string, json: boolean): Promise<number> {
     checks.push({ what: "BNB Smart Chain", ok: false, detail: (error as Error).message });
   }
   print(json, checks, () => checks.map((c) => `${c.ok ? "ok " : "NO "} ${c.what}: ${c.detail}`).join("\n"));
+  if (!checks.every((c) => c.ok)) helpDue();
   return checks.every((c) => c.ok) ? 0 : 2;
 }
 
 main(process.argv.slice(2)).then(
   // Run 21: a manual command's heartbeat gets a moment to go out before the process ends.
-  (code) => settleBeats().then(() => process.exit(code)),
+  (code) => {
+    if (help.due) sayHelp();
+    return settleBeats().then(() => process.exit(code));
+  },
   (error: unknown) => {
     console.error(`feast-league: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
+    sayHelp("err");
+    void settleBeats().then(() => process.exit(1));
   },
 );
 

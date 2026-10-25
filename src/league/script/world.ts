@@ -58,6 +58,7 @@ const round = (n: number, digits = 12) => Number(n.toPrecision(digits));
 
 export function stubWorld(seed = 963, count = 36): StubWorld {
   const rand = random(seed);
+  // A FIXTURE clock for the stub world FL script check runs on: never a season date the player is told.
   const start = Date.parse("2026-10-26T12:00:00Z");
   const stepMs = 5 * 60_000;
   const creators = COINS.map((_, i) => made(0xc4ea70 + i));

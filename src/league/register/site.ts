@@ -166,6 +166,8 @@ export type LeagueRead = {
    * the page does not say (then nothing is said of it). Tags are `league-vN`; anything else is dropped.
    */
   latestRuntime?: { tag: string; publishedAt: number | null; minSupported: string | null };
+  /** Run 22: where a player gets help (`support.url`), as the page gives it; undefined when it does not. */
+  support?: { url: string };
 };
 
 /** One seated agent of `field=1`: names are other players' words. `trades` only when the page gives it. */
@@ -278,7 +280,21 @@ export function parseLeague(body: unknown): LeagueRead | null {
   }
   const latest = latestRuntimeOf(b.latestRuntime);
   if (latest) read.latestRuntime = latest;
+  const support = supportOf(b.support);
+  if (support) read.support = support;
   return read;
+}
+
+/** `support: { url }`, checked (page data, shown to the player): an https URL of at most 200 characters, nothing else. */
+export function supportOf(raw: unknown): { url: string } | null {
+  const url = (raw as { url?: unknown } | null)?.url;
+  if (typeof url !== "string" || url.length > 200 || /\s/.test(url)) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && u.username === "" && u.password === "" ? { url: u.href } : null;
+  } catch {
+    return null;
+  }
 }
 
 const RELEASE_TAG = /^league-v\d{1,4}(\.\d{1,3}){0,2}$/;

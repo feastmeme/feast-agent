@@ -8,8 +8,8 @@ import { agentPaths, readJson, writeJsonAtomic } from "./store.ts";
  * When an agent `FL enter` started may trade (task 968; the coordinator's ruling C8). feast.meme's season starts at
  * 21:00 UTC+8 (the start, not a dinner: addendum 9), and the clients learn it only as `/api/league`'s countdown: the
  * start before it, the next dinner during the season. Trading opens at the start itself (addendum 12, the owner's
- * ruling of 2026-10-25 14:4x: no wait of 23 hours; season 1 starts Tuesday 10/27, 21:00 UTC+8, and the runtime reads
- * it from `/api/league`, never from here). The first dinner, a day after the start, is still the warm-up (no floor,
+ * ruling of 2026-10-25 14:4x: no wait of 23 hours). The start is the site's: the runtime reads it from `/api/league`,
+ * never from here (run 22: the owner moved season 1's start the night before, and only the site's clock moved). The first dinner, a day after the start, is still the warm-up (no floor,
  * eats nobody). An explicit `season.tradingOpensAt` from the page, when it sends one, is taken over the countdown.
  * Until then the waiting agent trades nothing; with no start announced it waits until told. The gate only holds
  * trading back: it loosens nothing.
@@ -34,7 +34,7 @@ export function tradingOpens(read: LeagueRead | null): Opening {
   return { kind: "unknown" };
 }
 
-/** "Tue 10/27 21:00", the copy's short form of an instant in UTC+8 (addendum 12). */
+/** "Ddd MM/DD HH:MM", the copy's short form of an instant in UTC+8 (addendum 12), always from the site's instant. */
 export function utc8Day(ms: number): string {
   const d = new Date(ms + 8 * 3_600_000);
   const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];

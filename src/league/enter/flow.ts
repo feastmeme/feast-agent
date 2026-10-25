@@ -26,6 +26,7 @@ import { hostDetailHint, modelHint } from "../headers.ts";
 import { agentPaths, appendJsonl, readJson, removeStop, walletLockHolder, writeJsonAtomic, writeStop } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
 import { upgradeSentence, versionView } from "../version.ts";
+import { keepSupport } from "../support.ts";
 import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { composeMeme, hostPicture, type Meme } from "./meme.ts";
@@ -472,6 +473,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (manual && statusOf(deps.home, planned.name).running) return end(2, false, "running", [head, copy.manualWhileRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, ...refLate(), copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     const rerunRead = await deps.site.league("today", null).catch(() => null);
+    keepSupport(deps.home, rerunRead);
     const opens = tradingOpens(rerunRead);
     const upgrade = upgradeSentence(versionView(rerunRead?.latestRuntime, now()), lang);
     const signInEnd = await signInEndNow();
@@ -535,6 +537,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
 
   // The season: the page says which, and when trading opens; a page that does not answer leaves it at 1, unknown.
   const leagueRead = await deps.site.league("today", null).catch(() => null);
+  keepSupport(deps.home, leagueRead);
   const season = leagueRead?.season.number ?? 1;
   const opens = tradingOpens(leagueRead);
   const upgrade = upgradeSentence(versionView(leagueRead?.latestRuntime, now()), lang);

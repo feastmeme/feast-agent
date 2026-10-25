@@ -40,6 +40,7 @@ import { sessionNotice, utc8 } from "./register/copy.ts";
 import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { errorLine } from "./rpc.ts";
 import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, waitingStatusLine, warmUpDinner, writeGate } from "./season-gate.ts";
+import { keepSupport } from "./support.ts";
 import { leagueDayKey, readVersion, versionNotice, versionPath, versionView, writeVersion } from "./version.ts";
 import { healthFlag, modelHint, withHealth, withHostHeaders, type Health } from "./headers.ts";
 import { scriptCheckPassed } from "./script/check.ts";
@@ -341,6 +342,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
       gateBackoff.ok();
       noteRelease(read, now);
+      // Run 22: the page's support link, kept for the lines that come without a read.
+      keepSupport(deps.home, read);
       const wasOver = gate.over;
       gate.over = seasonOver(read);
       gate.day = read.state === "season" ? read.season.day : null;

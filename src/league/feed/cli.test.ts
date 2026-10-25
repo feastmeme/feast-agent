@@ -5,6 +5,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { confirmAgent, planAgent, saveAgent } from "../agent.ts";
+import { splitHelp } from "../support.ts";
+
+/** Run 22: the help line every refusal, error and status ends with, kept apart from the output the tests read. */
+const helpOff = (stdout: string, stderr: string) => {
+  const out = splitHelp(stdout);
+  const err = splitHelp(stderr);
+  return { stdout: out.text, stderr: err.text, help: out.help ?? err.help };
+};
 
 /**
  * Task 967's flags as the skill runs them: `bin.mjs` in a child process, a fake `baw`, and the chain, the indexer
@@ -43,10 +51,10 @@ else console.log(JSON.stringify({ success: false, error: { name: "NOT_IN_THIS_TE
   return { home, env: { FEAST_LEAGUE_HOME: home, FEAST_LEAGUE_BAW: baw, FEAST_MAINNET_RPC_URL: closed, FEAST_LEAGUE_SITE: closed, FEAST_LEAGUE_INDEXER: closed } };
 }
 
-function run(args: string[], env: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
+function run(args: string[], env: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string; help: string | null }> {
   return new Promise((resolve) => {
     execFile(process.execPath, [BIN, ...args], { env: { ...process.env, ...env }, timeout: 60_000 }, (error, stdout, stderr) => {
-      resolve({ code: error ? Number((error as { code?: number }).code ?? 1) : 0, stdout, stderr });
+      resolve({ code: error ? Number((error as { code?: number }).code ?? 1) : 0, ...helpOff(stdout, stderr) });
     });
   });
 }

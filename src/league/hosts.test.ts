@@ -14,6 +14,14 @@ import { inTemp, windowsLines } from "./daemon.ts";
 import { checkHost, HOST_DETAIL_HEADER, hostDetailHint, hostHeaders, modelHint } from "./headers.ts";
 import { askChoice } from "./start.ts";
 import { agentPaths } from "./store.ts";
+import { splitHelp } from "./support.ts";
+
+/** Run 22: the help line every refusal, error and status ends with, kept apart from the output the tests read. */
+const helpOff = (stdout: string, stderr: string) => {
+  const out = splitHelp(stdout);
+  const err = splitHelp(stderr);
+  return { stdout: out.text, stderr: err.text, help: out.help ?? err.help };
+};
 
 /**
  * Task 975, addendum 11: the hosts beyond Claude Code and Codex (the site's header contract kept), the endpoint's
@@ -35,9 +43,9 @@ function setup() {
   const env = { FEAST_LEAGUE_HOME: home, FEAST_LEAGUE_MODEL: "other", FEAST_LEAGUE_BAW: "/nonexistent", FEAST_MAINNET_RPC_URL: "http://127.0.0.1:9", FEAST_LEAGUE_SITE: "http://127.0.0.1:9", FEAST_LEAGUE_DAEMON: "off" };
   return { dir, prompt, home, env };
 }
-function run(args: string[], env: Record<string, string>, stdin?: string): Promise<{ code: number; stdout: string; stderr: string }> {
+function run(args: string[], env: Record<string, string>, stdin?: string): Promise<{ code: number; stdout: string; stderr: string; help: string | null }> {
   return new Promise((resolve) => {
-    const child = execFile(process.execPath, [BIN, ...args], { env: { ...process.env, ...env }, timeout: 60_000 }, (error, stdout, stderr) => resolve({ code: error ? ((error as { code?: number }).code ?? 1) : 0, stdout, stderr }));
+    const child = execFile(process.execPath, [BIN, ...args], { env: { ...process.env, ...env }, timeout: 60_000 }, (error, stdout, stderr) => resolve({ code: error ? ((error as { code?: number }).code ?? 1) : 0, ...helpOff(stdout, stderr) }));
     if (stdin !== undefined) child.stdin?.end(stdin);
     else child.stdin?.end();
   });
@@ -329,4 +337,72 @@ describe("run 21: FL status says manual mode, starting, and how to drive with no
     expect(doneRunning("demo", { kind: "unknown" }, "en", { preset: "steady", idleMinutes: 30, ask: { every: 5, with: "claude" } })).not.toContain("FL answer");
     expect(driveByAnswerLine("demo", "zh")).toContain("`FL answer demo '<那个 JSON 对象>'`");
   });
+});
+
+describe("run 22: where to get help, at the end of a refusal, an error and FL status", () => {
+  it("the page's support link, checked as page data: https only, short, no credentials", async () => {
+    const { supportOf } = await import("./register/site.ts");
+    expect(supportOf({ url: "https://feast.meme/league#help" })).toEqual({ url: "https://feast.meme/league#help" });
+    for (const bad of [{ url: "http://feast.meme/help" }, { url: "javascript:alert(1)" }, { url: "https://user:pw@feast.meme/" }, { url: `https://feast.meme/${"x".repeat(200)}` }, { url: "https://feast.meme/a b" }, null, "https://feast.meme"]) expect(supportOf(bad), JSON.stringify(bad)).toBeNull();
+    const { keepSupport, supportLine, supportUrl } = await import("./support.ts");
+    const { home } = setup();
+    expect(supportUrl(home)).toBeNull();
+    keepSupport(home, { support: { url: "https://feast.meme/league#help" } } as never);
+    expect(supportUrl(home)).toBe("https://feast.meme/league#help");
+    expect(supportLine(null, "en")).toBe("Need help? feast.meme/league → Help");
+    expect(supportLine(null, "zh")).toBe("需要帮助？feast.meme/league → 帮助");
+    expect(supportLine("https://feast.meme/league#help", "en")).toBe("Need help? https://feast.meme/league#help");
+  });
+
+  it("a refusal ends with it; FL status ends with it; zh in zh; JSON carries no line; a thrown error says it on stderr", async () => {
+    const { prompt, home, env } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const refused = await run(["start", "demo", "--yes", "--poll", "2"], env);
+    expect(refused.code).toBe(2);
+    expect(refused.help).toBe("Need help? feast.meme/league → Help");
+    const status = await run(["status", "demo", "--no-league"], env);
+    expect(status.help).toBe("Need help? feast.meme/league → Help");
+    expect((await run(["status", "demo", "--no-league", "--lang", "zh"], env)).help).toBe("需要帮助？feast.meme/league → 帮助");
+    const { keepSupport } = await import("./support.ts");
+    keepSupport(home, { support: { url: "https://feast.meme/league#help" } } as never);
+    expect((await run(["status", "demo", "--no-league"], env)).help).toBe("Need help? https://feast.meme/league#help");
+    const asJson = await run(["status", "demo", "--no-league", "--json"], env);
+    expect(asJson.help).toBeNull();
+    expect(() => JSON.parse(asJson.stdout)).not.toThrow();
+    const thrown = await run(["status", "nobody-here"], env);
+    expect(thrown.code).toBe(1);
+    expect(thrown.stderr).toMatch(/^feast-league: /);
+    expect(thrown.help).toBe("Need help? https://feast.meme/league#help");
+    // A success that is no status or entry says nothing more.
+    expect((await run(["--help"], env)).help).toBeNull();
+  }, 60_000);
+});
+
+describe("run 22: FL report through the binary", () => {
+  it("doctor, status, the log's tail and the release in one scrubbed file, its path printed; with no notes session nothing is sent", async () => {
+    const { prompt, home, env } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const { appendFileSync, mkdirSync, statSync: st } = await import("node:fs");
+    mkdirSync(agentPaths(home, "demo").dir, { recursive: true });
+    appendFileSync(agentPaths(home, "demo").log, `${JSON.stringify({ event: "buy.filled", wallet: "0x000000000000000000000000000000000000A11C", txHash: `0x${"cd".repeat(32)}` })}\n`);
+    const out = await run(["report", "demo"], env);
+    expect(out.code).toBe(2);
+    const path = /^report saved: (\S+) \(\d+ bytes; wallet addresses, keys and paths scrubbed\)$/m.exec(out.stdout)?.[1];
+    expect(path).toBeDefined();
+    expect(out.stdout).toContain("not sent: no notes session (FL note --login opens one).");
+    expect(out.help).toBe("Need help? feast.meme/league → Help");
+    expect(st(path!).mode & 0o777).toBe(0o600);
+    const bundle = JSON.parse(readFileSync(path!, "utf8")) as Record<string, unknown> & { logTail: Record<string, unknown>[] };
+    expect(Object.keys(bundle).sort()).toEqual(["agent", "agentId", "at", "doctor", "host", "logTail", "runtime", "status"]);
+    expect(bundle).toMatchObject({ agent: "demo", runtime: "league-v5.1.3" });
+    expect(Array.isArray(bundle.doctor)).toBe(true);
+    expect(bundle.status).toMatchObject({ manual: false });
+    expect(bundle.logTail.at(-1)).toEqual({ event: "buy.filled", wallet: "0x0000…a11c", txHash: "0xcdcd…cdcd" });
+    expect(JSON.stringify(bundle)).not.toContain(home);
+    expect(JSON.stringify(bundle)).not.toMatch(/0x[0-9a-fA-F]{40}/);
+  }, 120_000);
 });

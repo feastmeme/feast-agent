@@ -9,7 +9,7 @@ The questions this answers: does an agent whose host is Grok keep deciding every
 - Release candidate: the `league-v5.1` tag (or the lane's head, if not yet tagged). Note its commit.
 - The owner's Binance Agentic Wallet is signed in, Developer Mode on, an Agent ID (`<id>.ai`) minted. The owner does the sign-in scan on his phone; you never read a pairing code aloud or paste one anywhere but the Grok session that asked for it.
 - Decide, with the owner, which run this is:
-  - **A, before trading opens** (the season's start, Tue 10/27 21:00 UTC+8: trading opens at that same instant, the owner's ruling of 2026-10-25 14:4x): the agent enters and waits; `FL buy` and `FL answer` are refused with "the season has not started; it opens at … (UTC+8)". This proves the plumbing at zero risk.
+  - **A, before trading opens** (the season's start, whenever `/api/league` puts it (`FL status` shows it): trading opens at that same instant, the owner's ruling of 2026-10-25 14:4x): the agent enters and waits; `FL buy` and `FL answer` are refused with "the season has not started; it opens at … (UTC+8)". This proves the plumbing at zero risk.
   - **B, in season**: real trades of the default sizes (0.006 BNB) within the hard limits, on the owner's wallet. Only with the owner's explicit yes, written in the run log.
 - Have open: feast.meme's league page and the agent's page; this file; a log file where you paste each step's output.
 
@@ -54,14 +54,14 @@ What must come back (exact first words):
 | Grok's answer | `FL answer` prints | exit |
 | --- | --- | --- |
 | a hold | `hold: nothing traded (pack sha256:…)` | 0 |
-| a buy or sale, run A (before the opening) | `refused: the season has not started; it opens at 2026-10-27 21:00 (UTC+8)` | 2 |
+| a buy or sale, run A (before the opening) | `refused: the season has not started; it opens at <the season's start, as feast.meme gives it> (UTC+8)` | 2 |
 | a buy, run B | `filled: bought <SYMBOL> for 0.006 BNB, transaction 0x…` | 0 |
 | a sale, run B | `filled: sold <SYMBOL> for … BNB, transaction 0x…` | 0 |
 | a coin id not in the pack, an amount over the cap | `not taken: … (pack sha256:…)` | 2 |
 | more than 10 minutes after the print | `no fresh pack: run FL ask <name> --print first (a pack answers for 10 minutes)` | 2 |
 | over a hard limit | `refused by L…: … (nothing was asked of the wallet)` | 2 |
 
-- PASS: `FL status` shows "alive since … UTC+8 · last tick … UTC+8 (… ago)" with a last tick under 2 minutes old, "wallet sign-in ends at …", and, for run A, "waiting for the season: season starts and trading opens Tue 10/27 21:00 UTC+8; it trades nothing before".
+- PASS: `FL status` shows "alive since … UTC+8 · last tick … UTC+8 (… ago)" with a last tick under 2 minutes old, "wallet sign-in ends at …", and, for run A, "waiting for the season: season starts and trading opens <the season's start, as feast.meme gives it> UTC+8; it trades nothing before".
 - PASS: the pack ends with "What should the agent do right now? Answer only in the schema." Grok's answer is one JSON object, and `FL answer` prints a line from the table above.
 - PASS: `FL note` says "sent to feast.meme" (or kept, with the reason). Within a minute, feast.meme shows the note on the agent's page, its AI shown as Grok.
 - FAIL: `FL answer` prints anything not in the table, or Grok answers in prose instead of JSON twice in a row.

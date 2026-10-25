@@ -540,7 +540,7 @@ describe("task 975, addendum 8: ready for the season", () => {
 describe("task 975, addendum 9: the season's start is not a dinner", () => {
   it("no copy, doc or comment calls the start a dinner; the first dinner is the warm-up", () => {
     const files = ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "skills/feast-league/references/register.md", "README.md", "docs/CHANGELOG.md", "docs/league/PLAN.md", "src/league/season-gate.ts", "src/league/season-gate.test.ts", "src/league/enter/copy.ts", "src/league/ask/pack.ts"];
-    for (const file of files) expect(read(file), file).not.toMatch(/dinner 0|dinner zero|first dinner is (Tue|10\/27)|10\/27[^,.\n]{0,20}\bis (a |the )?(dinner|warm-up)|warm-up[^.\n]{0,30}10\/27/i);
+    for (const file of files) expect(read(file), file).not.toMatch(/dinner 0|dinner zero|the (season's )?start is (a |the )?(dinner|warm-up)/i); // Run 22: the dates left the copy (the run-22 guard); the start moved to Monday, dinner 1 (the warm-up) is the next day.
     expect(read("docs/CHANGELOG.md")).toContain("the first dinner, Wednesday 10/28 21:00, is the warm-up (no floor, eats nobody)");
   });
 });
@@ -582,7 +582,7 @@ describe("task 975, addendum 12: trading opens at the start; FL enter --ref", ()
     // (The release notes name the old wait on purpose: what a runtime still on league-v5 does.)
     for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md", "plans/league-autopilot/grok-bot-rehearsal.md"]) expect(read(file), file).not.toMatch(/10\/28[ ,]*20:00|Wednesday 20:00|Wed 10\/28 20:00|an hour before the first dinner|one hour before the first dinner/);
     expect(read("docs/league/release-v5.1.md")).toContain("A runtime still on `league-v5` waits until Wed 10/28 20:00 whatever the site says");
-    expect(read("plans/league-autopilot/grok-bot-rehearsal.md")).toContain("season starts and trading opens Tue 10/27 21:00 UTC+8");
+    expect(read("plans/league-autopilot/grok-bot-rehearsal.md")).toContain("season starts and trading opens <the season's start, as feast.meme gives it> UTC+8");
   });
 
   it("SKILL says how a tutorial's code is passed; the CHANGELOG and the site patch say the rest", () => {
@@ -705,5 +705,47 @@ describe("task 975, run 21: league-v5.1.3, manual mode for Binance AI Pro", () =
     expect(skill).toContain("**Binance AI Pro: manual mode** (league-v5.1.3)");
     expect(skill).toContain("**in manual mode nothing trades on its own.**");
     expect(skill).toContain("`binance` (Binance AI Pro)");
+  });
+});
+
+describe("task 975, run 22: every season date the player sees comes from the site's clock", () => {
+  // Season 1's calendar as it was and as it is (the owner moved the start the night before): none may be written down.
+  const SEASON_DATE = /\b(?:10\/(?:2[6-9]|3[01])|11\/0?[1-3])\b|2026-(?:10-(?:2[6-9]|3[01])|11-0[1-3])|周[一二三四五六日]|\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)? \d{1,2}\/\d{1,2}|\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/;
+  /** The fakes, the dry runs and the stub worlds keep fixture dates, marked as such; nothing else may. */
+  const FIXTURES = /(\.test\.ts|fakes\.ts|dryrun\.ts|data\/golden\.ts|script\/world\.ts)$/;
+  const walk = (dir: string): string[] => readdirSync(join(ROOT, dir)).flatMap((n) => (statSync(join(ROOT, dir, n)).isDirectory() ? walk(join(dir, n)) : n.endsWith(".ts") ? [join(dir, n)] : []));
+
+  // src/league is the runtime and all its copy (src/binance and src/sdk are frozen and say nothing of the season).
+  it("src/league holds no literal season date or weekday: the copy renders the site's instant", () => {
+    const hits = walk("src/league").filter((f) => !FIXTURES.test(f)).flatMap((f) => read(f).split("\n").map((l, i) => [f, i + 1, l] as const).filter(([, , l]) => SEASON_DATE.test(l)).map(([f, n, l]) => `${f}:${n}: ${l.trim().slice(0, 120)}`));
+    expect(hits).toEqual([]);
+    // The fixtures that keep a date say they are fixtures.
+    expect(read("src/league/script/world.ts")).toContain("A FIXTURE clock");
+    expect(read("src/league/data/golden.ts")).toContain("TEST FAKES, NOT USED AT RUNTIME");
+  });
+
+  it("the skill, the setup, the README and the player docs say the season's start without a date of their own", () => {
+    for (const f of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md", "docs/league/manual-mode.md", "docs/league/ask-hosts.md", "plans/league-autopilot/grok-bot-rehearsal.md"]) {
+      const hits = read(f).split("\n").filter((l) => SEASON_DATE.test(l));
+      expect(hits, f).toEqual([]);
+    }
+    expect(read("skills/feast-league/SKILL.md")).toContain("trades from the season's start, <the season's start, as feast.meme gives it> UTC+8.");
+  });
+});
+
+describe("task 975, run 22: FL report, the support line, the Monday start in the notes", () => {
+  const log = read("docs/CHANGELOG.md");
+  const v513 = log.slice(log.indexOf("## league-v5.1.3\n"), log.indexOf("## league-v5.1.2\n"));
+  const notes = read("docs/league/release-v5.1.3.md");
+  it("the release notes and the CHANGELOG say the Monday start, manual mode, FL report and the support line, and the site's two doors", () => {
+    expect(notes).toContain("Season 1 now starts, and trading opens, **Monday 10/26 21:00 UTC+8**");
+    for (const word of ["manual mode", "`FL report <name>`", "Need help?", "需要帮助？", "`support.url`", "`POST /api/league/report`", "{ agentId, agent, runtime, host, doctor, status, logTail[], at }", "64 KB", "10 minutes"]) expect(notes, word).toContain(word);
+    for (const word of ["Dates only from the site", "`FL report <name>`", "The support line", "Monday 10/26 21:00 UTC+8"]) expect(v513, word).toContain(word);
+  });
+  it("SKILL: pass the help line on, FL report with the player's yes, and never a date of your own", () => {
+    const skill = read("skills/feast-league/SKILL.md");
+    expect(skill).toContain("### When the player hits a problem");
+    expect(skill).toContain("run **`FL report <name>`**");
+    expect(skill).toContain("Never write a date of your own into a card or a reply");
   });
 });

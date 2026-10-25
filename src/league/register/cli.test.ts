@@ -6,6 +6,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { confirmAgent, planAgent, saveAgent } from "../agent.ts";
 import { appendJsonl, agentPaths } from "../store.ts";
+import { splitHelp } from "../support.ts";
+
+/** Run 22: the help line every refusal, error and status ends with, kept apart from the output the tests read. */
+const helpOff = (stdout: string, stderr: string) => {
+  const out = splitHelp(stdout);
+  const err = splitHelp(stderr);
+  return { stdout: out.text, stderr: err.text, help: out.help ?? err.help };
+};
 
 /**
  * The CLI as the skill runs it: `bin.mjs` in a child process, with a fake `baw`
@@ -41,10 +49,10 @@ else console.log(JSON.stringify({ success: false, error: { name: "NOT_IN_THIS_TE
   return { path, calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []) };
 }
 
-function run(args: string[], env: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
+function run(args: string[], env: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string; help: string | null }> {
   return new Promise((resolve) => {
     execFile(process.execPath, [BIN, ...args], { env: { ...process.env, ...env }, timeout: 60_000 }, (error, stdout, stderr) => {
-      resolve({ code: error ? Number((error as { code?: number }).code ?? 1) : 0, stdout, stderr });
+      resolve({ code: error ? Number((error as { code?: number }).code ?? 1) : 0, ...helpOff(stdout, stderr) });
     });
   });
 }
