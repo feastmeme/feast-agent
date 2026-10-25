@@ -36,7 +36,7 @@ let stdin = "";
 process.stdin.on("data", (d) => (stdin += d));
 process.stdin.on("end", () => {
   const args = process.argv.slice(2);
-  fs.writeFileSync(${JSON.stringify(seen)} + "/${name}.json", JSON.stringify({ args, stdin, cwd: process.cwd(), env: process.env }));
+  fs.writeFileSync(${JSON.stringify(seen)} + "/${name}.json", JSON.stringify({ args, stdin, cwd: process.cwd(), env: process.env, workspace: fs.readdirSync(process.cwd()), geminiSettings: fs.existsSync(".gemini/settings.json") ? JSON.parse(fs.readFileSync(".gemini/settings.json", "utf8")) : null }));
   const mode = ${JSON.stringify(mode)};
   if (mode.startsWith("grandchild")) {
     // A grandchild that inherits stdout and keeps it open long after the host is done.
@@ -53,7 +53,8 @@ process.stdin.on("end", () => {
     if (mode === "is-error") return console.log(JSON.stringify({ type: "result", is_error: true, result: "Not logged in · Please run /login" }));
     console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: mode === "bad-json" ? "I think you should buy something" : answer }));
   } else if ("${name}" === "gemini") {
-    if (mode === "is-error") { console.log(JSON.stringify({ response: null, error: { type: "AuthError", message: "Please set an Auth method" } })); process.exit(1); }
+    // As the real CLI 0.65.0 fails (run 17): a pretty-printed object on stderr, nothing on stdout, exit 41.
+    if (mode === "is-error") { process.stderr.write("Approval mode note\\n" + JSON.stringify({ session_id: "s", error: { type: "Error", message: "Please set an Auth method in your " + require("node:os").homedir() + "/.gemini/settings.json", code: 41 } }, null, 2) + "\\n"); process.exit(41); }
     console.log(JSON.stringify({ response: mode === "bad-json" ? "buy something" : "\\u0060\\u0060\\u0060json\\n" + answer + "\\n\\u0060\\u0060\\u0060", stats: { models: {} } }));
   } else {
     const o = args[args.indexOf("-o") + 1];
@@ -68,7 +69,7 @@ process.stdin.on("end", () => {
   }
   const home = join(dir, "home");
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, FEAST_MAINNET_RPC_URL: "https://rpc.example/with-a-key" };
-  const read = (name: string) => JSON.parse(readFileSync(join(seen, `${name}.json`), "utf8")) as { args: string[]; stdin: string; cwd: string; env: Record<string, string | undefined> };
+  const read = (name: string) => JSON.parse(readFileSync(join(seen, `${name}.json`), "utf8")) as { args: string[]; stdin: string; cwd: string; env: Record<string, string | undefined>; workspace: string[]; geminiSettings: unknown };
   const grandchild = () => Number(readFileSync(join(seen, "grandchild.pid"), "utf8"));
   return { home, env, read, grandchild };
 }
@@ -239,15 +240,19 @@ describe("addendum 11: the new adapters", () => {
     expect(seen.stdin).toBe("THE PACK");
     expect(seen.env.CLAUDECODE).toBeUndefined();
     // After the security review: its tools off by system settings, in a fresh temp workspace outside the agent's home, gone after.
-    const settingsPath = seen.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH!;
-    expect(settingsPath).toMatch(/feast-ask-/);
-    expect(existsSync(settingsPath)).toBe(false);
+    // Run 17, on the real CLI: the exclusion in the workspace's own settings (a system file is read only from a root-owned
+    // folder), the folder trusted so it is read and plan mode holds; nothing else in the folder.
+    expect(seen.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();
+    expect(seen.env.GEMINI_CLI_TRUST_WORKSPACE).toBe("true");
+    expect(seen.workspace).toEqual([".gemini"]);
+    expect(seen.geminiSettings).toEqual(geminiSettings());
     expect(geminiSettings()).toMatchObject({ tools: { exclude: expect.arrayContaining(["run_shell_command", "read_file", "read_many_files", "web_fetch", "google_web_search", "write_file", "glob", "grep_search", "list_directory"]) }, admin: { extensions: { enabled: false } } });
+    // A failure's object on stderr, pretty-printed, as the real CLI 0.65.0 prints it: its message read, the home as ~.
     expect(seen.cwd).toMatch(/feast-ask-[^/]+\/w$/);
     expect(seen.cwd.includes(s.home.replace(/^\/private/, ""))).toBe(false);
     expect(existsSync(seen.cwd)).toBe(false);
     const e = stubs("is-error");
-    expect(await callHost({ with: "gemini", pack: "p", home: e.home, name: "demo", env: e.env })).toEqual({ ok: false, cause: "Gemini CLI answered an error: Please set an Auth method" });
+    expect(await callHost({ with: "gemini", pack: "p", home: e.home, name: "demo", env: e.env })).toEqual({ ok: false, cause: "Gemini CLI answered an error: Please set an Auth method in your ~/.gemini/settings.json" });
     const b = stubs("bad-json");
     expect(await callHost({ with: "gemini", pack: "p", home: b.home, name: "demo", env: b.env })).toEqual({ ok: false, cause: "Gemini CLI's answer was not JSON" });
     const slow = stubs("grandchild-hangs");
@@ -266,6 +271,7 @@ describe("addendum 11: the new adapters", () => {
     expect(seen.cwd.replace(/^\/private/, "")).toBe(workspace.replace(/^\/private/, ""));
     expect(existsSync(workspace)).toBe(false);
     expect(seen.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();
+    expect(seen.workspace).toEqual([]);
     const e = stubs("is-error");
     expect(await callHost({ with: "cursor", pack: "p", home: e.home, name: "demo", env: e.env })).toEqual({ ok: false, cause: "Cursor answered an error: Not logged in · Please run /login" });
   }, 30_000);

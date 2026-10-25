@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { clean } from "../enter/copy.ts";
@@ -62,9 +62,9 @@ export function askDirs(home: string, name: string): { cwd: string; io: string }
 }
 
 /**
- * The Gemini CLI's tools, every built-in one (addendum 11, after a security review): off, through a system settings
- * file (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`): the system level overrides the user's and the project's settings (its
- * configuration reference). Not rehearsed on a real Gemini CLI here (none is installed): the coordinator's rehearsal
+ * The Gemini CLI's tools, every built-in one (addendum 11, after a security review): off, through the ask's own
+ * workspace settings (`.gemini/settings.json` in the fresh folder; run 17 found the CLI reads a system settings file
+ * only from a root-owned folder). Not rehearsed on a real Gemini CLI here (none is installed): the coordinator's rehearsal
  * checks that a pack asking it to read a file is answered without one.
  */
 export const GEMINI_TOOLS = [
@@ -232,6 +232,22 @@ async function callEndpoint(o: CallInput): Promise<HostCall> {
   return answer === undefined ? { ok: false, cause: `${who}'s answer was not JSON` } : { ok: true, answer };
 }
 
+/** The last JSON object in a text (a CLI's error printed over several lines); undefined when there is none. */
+function jsonIn(text: string): unknown {
+  const end = text.lastIndexOf("}");
+  for (let start = text.indexOf("{"); start !== -1 && start < end; start = text.indexOf("{", start + 1)) {
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      // Not from here: try the next brace.
+    }
+  }
+  return undefined;
+}
+
+/** The player's home folder shown as ~ in a cause (it names the user). */
+const home = (text: string) => text.split(homedir()).join("~");
+
 /** A child's words, fit to show: the tail, one line, no URL (it may carry a key). */
 const tail = (text: string) => clean(text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>").trim().split("\n").slice(-3).join(" "), 200);
 
@@ -315,9 +331,13 @@ async function callCliIn(o: CallInput & { with: CliAsk }, fresh: { root: string;
   // Gemini's tools off: its system settings, beside (not in) its workspace.
   const extraEnv: NodeJS.ProcessEnv = {};
   if (o.with === "gemini" && fresh) {
-    const settings = join(fresh.root, "system-settings.json");
-    writeFileSync(settings, JSON.stringify(geminiSettings()), { mode: 0o600 });
-    extraEnv.GEMINI_CLI_SYSTEM_SETTINGS_PATH = settings;
+    // The workspace's own settings (run 17, on the real CLI 0.65.0): a system settings file is read only from a folder
+    // root owns, which the runtime cannot make; the project's `.gemini/settings.json` is read for a trusted folder,
+    // and it is above the player's own settings. The folder is a fresh empty one of ours, trusted for this one ask (its
+    // documented switch), so the file is read and plan mode holds (untrusted, the CLI turns plan mode back to default).
+    mkdirSync(join(cwd, ".gemini"));
+    writeFileSync(join(cwd, ".gemini", "settings.json"), JSON.stringify(geminiSettings()), { mode: 0o600 });
+    extraEnv.GEMINI_CLI_TRUST_WORKSPACE = "true";
   }
   const who = hostShown(o.with);
   // Cursor takes the pack as its prompt; the others read it on stdin.
@@ -373,9 +393,9 @@ async function callCliIn(o: CallInput & { with: CliAsk }, fresh: { root: string;
   if (run.error) return { ok: false, cause: `${who} could not be started: ${tail(run.error.message)}` };
   if (run.timedOut) return { ok: false, cause: `${who} did not answer within ${Math.round(timeoutMs / 1_000)} s` };
   if (o.with === "gemini") {
-    // `{ response, stats, error? }` (its headless docs).
-    const out = parseAnswerText(run.stdout) as { response?: unknown; error?: { message?: unknown } | null } | undefined;
-    if (run.code !== 0 || (out && out.error)) return { ok: false, cause: `${who} answered an error: ${tail(typeof out?.error?.message === "string" ? out.error.message : run.stderr || run.stdout || `exit ${run.code}`)}` };
+    // `{ response, stats, error? }` (its headless docs); a failure's object comes on stderr, pretty-printed (0.65.0).
+    const out = (parseAnswerText(run.stdout) ?? jsonIn(run.stderr)) as { response?: unknown; error?: { message?: unknown } | null } | undefined;
+    if (run.code !== 0 || (out && out.error)) return { ok: false, cause: `${who} answered an error: ${tail(home(typeof out?.error?.message === "string" ? out.error.message : run.stderr || run.stdout || `exit ${run.code}`))}` };
     const answer = typeof out?.response === "string" ? parseAnswerText(out.response) : undefined;
     return answer === undefined ? { ok: false, cause: `${who}'s answer was not JSON` } : { ok: true, answer };
   }
