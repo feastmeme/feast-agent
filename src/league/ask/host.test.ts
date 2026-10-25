@@ -1,9 +1,9 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ASK_INSTRUCTION, geminiSettings, askArgv, askDirs, askKeyPath, askWithFor, callHost, checkBaseUrl, childEnv, endpointKey, LOGIN_KEPT } from "./host.ts";
+import { ASK_INSTRUCTION, askWorkspaces, geminiSettings, askArgv, askDirs, askKeyPath, askWithFor, callHost, checkBaseUrl, childEnv, endpointKey, LOGIN_KEPT } from "./host.ts";
 import { ANSWER_SCHEMA } from "./pack.ts";
 
 /**
@@ -248,8 +248,10 @@ describe("addendum 11: the new adapters", () => {
     expect(seen.geminiSettings).toEqual(geminiSettings());
     expect(geminiSettings()).toMatchObject({ tools: { exclude: expect.arrayContaining(["run_shell_command", "read_file", "read_many_files", "web_fetch", "google_web_search", "write_file", "glob", "grep_search", "list_directory"]) }, admin: { extensions: { enabled: false } } });
     // A failure's object on stderr, pretty-printed, as the real CLI 0.65.0 prints it: its message read, the home as ~.
-    expect(seen.cwd).toMatch(/feast-ask-[^/]+\/w$/);
-    expect(seen.cwd.includes(s.home.replace(/^\/private/, ""))).toBe(false);
+    // Run 17, after a security review: in the league home's own 0700 ask-workspaces, outside the agent's folder.
+    expect(seen.cwd.replace(/^\/private/, "")).toMatch(new RegExp(`^${askWorkspaces(s.home).replace(/^\/private/, "")}/feast-ask-[^/]+/w$`));
+    expect(seen.cwd.includes(join("agents", "demo"))).toBe(false);
+    expect(statSync(askWorkspaces(s.home)).mode & 0o777).toBe(0o700);
     expect(existsSync(seen.cwd)).toBe(false);
     const e = stubs("is-error");
     expect(await callHost({ with: "gemini", pack: "p", home: e.home, name: "demo", env: e.env })).toEqual({ ok: false, cause: "Gemini CLI answered an error: Please set an Auth method in your ~/.gemini/settings.json" });
@@ -266,8 +268,8 @@ describe("addendum 11: the new adapters", () => {
     expect(seen.stdin).toBe("");
     expect(seen.args.at(-1)).toContain("THE PACK");
     const workspace = seen.args[seen.args.indexOf("--workspace") + 1]!;
-    expect(workspace).toMatch(/feast-ask-[^/]+\/w$/);
-    expect(workspace.includes(s.home.replace(/^\/private/, ""))).toBe(false);
+    expect(workspace.replace(/^\/private/, "")).toMatch(new RegExp(`^${askWorkspaces(s.home).replace(/^\/private/, "")}/feast-ask-[^/]+/w$`));
+    expect(workspace.includes(join("agents", "demo"))).toBe(false);
     expect(seen.cwd.replace(/^\/private/, "")).toBe(workspace.replace(/^\/private/, ""));
     expect(existsSync(workspace)).toBe(false);
     expect(seen.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();

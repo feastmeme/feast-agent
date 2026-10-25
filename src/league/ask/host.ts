@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { clean } from "../enter/copy.ts";
@@ -80,12 +80,17 @@ export function geminiSettings(): Record<string, unknown> {
 }
 
 /**
- * Where Gemini and Cursor run (addendum 11): a fresh empty folder in the system's temp folder, made for one ask and
- * removed after it, never inside the agent's home (its key file, its notes token): the pack's untrusted text finds
- * nothing to read there, whatever a tool were to do.
+ * Where Gemini and Cursor run (addendum 11; run 17, after a security review): a fresh empty folder made for one ask
+ * and removed after it, in the league home's own `ask-workspaces` (mode 0700), never inside an agent's folder (its key
+ * file, its notes token) and never in a temp folder others may write to (Linux's `/tmp`): a trusted Gemini workspace
+ * reads `GEMINI.md` and `.env` from the folders above it, and nobody but this user can put one there.
  */
-function freshWorkspace(): { root: string; cwd: string; remove: () => void } {
-  const root = mkdtempSync(join(tmpdir(), "feast-ask-"));
+export const askWorkspaces = (home: string) => join(home, "ask-workspaces");
+function freshWorkspace(home: string): { root: string; cwd: string; remove: () => void } {
+  const parent = askWorkspaces(home);
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  chmodSync(parent, 0o700);
+  const root = mkdtempSync(join(parent, "feast-ask-"));
   const cwd = join(root, "w");
   mkdirSync(cwd);
   return { root, cwd, remove: () => rmSync(root, { recursive: true, force: true }) };
@@ -309,7 +314,7 @@ export async function callHost(o: CallInput): Promise<HostCall> {
 }
 
 async function callCli(o: CallInput & { with: CliAsk }): Promise<HostCall> {
-  const fresh = o.with === "gemini" || o.with === "cursor" ? freshWorkspace() : null;
+  const fresh = o.with === "gemini" || o.with === "cursor" ? freshWorkspace(o.home) : null;
   try {
     return await callCliIn(o, fresh);
   } finally {
