@@ -77,8 +77,8 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
-import { autopilotLine, awakeLine, clean, tradeNowLine } from "./enter/copy.ts";
-import { enter, entryOneShot, readEntry } from "./enter/flow.ts";
+import { autopilotLine, awakeLine, clean, referrerLine, tradeNowLine } from "./enter/copy.ts";
+import { enter, entryOneShot, readEntry, referrerStatus } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { referralDeps } from "./register/referral.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv, type LeagueRead } from "./register/site.ts";
@@ -564,7 +564,8 @@ async function main(argv: string[]): Promise<number> {
         alive: readAlive(home, name),
         // Addendum 12: the referral code sent with the registration, from the entry's record (kept nowhere else).
         referral: entryRecord?.ref ?? null,
-        referrer: entryRecord?.ref ? { bound: referrerOn === null || referrerOn === "unreadable" ? (referrerOn === null ? false : null) : true, binding: entryRecord.refBinding ?? null } : null,
+        // Run 18: where the referrer stands (null with no code: an entry with no code says nothing about referrals).
+        referrer: referrerStatus(entryRecord, referrerOn, Date.now()),
         signInEndsAt: signInEnd === null ? null : new Date(signInEnd).toISOString(),
       };
       const gate = data.season;
@@ -622,7 +623,7 @@ async function main(argv: string[]): Promise<number> {
           ...(versionLine(release) ? [versionLine(release)!] : []),
           ...(s.agent!.track !== "entry" && signInLine(signInEnd, utc8) ? [signInLine(signInEnd, utc8)!] : []),
           ...(data.referral ? [`referral: ${data.referral} (sent with the registration)`] : []),
-          ...(data.referrer ? [referrerLine(data.referrer.bound, data.referrer.binding?.state ?? null, lang)] : []),
+          ...(data.referrer ? [referrerLine(data.referrer, lang)] : []),
           // It runs on this machine: say so, and when it last slept (task 975, addendum 3).
           ...(s.agent!.track !== "entry" ? [awakeLine(lang)] : []),
           ...(sleptAt ? [`slept ${sleptAt.minutes} minutes at ${utc8(sleptAt.at)} UTC+8: nothing traded while it slept`] : []),
@@ -1000,18 +1001,6 @@ async function main(argv: string[]): Promise<number> {
 }
 
 /** Run 17: "引荐人:已绑定 / 未绑定" (zh, the coordinator's words), "referrer: bound / not bound" (en), and why. */
-function referrerLine(bound: boolean | null, binding: string | null, lang: Lang): string {
-  const zh = lang === "zh";
-  if (bound === true) return zh ? "引荐人:已绑定" : "referrer: bound";
-  const why =
-    bound === null
-      ? zh ? "链暂时读不到" : "the chain could not be read just now"
-      : binding === "pending" || binding === "sent"
-        ? zh ? "绑定已签名，等 keeper 上链" : "the binding is signed and waits for the keeper"
-        : zh ? "FL enter 会请你签名绑定" : "FL enter asks you to sign the binding";
-  return zh ? `引荐人:未绑定（${why}）` : `referrer: not bound (${why})`;
-}
-
 /** The last `FL ask --print`'s ids (addendum 11), and how long an answer to it is taken. */
 const PRINTED_MAX_AGE_MS = 10 * 60_000;
 function readPrinted(home: string, name: string): { at: number; digest: string; maxBuyBnb: number; ids: [string, { coin: Address; symbol: string | null; held: boolean }][] } | null {

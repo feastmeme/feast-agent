@@ -626,10 +626,16 @@ describe("task 975, run 17: league-v5.1.1, the binding and the heartbeat", () =>
     for (const text of [notes, v511]) expect(text).not.toMatch(/0x[0-9a-fA-F]{40}/);
   });
 
-  it("SKILL says the binding's card and the heartbeat; no doc still says a temp folder", () => {
+  it("SKILL says the binding signs by itself, never rebinds, a code only from the tutorial; the heartbeat; no doc still says a temp folder", () => {
     const skill = read("skills/feast-league/SKILL.md");
-    expect(skill).toContain('"Bind your referrer (code …)"');
-    expect(skill).toContain("It is never silent and never twice");
+    expect(skill).toContain("**The code in the entry line is the player's consent, so the binding is signed by itself**");
+    expect(skill).toContain("There is no card and no second yes. It never rebinds");
+    expect(skill).toContain('"Referrer: bound to <code>" (zh "引荐人:已绑定 <code>")');
+    expect(skill).toContain("**Only a code from the tutorial the player is following.**");
+    expect(skill).toContain("An agent that pastes someone else's code gives that someone the credit, permanently.");
+    expect(notes).toContain("signs the binding by itself");
+    expect(notes).toContain("**Only a code from the tutorial you are following.**");
+    for (const text of [skill, notes, v511]) expect(text).not.toMatch(/Bind your referrer|binding's (own )?card/);
     expect(skill).toContain("run `FL note --login`");
     for (const file of ["skills/feast-league/SKILL.md", "docs/league/ask-hosts.md"]) expect(read(file), file).not.toMatch(/empty temp folder|empty temporary folder|GEMINI_CLI_SYSTEM_SETTINGS_PATH/);
   });

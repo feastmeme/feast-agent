@@ -150,15 +150,18 @@ export type EntryRecord = {
   registered?: { season: number; issuedAt: number; seat: number | null; founding: number | null; at: string } | null;
   /** Addendum 12: the referral code sent with the registration (`FL enter --ref`); here and nowhere else. */
   ref?: string | null;
-  /** Run 17: where the wallet's referral binding stands, after the player's yes; never asked again once kept or bound. */
-  refBinding?: { state: "pending" | "sent" | "bound" | "refused"; referrer: string | null; deadline: number | null; at: string; refusal?: string | null } | null;
+  /**
+   * Run 17: where the wallet's referral binding stands; signed by itself since run 18 (the code is the consent), and
+   * never again once kept, bound or the wallet's own. `referrer` is the code's referrer, when the site named it.
+   */
+  refBinding?: { state: "pending" | "sent" | "bound" | "refused" | "unknown" | "self"; referrer: string | null; deadline: number | null; at: string; refusal?: string | null } | null;
   /** Task 968: the meme launched with `--meme` or `FL meme`. */
   meme?: { coin: Address; symbol: string; name: string; txHash: Hex | null; concept: string } | null;
   /** Task 968: the trading agent the entry started. */
   agent?: string | null;
 };
 
-type Stage = "launch" | "notes" | "register" | "meme" | "start" | "bind";
+type Stage = "launch" | "notes" | "register" | "meme" | "start";
 type Pending = { stage: Stage; digest: string; at: string };
 
 const ID_NAME = /^([a-z0-9]{1,64})(\.ai)?$/;
@@ -313,12 +316,27 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
    * keeps it and the keeper relays it. Never silent, never twice: a wallet bound on chain (to anyone), or a binding
    * already kept and not expired, is never asked again. `null`: nothing to ask; else the card, or the lines it said.
    */
-  const bindStep = async (): Promise<EnterResult | string[]> => {
+  /**
+   * The referral binding (run 17), signed by itself (run 18, the owner's ruling "自动签"): a code the player put in
+   * the entry line is their word on who referred them, so no card and no second yes. Everything else holds: nothing
+   * when the wallet has a referrer on chain (anyone's) or a kept binding is still live; the signature checked here
+   * before it is sent; a failure is one line and the next `FL enter` tries again, never a failed entry.
+   */
+  const bindStep = async (): Promise<string[]> => {
     const kept = readEntry(deps.home);
     const code = (refSent ? ref : null) ?? kept?.ref ?? null;
     if (!code || !deps.referrals || !deps.signer.signReferralBind) return [];
+    return bindWith(code, kept).catch((error: unknown) => {
+      log("enter.bind", { result: "failed", why: (error as Error).name });
+      return [copy.referrerLine({ kind: "failed", code }, lang)];
+    });
+  };
+  const bindWith = async (code: string, kept: EntryRecord | null): Promise<string[]> => {
+    if (!deps.referrals || !deps.signer.signReferralBind) return [];
+    const said = (r: copy.ReferrerSaid) => [copy.referrerLine(r, lang)];
     const b = kept?.refBinding ?? null;
-    if (b && (b.state === "bound" || b.state === "sent" || (b.state === "pending" && b.deadline !== null && b.deadline * 1_000 > now()))) return [];
+    if (b && (b.state === "bound" || b.state === "sent" || b.state === "self" || (b.state === "pending" && b.deadline !== null && b.deadline * 1_000 > now()))) return [];
+    const at = () => new Date(now()).toISOString();
     const keep = (refBinding: NonNullable<EntryRecord["refBinding"]>) => {
       const latest = readEntry(deps.home);
       if (latest) writeJsonAtomic(paths.entry, { ...latest, refBinding });
@@ -327,49 +345,63 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     try {
       wallet = getAddress(await deps.signer.address());
     } catch {
-      return [copy.bindLater("wallet", lang)];
+      return said({ kind: "later", code, who: "wallet" });
     }
-    const onChain = await deps.referrals.referrerOf(wallet);
-    if (onChain === "unreadable") return [copy.bindLater("chain", lang)];
-    if (onChain !== null) {
-      keep({ state: "bound", referrer: null, deadline: null, at: new Date(now()).toISOString() });
+    const referrals = deps.referrals;
+    /** Bound on chain already: kept as bound, and said whether it is this code's referrer. */
+    const boundAlready = async (onChain: Address | null) => {
+      const r = await referrals.resolve(code);
+      const referrer = r.kind === "address" ? r.referrer.toLowerCase() : null;
+      keep({ state: "bound", referrer, deadline: null, at: at() });
       log("enter.bind", { result: "already-bound" });
-      return [copy.bindAlready(lang)];
+      if (referrer === null || onChain === null) return said({ kind: "bound-unread", code });
+      return said({ kind: referrer === onChain.toLowerCase() ? "bound" : "other", code });
+    };
+    const onChain = await referrals.referrerOf(wallet);
+    if (onChain === "unreadable") return said({ kind: "later", code, who: "chain" });
+    if (onChain !== null) return boundAlready(onChain);
+    const resolved = await referrals.resolve(code);
+    if (resolved.kind === "unreadable") return said({ kind: "later", code, who: "site" });
+    if (resolved.kind === "unknown") {
+      keep({ state: "unknown", referrer: null, deadline: null, at: at() });
+      log("enter.bind", { result: "unknown-code" });
+      return said({ kind: "unknown", code });
     }
-    const resolved = await deps.referrals.resolve(code);
-    if (resolved.kind === "unreadable") return [copy.bindLater("site", lang)];
-    if (resolved.kind === "unknown") return [copy.bindUnknown(code, lang)];
-    if (resolved.referrer.toLowerCase() === wallet.toLowerCase()) return [copy.bindSelf(lang)];
+    if (resolved.referrer.toLowerCase() === wallet.toLowerCase()) {
+      keep({ state: "self", referrer: null, deadline: null, at: at() });
+      log("enter.bind", { result: "own-code" });
+      return said({ kind: "self", code });
+    }
     const referrer = resolved.referrer;
-    const digest = sha256(JSON.stringify({ stage: "bind", code, referrer: referrer.toLowerCase() }));
-    if (!yesFor("bind", digest)) return ask("bind", digest, copy.bindCard({ code, referrer }, lang), { ref: code });
     const fields: BindFields = { wallet, referrer, deadline: bindDeadline(now()) };
     const signed = await deps.signer.signReferralBind(fields, deps.signOptions);
     if (signed.kind !== "signed") {
       log("enter.bind", { result: "not-signed", why: signed.kind });
-      return [copy.bindNotSigned(signed.kind, lang)];
+      return said({ kind: "not-signed", code, why: signed.kind });
     }
     const signature = joinSignature(signed.signature, signed.recovery);
     if (!signature || !(await bindSignatureRecovers(fields, signature))) {
       log("enter.bind", { result: "local-check-failed" });
-      return [copy.bindNotSigned("local-check", lang)];
+      return said({ kind: "not-signed", code, why: "local-check" });
     }
-    const answer = await deps.referrals.submit({ wallet: wallet.toLowerCase(), referrer: referrer.toLowerCase(), deadline: fields.deadline.toString(), signature, chainId: REFERRALS_CHAIN_ID });
+    const answer = await referrals.submit({ wallet: wallet.toLowerCase(), referrer: referrer.toLowerCase(), deadline: fields.deadline.toString(), signature, chainId: REFERRALS_CHAIN_ID });
     log("enter.bind", { result: answer.kind, ...(answer.kind === "refused" ? { status: answer.status, refusal: answer.name } : {}) });
-    const at = new Date(now()).toISOString();
     if (answer.kind === "kept") {
-      keep({ state: answer.status === "sent" ? "sent" : "pending", referrer: referrer.toLowerCase(), deadline: Number(fields.deadline), at });
-      return [copy.bindKept(code, lang)];
+      keep({ state: answer.status === "sent" ? "sent" : "pending", referrer: referrer.toLowerCase(), deadline: Number(fields.deadline), at: at() });
+      return said({ kind: "kept", code });
     }
     if (answer.kind === "already-bound") {
-      keep({ state: "bound", referrer: null, deadline: null, at });
-      return [copy.bindAlready(lang)];
+      const now2 = await referrals.referrerOf(wallet);
+      keep({ state: "bound", referrer: referrer.toLowerCase(), deadline: null, at: at() });
+      if (now2 === "unreadable" || now2 === null) return said({ kind: "bound-unread", code });
+      return said({ kind: now2.toLowerCase() === referrer.toLowerCase() ? "bound" : "other", code });
     }
     if (answer.kind === "refused") {
-      keep({ state: "refused", referrer: referrer.toLowerCase(), deadline: Number(fields.deadline), at, refusal: answer.name ?? answer.code });
-      return [copy.bindRefused(answer.name ?? answer.code ?? `HTTP ${answer.status}`, lang)];
+      const name = answer.name ?? answer.code ?? `HTTP ${answer.status}`;
+      keep({ state: "refused", referrer: referrer.toLowerCase(), deadline: Number(fields.deadline), at: at(), refusal: name });
+      return said({ kind: "refused", code, name });
     }
-    return [copy.bindLater("site", lang)];
+    return said({ kind: "later", code, who: "site" });
   };
 
   /** The wallet's sign-in end, for the entry card (addendum 8); null when it cannot be read. */
@@ -411,10 +443,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const refused = planOnce();
     if (refused) return refused;
     const head = copy.alreadyEntered({ agentId: given, coin: record!.bodyCoin, notes: record!.notes ?? null, season: record!.registered?.season ?? null, seat: record!.registered?.seat ?? null }, lang);
-    // Run 17: the referral binding, asked once, on a rerun too (a v5.1 entry's recorded code binds here).
-    const bound = input.memeOnly ? [] : await bindStep();
-    if (!Array.isArray(bound)) return bound;
-    lines.push(...bound);
+    // Run 17: the referral binding, on a rerun too (a v5.1 entry's recorded code binds here, by itself since run 18).
+    lines.push(...(input.memeOnly ? [] : await bindStep()));
     if (!planned) return end(0, true, "entered", [head, ...refLate(), ...(input.memeOnly ? [] : [copy.doneLine(lang)])], { agentId: given, bodyCoin: record!.bodyCoin, notes: record!.notes ?? null });
     if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, ...refLate(), copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     const rerunRead = await deps.site.league("today", null).catch(() => null);
@@ -502,10 +532,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const finish = async (): Promise<EnterResult> => {
     lines.push(...refLate());
     if (planned) lines.push(...(await startStep()));
-    // Run 17: the agent runs; then the referral binding's own card, if this entry carries a code.
-    const bound = await bindStep();
-    if (!Array.isArray(bound)) return bound;
-    lines.push(...bound);
+    // Run 17: the agent runs; then the referral binding, signed by itself (run 18) when this entry carries a code.
+    lines.push(...(await bindStep()));
     lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade) : copy.doneLine(lang));
     if (composed) return memeStep(composed);
     // Signed in, and the site has not given the seat yet: "registered", not done; a rerun picks it up.
@@ -713,4 +741,24 @@ export function entryOneShot(options: { home: string; signer: Signer; rpcUrl?: s
       unresolved: (after?.unresolved ?? []).some((u) => u.kind === "launch"),
     };
   };
+}
+
+/**
+ * `FL status`'s referrer line (run 18): from the entry's code, the registry's live read and the kept binding. Null when
+ * the entry carries no code: an entry with no code says nothing about referrals.
+ */
+export function referrerStatus(entry: Pick<EntryRecord, "ref" | "refBinding"> | null, onChain: Address | null | "unreadable", nowMs: number): copy.ReferrerSaid | null {
+  const code = entry?.ref ?? null;
+  if (!code) return null;
+  const b = entry?.refBinding ?? null;
+  if (onChain === "unreadable") return { kind: "unread", code };
+  if (onChain !== null) {
+    if (!b?.referrer) return { kind: "bound-unread", code };
+    return { kind: b.referrer.toLowerCase() === onChain.toLowerCase() ? "bound" : "other", code };
+  }
+  if (b?.state === "sent" || (b?.state === "pending" && b.deadline !== null && b.deadline * 1_000 > nowMs)) return { kind: "kept", code };
+  if (b?.state === "refused") return { kind: "refused", code, name: b.refusal ?? "refused" };
+  if (b?.state === "unknown") return { kind: "unknown", code };
+  if (b?.state === "self") return { kind: "self", code };
+  return { kind: "next", code };
 }

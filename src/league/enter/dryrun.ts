@@ -8,14 +8,16 @@
  *   npx tsx src/league/enter/dryrun.ts [--lang en|zh]
  *
  * (a) the entry card, with the season-1 default copied to ./strategy.md; (b) the --yes against a register route
- * that seats; (c) one that answers pending; (d) the compose card; (e) the meme's preview with the host's PNG,
- * (e2) with a JPEG, (f) with 262,145 bytes, (g) with no league creature; (h) the agent under the season gate,
- * three simulated minutes before trading opens; (i) the same with no start announced.
+ * that seats; (c) one that answers pending; (r) a tutorial's code, its referral binding signed by itself (run 18);
+ * (d) the compose card; (e) the meme's preview with the host's PNG, (e2) with a JPEG, (f) with 262,145 bytes, (g)
+ * with no league creature; (h) the agent under the season gate, three simulated minutes before trading opens; (i)
+ * the same with no start announced.
  */
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { getAddress } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import { BawSigner } from "../baw.ts";
@@ -23,6 +25,7 @@ import { FakeFeed, INDEXER as FEED_INDEXER, seeded, SITE as FEED_SITE } from "..
 import { fakeClock, FEAST, tradeWorld } from "../prompt/fakes.ts";
 import { langOf, short, utc8 } from "../register/copy.ts";
 import { fakeBaw, leagueWire } from "../register/fakes.ts";
+import type { ReferralDeps } from "../register/referral.ts";
 import { LeagueSite } from "../register/site.ts";
 import { runAgent } from "../runtime.ts";
 import { agentPaths, writeJsonAtomic } from "../store.ts";
@@ -46,7 +49,7 @@ const say = (line = "") => out.push(abbreviated(line));
 const section = (title: string) => say(`\n## ${title}\n`);
 const block = (text: string) => say(["```text", text, "```"].join("\n"));
 
-function world(page: Partial<FakeSiteOptions> = {}) {
+function world(page: Partial<FakeSiteOptions> = {}, referrals?: ReferralDeps) {
   const root = mkdtempSync(join(tmpdir(), "feast-league-enter-dryrun-"));
   roots.push(root);
   const home = join(root, "home");
@@ -71,6 +74,7 @@ function world(page: Partial<FakeSiteOptions> = {}) {
         signOptions: { pollMs: 1, sleep: async () => {} },
         cwd,
         start: async (name) => (starts.push(name), 4242),
+        ...(referrals ? { referrals } : {}),
         oneShot: async () => {
           throw new Error("the dry run never launches: it stops at the preview card");
         },
@@ -118,6 +122,26 @@ try {
   say(`exit ${c.code}, stage ${c.stage}`);
   block(c.text);
   block(p.asked().join("\n"));
+
+  // --- (r) a tutorial's code: the binding signed by itself (run 18) ------------------------------------------
+  section("(r) --ref in the entry line: the referral binding, signed by itself once the agent runs (run 18)");
+  say("The code's referrer is made up; the registry reads no referrer for the wallet; the bind route keeps what it is sent.");
+  const bound: Record<string, unknown>[] = [];
+  const referrer = "0x000000000000000000000000000000000000b0b0" as const;
+  const r = world({}, {
+    resolve: async (code) => (code === "H7KMQ2" ? { kind: "address", referrer: getAddress(referrer) } : { kind: "unknown" }),
+    referrerOf: async () => null,
+    submit: async (body) => (bound.push(body), { kind: "kept", status: "pending" }),
+  });
+  await r.run({ ref: "ref: H7KMQ2" });
+  const r2 = await r.run({ ref: "ref: H7KMQ2", yes: true });
+  say(`exit ${r2.code}, stage ${r2.stage}`);
+  block(r2.text);
+  block(r.asked().join("\n"));
+  say("Sent to POST /api/v1/referral/bind (the signature cut short):");
+  block(bound.map((b) => JSON.stringify({ ...b, signature: `${String(b.signature).slice(0, 10)}…` })).join("\n"));
+  const r3 = await r.run({ yes: true });
+  say(`The next FL enter: ${bound.length === 1 ? "nothing signed again" : "signed again"}; a referrer line: ${/Referrer:|引荐人:/.test(r3.text) ? "yes" : "none"}.`);
 
   // --- (d) the compose card -------------------------------------------------------------------------
   section("(d) --meme without the composed fields: the compose card");

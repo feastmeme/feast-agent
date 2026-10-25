@@ -190,7 +190,9 @@ describe("addendum 12: the referral code in FL status", () => {
     const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
     if (!planned.ok) throw new Error(planned.errors.join("; "));
     saveAgent(home, confirmAgent(planned.agent));
-    expect((await run(["status", "demo", "--no-league"], env)).stdout).not.toContain("referral:");
+    const none = (await run(["status", "demo", "--no-league"], env)).stdout;
+    expect(none).not.toContain("referral:");
+    expect(none).not.toMatch(/Referrer|引荐/);
     const { mkdirSync } = await import("node:fs");
     mkdirSync(agentPaths(home, "league-entry").dir, { recursive: true });
     writeFileSync(join(agentPaths(home, "league-entry").dir, "entry.json"), JSON.stringify({ agentId: "maplegrin", bodyCoin: null, launchTx: null, ref: "H7KMQ2" }));
@@ -198,8 +200,8 @@ describe("addendum 12: the referral code in FL status", () => {
     expect(status.stdout).toContain("referral: H7KMQ2 (sent with the registration)");
     expect(JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout)).toMatchObject({ referral: "H7KMQ2" });
     // Run 17: the binding's line; with no wallet to read (this test's), it cannot tell, and says so.
-    expect(status.stdout).toContain("referrer: not bound (the chain could not be read just now)");
-    expect((await run(["status", "demo", "--no-league", "--lang", "zh"], env)).stdout).toContain("引荐人:未绑定（链暂时读不到）");
+    expect(status.stdout).toContain("Referrer: not read just now (the chain did not answer)");
+    expect((await run(["status", "demo", "--no-league", "--lang", "zh"], env)).stdout).toContain("引荐人:暂时读不到（链没有回应）");
     const bad = await run(["enter", "--name", "maplegrin.ai", "--ref", "nope!"], env);
     expect(bad.code).toBe(2);
     expect(bad.stdout).toContain("--ref is a referral code");

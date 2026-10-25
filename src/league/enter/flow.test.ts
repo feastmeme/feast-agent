@@ -19,7 +19,7 @@ import { agentPaths, leagueRecordPath, walletLockPath, writeFileAtomic } from ".
 import { ENTRY_AGENT } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { AVATAR_PNG, FakeEnterSite, fakeEnterChain, fakeOneShot, INDEXER, keptRow, SITE, type FakeChainOptions, type FakeShotOptions, type FakeSiteOptions } from "./fakes.ts";
-import { enter, entryAgent, readEntry, type EnterDeps, type EnterInput } from "./flow.ts";
+import { enter, entryAgent, readEntry, referrerStatus, type EnterDeps, type EnterInput } from "./flow.ts";
 import { defaultStrategy } from "./strategy.ts";
 
 /**
@@ -970,31 +970,34 @@ describe("addendum 12: FL enter --ref", () => {
   });
 });
 
-describe("run 17: the referral binding (v5.1.1)", () => {
+describe("run 17: the referral binding (v5.1.1), signed by itself since run 18", () => {
   const REFERRER = "0x000000000000000000000000000000000000b0b0";
-  function referred(o: { onChain?: string | null | "unreadable"; resolve?: "found" | "unknown" } = {}) {
+  function referred(o: { onChain?: string | null | "unreadable"; resolve?: "found" | "unknown"; submit?: "kept" | "refused" } = {}) {
     const w = world();
     const submitted: Record<string, unknown>[] = [];
     let reads = 0;
+    let resolves = 0;
     w.deps.referrals = {
-      resolve: async (code) => (o.resolve === "unknown" ? { kind: "unknown" } : code === "H7KMQ2" ? { kind: "address", referrer: getAddress(REFERRER) } : { kind: "unknown" }),
+      resolve: async (code) => (resolves++, o.resolve === "unknown" ? { kind: "unknown" } : code === "H7KMQ2" ? { kind: "address", referrer: getAddress(REFERRER) } : { kind: "unknown" }),
       referrerOf: async () => (reads++, o.onChain === undefined ? null : (o.onChain as never)),
-      submit: async (body) => (submitted.push(body), { kind: "kept", status: "pending" }),
+      submit: async (body) => (submitted.push(body), o.submit === "refused" ? { kind: "refused", status: 400, code: "BAD_SIGNATURE", name: null } : { kind: "kept", status: "pending" }),
     };
-    return { w, submitted, reads: () => reads };
+    return { w, submitted, reads: () => reads, resolves: () => resolves };
   }
 
-  it("after the entry starts the agent: its own card; on the yes, the wallet signs the Bind and the site keeps it; never asked again", async () => {
+  it("the entry that starts the agent signs the Bind by itself: no card, no second yes; the closing line says it; never signed again", async () => {
     const { w, submitted } = referred();
-    await w.run({ ref: "ref: H7KMQ2" });
+    const first = await w.run({ ref: "ref: H7KMQ2" });
+    expect(submitted).toEqual([]);
     const second = await w.run({ ref: "ref: H7KMQ2", yes: true });
     expect(w.starts).toHaveLength(1);
-    expect(second).toMatchObject({ code: 2, stage: "bind-card" });
-    expect(second.text).toContain("Bind your referrer (code H7KMQ2)");
-    expect(second.text).toContain("| Once bound | for good: a wallet's referrer never changes |");
-    expect(submitted).toEqual([]);
-    const third = await w.run({ yes: true });
-    expect(third.text).toContain("Referral binding signed and kept by feast.meme (code H7KMQ2)");
+    expect(second.code).toBe(0);
+    for (const text of [first.text, second.text]) expect(text).not.toMatch(/Bind your referrer|bind-card/);
+    expect(second.stage).not.toBe("bind-card");
+    expect(second.text).toContain("Referrer: bound to H7KMQ2 (signed by itself, free; feast.meme's keeper is putting it on chain)");
+    // After the agent is running: under its start line, among the closing lines.
+    expect(second.text.indexOf("started \"")).toBeGreaterThan(-1);
+    expect(second.text.indexOf("Referrer: bound to H7KMQ2")).toBeGreaterThan(second.text.indexOf("started \""));
     expect(submitted).toHaveLength(1);
     const body = submitted[0] as { wallet: string; referrer: string; deadline: string; signature: `0x${string}`; chainId: number };
     expect(body).toMatchObject({ wallet: w.wallet.toLowerCase(), referrer: REFERRER, chainId: 56 });
@@ -1002,46 +1005,108 @@ describe("run 17: the referral binding (v5.1.1)", () => {
     expect(await bindSignatureRecovers({ wallet: w.wallet, referrer: getAddress(REFERRER), deadline: BigInt(body.deadline) }, body.signature)).toBe(true);
     expect(Number(body.deadline) * 1_000 - DAY_ONE).toBeGreaterThan(6.9 * 86_400_000);
     expect(w.entry().refBinding).toMatchObject({ state: "pending", referrer: REFERRER });
-    // Asked never again: the next entry says nothing of it, and signs nothing more.
-    const fourth = await w.run({ yes: true });
-    expect(fourth.text).not.toContain("Bind your referrer");
+    // Never again: the next entry says nothing of it, and signs nothing more.
+    const third = await w.run({ yes: true });
+    expect(third.text).not.toContain("Referrer:");
     expect(submitted).toHaveLength(1);
   });
 
-  it("a v5.1 entry whose code was only recorded: the rerun asks to bind it", async () => {
+  it("in Chinese, the closing line is 引荐人:已绑定 <code>", async () => {
     const { w } = referred();
+    await w.run({ ref: "H7KMQ2", lang: "zh" });
+    const out = await w.run({ ref: "H7KMQ2", yes: true, lang: "zh" });
+    expect(out.text).toContain("引荐人:已绑定 H7KMQ2（已自动签名，免费；feast.meme 的 keeper 正在上链）");
+  });
+
+  it("no code: nothing read, nothing signed, nothing said about referrals", async () => {
+    const { w, submitted, reads, resolves } = referred();
+    await w.run();
+    const out = await w.run({ yes: true });
+    expect(out.code).toBe(0);
+    expect(reads()).toBe(0);
+    expect(resolves()).toBe(0);
+    expect(submitted).toEqual([]);
+    expect(out.text).not.toMatch(/Referrer|referral|引荐/i);
+    expect(w.entry().refBinding).toBeUndefined();
+  });
+
+  it("a v5.1 entry whose code was only recorded: the rerun signs it by itself", async () => {
+    const { w, submitted } = referred({ onChain: "unreadable" });
     await w.run({ ref: "H7KMQ2" });
     await w.run({ ref: "H7KMQ2", yes: true });
-    // As v5.1 left it: the code kept, no binding.
+    expect(submitted).toEqual([]);
+    // As v5.1 left it: the code kept, no binding; the chain answers now.
     const { refBinding: _, ...entry } = w.entry() as Record<string, unknown>;
     writeFileSync(join(agentPaths(w.home, ENTRY_AGENT).dir, "entry.json"), JSON.stringify(entry));
-    rmSync(join(agentPaths(w.home, ENTRY_AGENT).dir, "pending.json"), { force: true });
+    w.deps.referrals = { ...w.deps.referrals!, referrerOf: async () => null };
     const again = await w.run({});
-    expect(again.text).toContain("Bind your referrer (code H7KMQ2)");
+    expect(again.text).toContain("Referrer: bound to H7KMQ2 (signed by itself, free;");
+    expect(again.text).not.toContain("Bind your referrer");
+    expect(submitted).toHaveLength(1);
+    expect(w.entry().refBinding).toMatchObject({ state: "pending" });
   });
 
-  it("a wallet with a referrer on chain already: never asked, never signed, said once", async () => {
-    const { w, submitted } = referred({ onChain: "0x000000000000000000000000000000000000c0de" });
-    await w.run({ ref: "H7KMQ2" });
-    const out = await w.run({ ref: "H7KMQ2", yes: true });
-    expect(out.text).toContain("This wallet already has a referrer on chain: nothing to bind (a referrer never changes).");
-    expect(out.text).not.toContain("Bind your referrer");
-    expect(submitted).toEqual([]);
-    expect(w.entry().refBinding).toMatchObject({ state: "bound" });
+  it("a wallet with a referrer on chain already: never signed; said whose it is, once", async () => {
+    const other = referred({ onChain: "0x000000000000000000000000000000000000c0de" });
+    await other.w.run({ ref: "H7KMQ2" });
+    const out = await other.w.run({ ref: "H7KMQ2", yes: true });
+    expect(out.text).toContain("Referrer: bound, to someone else before H7KMQ2 (a referrer never changes)");
+    expect(other.submitted).toEqual([]);
+    expect(other.w.entry().refBinding).toMatchObject({ state: "bound" });
+    expect((await other.w.run({ yes: true })).text).not.toContain("Referrer:");
+    const same = referred({ onChain: REFERRER });
+    await same.w.run({ ref: "H7KMQ2" });
+    expect((await same.w.run({ ref: "H7KMQ2", yes: true })).text).toContain("Referrer: bound to H7KMQ2");
+    expect(same.submitted).toEqual([]);
   });
 
-  it("no code: nothing asked of the registry; a code that names nobody: said, nothing signed; the chain unread: asked again later", async () => {
-    const none = referred();
-    await none.w.run();
-    await none.w.run({ yes: true });
-    expect(none.reads()).toBe(0);
+  it("a code that names nobody: said, nothing signed; the chain unread or a refusal: one line, the entry done, tried again next time", async () => {
     const unknown = referred({ resolve: "unknown" });
     await unknown.w.run({ ref: "H7KMQ2" });
-    expect((await unknown.w.run({ ref: "H7KMQ2", yes: true })).text).toContain("The referral code H7KMQ2 names nobody on feast.meme: nothing to bind.");
+    const said = await unknown.w.run({ ref: "H7KMQ2", yes: true });
+    expect(said.code).toBe(0);
+    expect(said.text).toContain("Referrer: not bound (the code H7KMQ2 names nobody on feast.meme)");
     expect(unknown.submitted).toEqual([]);
     const down = referred({ onChain: "unreadable" });
     await down.w.run({ ref: "H7KMQ2" });
-    expect((await down.w.run({ ref: "H7KMQ2", yes: true })).text).toContain("The referral binding could not be handled just now (the chain did not answer)");
+    const late = await down.w.run({ ref: "H7KMQ2", yes: true });
+    expect(late.code).toBe(0);
+    expect(late.text).toContain("Referrer: not bound yet (the chain did not answer; nothing was signed; the next FL enter tries again)");
     expect(down.w.entry().refBinding).toBeUndefined();
+    const refused = referred({ submit: "refused" });
+    await refused.w.run({ ref: "H7KMQ2" });
+    const no = await refused.w.run({ ref: "H7KMQ2", yes: true });
+    expect(no.code).toBe(0);
+    expect(no.text).toContain("Referrer: not bound (feast.meme refused it: BAD_SIGNATURE; the next FL enter tries again)");
+    await refused.w.run({});
+    expect(refused.submitted).toHaveLength(2);
+    const thrown = referred();
+    thrown.w.deps.referrals = { ...thrown.w.deps.referrals!, resolve: async () => { throw new Error("boom"); } };
+    await thrown.w.run({ ref: "H7KMQ2" });
+    const kept = await thrown.w.run({ ref: "H7KMQ2", yes: true });
+    expect(kept.code).toBe(0);
+    expect(kept.text).toContain("Referrer: not bound yet (the binding could not be done just now; the next FL enter tries again)");
+  });
+});
+
+describe("run 18: FL status's referrer line", () => {
+  const CODE_REFERRER = "0x000000000000000000000000000000000000b0b0" as const;
+  const OTHER = "0x000000000000000000000000000000000000c0de" as const;
+  const T = Date.parse("2026-10-26T12:00:00Z");
+  const line = (e: Parameters<typeof referrerStatus>[0], on: Parameters<typeof referrerStatus>[1], lang: "en" | "zh" = "en") => {
+    const r = referrerStatus(e, on, T);
+    return r === null ? null : copy.referrerLine(r, lang);
+  };
+  it("bound to the code, in both languages; someone else's; kept and waiting; not yet; no code, no line", () => {
+    const pending = { state: "pending" as const, referrer: CODE_REFERRER, deadline: T / 1_000 + 86_400, at: "x" };
+    expect(line({ ref: "H7KMQ2", refBinding: pending }, getAddress(CODE_REFERRER))).toBe("Referrer: bound to H7KMQ2");
+    expect(line({ ref: "H7KMQ2", refBinding: pending }, getAddress(CODE_REFERRER), "zh")).toBe("引荐人:已绑定 H7KMQ2");
+    expect(line({ ref: "H7KMQ2", refBinding: { ...pending, state: "bound" } }, getAddress(OTHER))).toBe("Referrer: bound, to someone else before H7KMQ2 (a referrer never changes)");
+    expect(line({ ref: "H7KMQ2", refBinding: pending }, null)).toBe("Referrer: bound to H7KMQ2 (signed by itself, free; feast.meme's keeper is putting it on chain)");
+    expect(line({ ref: "H7KMQ2", refBinding: { ...pending, deadline: T / 1_000 - 1 } }, null)).toBe("Referrer: not bound yet (the next FL enter signs the binding to H7KMQ2 by itself)");
+    expect(line({ ref: "H7KMQ2", refBinding: null }, null, "zh")).toBe("引荐人:未绑定（下次 FL enter 会自动签名绑定 H7KMQ2）");
+    expect(line({ ref: "H7KMQ2", refBinding: { state: "self", referrer: null, deadline: null, at: "x" } }, null)).toBe("Referrer: not applicable (the code H7KMQ2 is this wallet's own)");
+    expect(line({ ref: null, refBinding: null }, null)).toBeNull();
+    expect(line(null, "unreadable")).toBeNull();
   });
 });

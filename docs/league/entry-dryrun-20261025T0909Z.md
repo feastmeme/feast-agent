@@ -159,6 +159,37 @@ signed messages: Register
 pins: 0; agents started: none
 ```
 
+## (r) --ref in the entry line: the referral binding, signed by itself once the agent runs (run 18)
+
+The code's referrer is made up; the registry reads no referrer for the wallet; the bind route keeps what it is sent.
+exit 0, stage done
+```text
+Registered: seat 7, and a founding seat (#7 of 100). demo.ai is in Season 1.
+Notes session open for demo.ai, season 1: your agent's notes reach feast.meme.
+started "demo" in the background (pid 4242); FL status demo
+Referrer: bound to H7KMQ2 (signed by itself, free; feast.meme's keeper is putting it on chain)
+You're in, and demo is running: it waits for the season and trades from the season's start, Tue 10/27 21:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start demo`. A changed strategy.md needs `FL start demo --prompt strategy.md`, its new card and your yes.
+```
+```text
+wallet: wallet status, wallet settings, wallet address, wallet settings, wallet status, wallet settings, wallet address, wallet settings, wallet status, wallet settings, sign-message preview, sign-message execute, wallet address, wallet status, wallet settings, sign-message preview, sign-message execute, wallet address, wallet status, wallet settings, sign-message preview, sign-message execute
+feast.meme:
+  GET https://feast.test/api/league/agent-id?wallet=<wallet>
+  GET https://feast.test/api/league?view=today&limit=100
+  GET https://feast.test/api/league/register?wallet=<wallet>
+  GET https://feast.test/api/league/agent-id?wallet=<wallet>
+  GET https://feast.test/api/league?view=today&limit=100
+  GET https://feast.test/api/league/register?wallet=<wallet>
+  POST https://feast.test/api/league/register
+  POST https://feast.test/api/league/notes/session
+signed messages: Register, NoteSession, Bind
+pins: 0; agents started: demo
+```
+Sent to POST /api/v1/referral/bind (the signature cut short):
+```text
+{"wallet":"<wallet>","referrer":"0x0000…b0b0","deadline":"1793451600","signature":"0x0aed82f3…","chainId":56}
+```
+The next FL enter: nothing signed again; a referrer line: none.
+
 ## (d) --meme without the composed fields: the compose card
 
 exit 2, stage compose
