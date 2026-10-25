@@ -76,7 +76,7 @@ describe("the skill, the setup, the release notes", () => {
     const setup = read("skills/feast-league/references/setup.md");
     expect(setup).toContain("--branch league-v5");
     expect(setup).not.toContain("--branch league-v4");
-    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5` moves to `league-v5.1` the same way");
+    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1` moves to `league-v5.1.1` the same way");
     expect(setup).toContain("If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it.");
   });
 
@@ -334,7 +334,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
 
   it("a Grok host is told to pass --host grok; What it sends names the two headers", () => {
     expect(section9).toContain("passes `--host grok`");
-    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1`)");
+    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.1`)");
     expect(skill).toMatch(/Every request `FL` makes to feast\.meme carries two headers: `x-feast-host`/);
   });
 
@@ -343,7 +343,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
     expect(log.indexOf("## league-v5")).toBeLessThan(log.indexOf("## league-v4"));
     const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
     for (const word of ["steady", "--no-autopilot", "30 minutes", "x-feast-host", "x-feast-runtime"]) expect(v5, word).toContain(word);
-    expect(/^## (league-v\d+(?:\.\d+)?)$/m.exec(log)![1]).toBe(RUNTIME_RELEASE);
+    expect(/^## (league-v\d+(?:\.\d+){0,2})$/m.exec(log)![1]).toBe(RUNTIME_RELEASE);
   });
 
   it("the description stays within 1024 characters and names the steady backup and six presets", () => {
@@ -549,7 +549,7 @@ describe("task 975, addendum 11: the continuity package (league-v5.1)", () => {
   const skill = read("skills/feast-league/SKILL.md");
   const section9 = skill.slice(skill.indexOf("## 9."), skill.indexOf("### The older signed path"));
   const log = read("docs/CHANGELOG.md");
-  const v51 = log.slice(log.indexOf("## league-v5.1"), log.indexOf("## league-v5\n"));
+  const v51 = log.slice(log.indexOf("## league-v5.1\n"), log.indexOf("## league-v5\n"));
 
   it("SKILL asks the interval and the model, the owner's cost line byte-exact; the daemon by default; the hosts and how each is asked", () => {
     expect(section9).toContain("「用哪个模型来问？默认是宿主默认模型。默认模型每问约 0.12–0.21 美元(Claude Code 实测),haiku 约 0.0003」");
@@ -566,7 +566,7 @@ describe("task 975, addendum 11: the continuity package (league-v5.1)", () => {
   it("the hosts' doc names the providers by name only, never a key; the Grok Bot script has its PASS lines", () => {
     const hosts = read("docs/league/ask-hosts.md");
     for (const p of ["DeepSeek", "Qwen", "Kimi", "xAI", "OpenRouter"]) expect(hosts, p).toContain(p);
-    expect(hosts).not.toMatch(/sk-[A-Za-z0-9]{8,}|https:\/\/api\./);
+    expect(hosts).not.toMatch(/\bsk-[A-Za-z0-9]{8,}|https:\/\/api\./);
     const grok = read("plans/league-autopilot/grok-bot-rehearsal.md");
     for (const piece of ["FL ask <name> --print", "FL answer <name>", "every 5 minutes", "## 6. The laptop lid", "| 6 lid |", "⏰ 登录到期 · 24 小时后 · 主人需要重新扫码一次"]) expect(grok, piece).toContain(piece);
     expect(grok).not.toMatch(/0x[0-9a-fA-F]{40}/);
@@ -590,7 +590,7 @@ describe("task 975, addendum 12: trading opens at the start; FL enter --ref", ()
     expect(skill).toContain("add `--ref <code>` to that command");
     expect(skill).toContain('"referral: <code> (sent with the registration)"');
     const log = read("docs/CHANGELOG.md");
-    expect(log.slice(log.indexOf("## league-v5.1"), log.indexOf("## league-v5\n"))).toContain("`FL enter --ref <code>`");
+    expect(log.slice(log.indexOf("## league-v5.1\n"), log.indexOf("## league-v5\n"))).toContain("`FL enter --ref <code>`");
     const patch = read("plans/league-autopilot/out-of-surface/register-ref.md");
     for (const piece of ["ALTER TABLE league_agents ADD COLUMN IF NOT EXISTS ref text NULL;", "normalizeReferralCode(record.ref)", "REF = COALESCE(LEAGUE_AGENTS.REF, EXCLUDED.REF)"]) expect(patch, piece).toContain(piece);
   });
@@ -610,5 +610,27 @@ describe("task 975, addendum 13: the gate's own 23 hours are gone", () => {
     expect(waitingLine(opens as { kind: "at"; at: number }, "en")).toBe("Starts now and waits for the season: trading opens at the season's start, Tue 10/27 21:00 UTC+8, and it trades nothing before. The first dinner, a day later, is the warm-up: it eats nobody.");
     expect(doneRunning("maplegrin", opens as { kind: "at"; at: number }, "en", null)).toMatch(/^You're in, and maplegrin is running: it waits for the season and trades from the season's start, Tue 10\/27 21:00 UTC\+8\. /);
     expect(waitingLine(opens as { kind: "at"; at: number }, "zh")).toContain("赛季开始的 10/27（周二）21:00（UTC+8）开放交易");
+  });
+});
+
+describe("task 975, run 17: league-v5.1.1, the binding and the heartbeat", () => {
+  const log = read("docs/CHANGELOG.md");
+  const v511 = log.slice(log.indexOf("## league-v5.1.1\n"), log.indexOf("## league-v5.1\n"));
+  const notes = read("docs/league/release-v5.1.1.md");
+
+  it("the release notes say plainly what v5.1 did with a code and what v5.1.1 adds", () => {
+    expect(notes).toContain("**v5.1 runtimes entered with `--ref` had their code recorded; the binding comes with v5.1.1.**");
+    expect(notes).toContain("upgrade, then run the same `FL enter` again");
+    expect(v511).toContain("**v5.1 runtimes entered with `--ref` have their code recorded; the binding comes with v5.1.1.**");
+    for (const word of ["/api/v1/referral/bind", "/api/v1/referral/resolve", "signReferralBind", "引荐人:已绑定", "/api/league?me=<wallet>", ".gemini/settings.json", "ask-workspaces", "`minSupported` stays `league-v4`"]) expect(v511, word).toContain(word);
+    for (const text of [notes, v511]) expect(text).not.toMatch(/0x[0-9a-fA-F]{40}/);
+  });
+
+  it("SKILL says the binding's card and the heartbeat; no doc still says a temp folder", () => {
+    const skill = read("skills/feast-league/SKILL.md");
+    expect(skill).toContain('"Bind your referrer (code …)"');
+    expect(skill).toContain("It is never silent and never twice");
+    expect(skill).toContain("run `FL note --login`");
+    for (const file of ["skills/feast-league/SKILL.md", "docs/league/ask-hosts.md"]) expect(read(file), file).not.toMatch(/empty temp folder|empty temporary folder|GEMINI_CLI_SYSTEM_SETTINGS_PATH/);
   });
 });

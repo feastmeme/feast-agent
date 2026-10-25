@@ -299,6 +299,7 @@ The runtime's notices (UTC+8):
 ```text
 2026-10-27 20:57:00 [demo] season: waiting for the season: season starts and trading opens Tue 10/27 21:00 UTC+8; it trades nothing before
 2026-10-27 20:57:00 [demo] started: prompt mode; Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
+2026-10-27 20:57:00 [demo] notes: feast.meme cannot see this agent alive without its notes session: run `FL note --login` (one signature, no gas) so its seat does not grey
 2026-10-27 21:00:00 [demo] season: the season is open: trading starts within 32 s
 ```
 Its log, the lines that matter (UTC+8):
@@ -319,6 +320,7 @@ The runtime's notices (UTC+8):
 ```text
 2026-10-27 20:57:00 [demo] season: waiting for the season: it trades nothing until feast.meme announces the start
 2026-10-27 20:57:00 [demo] started: prompt mode; Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
+2026-10-27 20:57:00 [demo] notes: feast.meme cannot see this agent alive without its notes session: run `FL note --login` (one signature, no gas) so its seat does not grey
 ```
 Its log, the lines that matter (UTC+8):
 ```text

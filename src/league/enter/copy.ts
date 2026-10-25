@@ -400,6 +400,44 @@ export function noDaemonLine(name: string, lang: Lang): string {
   return lang === "zh" ? `没有装守护进程：这台电脑重启后，运行 \`FL start ${name}\`。` : `No daemon: after this machine restarts, run \`FL start ${name}\`.`;
 }
 
+// --- the referral binding (task 975, run 17) --------------------------------------------------------------------
+
+/** Its own card: what is signed, what it does, that it is for good. The player says yes to it, or it is never signed. */
+export function bindCard(view: { code: string; referrer: string }, lang: Lang): string {
+  const zh = lang === "zh";
+  const rows: [string, string][] = [
+    [zh ? "内容" : "What", zh ? "签一条免费消息：不是交易，不花 gas，不动资金" : "sign one free message: no transaction, no gas, no funds"],
+    [zh ? "消息里有" : "It carries", zh ? `这个钱包、推荐码 ${view.code} 的引荐人（${short(view.referrer)}）、七天后的截止时间（EIP-712 Bind，FeastReferrals）` : `this wallet, the referrer of code ${view.code} (${short(view.referrer)}), a deadline seven days ahead (EIP-712 Bind, FeastReferrals)`],
+    [zh ? "作用" : "What it does", zh ? "feast.meme 的 keeper 把它上链之后，这个钱包每笔交易的手续费里，引荐人拿引荐份额（默认分成下手续费 100 份中的 10 份）；你的交易成本不变" : "once feast.meme's keeper relays it on chain, the referrer receives the referral share of the fee on this wallet's trades (10 of the fee's 100 points under the default split); your trades cost no more"],
+    [zh ? "绑定之后" : "Once bound", zh ? "永久有效：一个钱包的引荐人不会再变" : "for good: a wallet's referrer never changes"],
+    [zh ? "发送到" : "Sent to", zh ? "feast.meme（/api/v1/referral/bind），由它的 keeper 上链并付 gas" : "feast.meme (/api/v1/referral/bind); its keeper relays it on chain and pays the gas"],
+  ];
+  return [zh ? `绑定引荐人（推荐码 ${view.code}）` : `Bind your referrer (code ${view.code})`, "", table(rows)].join("\n");
+}
+
+export function bindKept(code: string, lang: Lang): string {
+  return lang === "zh" ? `引荐绑定已签名，feast.meme 已收下（推荐码 ${code}）：它的 keeper 会把它上链；FL status 会显示何时绑定完成。` : `Referral binding signed and kept by feast.meme (code ${code}): its keeper relays it on chain; FL status says when it is bound.`;
+}
+export function bindAlready(lang: Lang): string {
+  return lang === "zh" ? "这个钱包在链上已经有引荐人：不再绑定（引荐人不会再变）。" : "This wallet already has a referrer on chain: nothing to bind (a referrer never changes).";
+}
+export function bindUnknown(code: string, lang: Lang): string {
+  return lang === "zh" ? `推荐码 ${code} 在 feast.meme 上对应不到任何人：不绑定。` : `The referral code ${code} names nobody on feast.meme: nothing to bind.`;
+}
+export function bindSelf(lang: Lang): string {
+  return lang === "zh" ? "这个推荐码是这个钱包自己的：钱包不能引荐自己，不绑定。" : "The referral code is this wallet's own: a wallet cannot refer itself; nothing to bind.";
+}
+export function bindLater(what: "wallet" | "chain" | "site", lang: Lang): string {
+  const who = lang === "zh" ? { wallet: "钱包", chain: "链", site: "feast.meme" }[what] : { wallet: "the wallet", chain: "the chain", site: "feast.meme" }[what];
+  return lang === "zh" ? `暂时无法处理引荐绑定（${who}没有回应）：什么都没签；下次运行 FL enter 会再问。` : `The referral binding could not be handled just now (${who} did not answer): nothing was signed; FL enter asks again next time.`;
+}
+export function bindNotSigned(why: string, lang: Lang): string {
+  return lang === "zh" ? `引荐绑定没有签名（${why}）：什么都没发送；下次运行 FL enter 会再问。` : `The referral binding was not signed (${why}): nothing was sent; FL enter asks again next time.`;
+}
+export function bindRefused(name: string, lang: Lang): string {
+  return lang === "zh" ? `feast.meme 拒绝了引荐绑定（${name}）：没有再发送任何东西。` : `feast.meme refused the referral binding (${name}): nothing more was sent.`;
+}
+
 /** Addendum 12: a code given once the wallet is registered: a referral goes with the registration only. */
 export function refNotSent(ref: string, lang: Lang): string {
   return lang === "zh" ? `推荐码 ${ref} 没有发送：这个钱包已经报名，推荐码只能随报名一起发送。` : `The referral code ${ref} was not sent: this wallet is registered already, and a code goes with the registration only.`;

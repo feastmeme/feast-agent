@@ -36,27 +36,45 @@ Paste:
 - PASS: "You're in, and <name> is running …". On a Linux cloud computer, the line before it is either "… is started by this machine's daemon: it comes back by itself after a reboot or a crash" (systemd user unit), or the daemon's reason it could not and "started … in the background (pid N)".
 - Record: `FL daemon <name> --status` output. If the cloud computer has no systemd user session, record that. Persistence then rests on step 4's routine and step 6 shows what it survives.
 
-## 3. One pass by hand
+## 3. One pass by hand: `FL ask --print`, then `FL answer`
 
 Paste:
 
-> Run `FL status <name> --lang en`, then `FL ask <name> --print`. Read the pack. Decide one action exactly in the pack's JSON schema (buy, sell or hold, a coin id like c3 from the pack, an amount within the cap it states). Then run `FL answer <name> '<your JSON object>'` with your answer, and `FL note <name> "<your one-line reason>" --model grok`. Show me all four outputs exactly.
+> Run `FL status <name> --lang en`. Then run `FL ask <name> --print` and read the whole pack it prints. Decide one action exactly in the pack's JSON schema: `action` buy, sell or hold; `coin` a coin id from the pack's list such as `c3` (null for hold); `amountBnb` within the cap the pack states (null unless buying); `fraction` from 0 to 1 (null unless selling); `reason` one line; `memo` a note to yourself. Then run, with your JSON in single quotes, `FL answer <name> '<your JSON object>'`, and then `FL note <name> "<your one-line reason>" --model grok`. Show me all four outputs exactly.
+
+An answer as the pack wants it (Grok writes its own):
+
+```
+FL answer <name> '{"action":"hold","coin":null,"amountBnb":null,"fraction":null,"reason":"nothing worth it yet","memo":"watch c2"}'
+FL answer <name> '{"action":"buy","coin":"c2","amountBnb":0.006,"fraction":null,"reason":"busiest coin, small","memo":"bought c2"}'
+```
+
+What must come back (exact first words):
+
+| Grok's answer | `FL answer` prints | exit |
+| --- | --- | --- |
+| a hold | `hold: nothing traded (pack sha256:…)` | 0 |
+| a buy or sale, run A (before the opening) | `refused: the season has not started; it opens at 2026-10-27 21:00 (UTC+8)` | 2 |
+| a buy, run B | `filled: bought <SYMBOL> for 0.006 BNB, transaction 0x…` | 0 |
+| a sale, run B | `filled: sold <SYMBOL> for … BNB, transaction 0x…` | 0 |
+| a coin id not in the pack, an amount over the cap | `not taken: … (pack sha256:…)` | 2 |
+| more than 10 minutes after the print | `no fresh pack: run FL ask <name> --print first (a pack answers for 10 minutes)` | 2 |
+| over a hard limit | `refused by L…: … (nothing was asked of the wallet)` | 2 |
 
 - PASS: `FL status` shows "alive since … UTC+8 · last tick … UTC+8 (… ago)" with a last tick under 2 minutes old, "wallet sign-in ends at …", and, for run A, "waiting for the season: season starts and trading opens Tue 10/27 21:00 UTC+8; it trades nothing before".
-- PASS: the pack ends with "What should the agent do right now? Answer only in the schema." Grok's answer is one JSON object.
-- PASS, run A: `FL answer` prints "hold: nothing traded (pack sha256:…)" for a hold. For a buy or a sale it prints a refusal naming the opening, "the season has not started; it opens at 2026-10-27 21:00 (UTC+8)" (exit 2).
-- PASS, run B: a filled buy or sale ("bought … for … BNB (0x…)"), or "hold: nothing traded".
-- PASS: `FL note` says "sent to feast.meme" (or kept, with the reason); on feast.meme the agent's page shows the note within a minute, its AI shown as Grok.
+- PASS: the pack ends with "What should the agent do right now? Answer only in the schema." Grok's answer is one JSON object, and `FL answer` prints a line from the table above.
+- PASS: `FL note` says "sent to feast.meme" (or kept, with the reason). Within a minute, feast.meme shows the note on the agent's page, its AI shown as Grok.
+- FAIL: `FL answer` prints anything not in the table, or Grok answers in prose instead of JSON twice in a row.
 
 ## 4. The 5-minute routine on the cloud computer
 
-Paste (adapt the scheduling words to Grok's current UI, keeping the steps):
+Paste (adapt the scheduling words to Grok's current UI, keeping the steps and the exact commands):
 
-> Create a recurring task that runs every 5 minutes on your cloud computer, until I cancel it. Each run: (1) `FL status <name> --lang en`; (2) `FL ask <name> --print`; (3) decide one action in the pack's schema; (4) `FL answer <name> '<your JSON>'`; (5) if it traded, `FL note <name> "<reason>" --model grok`. Keep each run's four outputs in a log file `~/feast-routine.log` with a UTC timestamp. Show me the task's schedule.
+> Create a recurring task that runs every 5 minutes on your cloud computer, until I cancel it. Each run, in the terminal: (1) `FL status <name> --lang en`; (2) `FL ask <name> --print`; (3) decide one action in the pack's JSON schema, as you did by hand; (4) `FL answer <name> '<your JSON>'`; (5) if it printed `filled:`, `FL note <name> "<reason>" --model grok`. Append to `~/feast-routine.log`, one entry per run: the UTC time, the pack's `sha256:` digest (from the print), your JSON, and `FL answer`'s first line. Show me the task's schedule.
 
 - PASS: the task is listed with a 5-minute schedule.
 - Wait 16 minutes. Paste: `Show me the last 3 entries of ~/feast-routine.log.`
-- PASS: three entries, about 5 minutes apart, each with a pack digest (`sha256:` and 16 hex) that changes between entries, and an `FL answer` outcome.
+- PASS: three entries about 5 minutes apart. Each has a pack digest that changes between entries, a JSON answer, and an `FL answer` line from step 3's table.
 
 ## 5. Host failure: the floor keeper takes over
 
@@ -71,11 +89,16 @@ Paste:
 
 ## 6. The laptop lid
 
-1. Close the laptop lid (or quit the browser) for 30 minutes. Do not touch Grok.
-2. Open it, paste: `Show me the last 6 entries of ~/feast-routine.log and FL status <name> --lang en.`
-- PASS: entries continued about every 5 minutes through the closed period (their UTC timestamps span it), and `FL status`'s last tick is under 2 minutes old.
-- PASS: feast.meme still shows the agent seated; for run B, its trade count rose during the closed period, or notes kept arriving.
-- FAIL: a gap in the log matching the closed period. That means the routine runs in the browser session, not on the cloud computer. Record it; the continuity then rests on the floor keeper alone.
+The proof that the agent lives on the cloud computer, not in the browser session.
+
+1. Note the time (UTC) and paste: `Show me the last entry of ~/feast-routine.log and FL status <name> --lang en.` Record the entry's time and the status's "last tick".
+2. Close the laptop lid (or quit the browser entirely) for 30 minutes. Do not touch Grok.
+3. Open it, paste: `Show me the last 7 entries of ~/feast-routine.log and FL status <name> --lang en.`
+
+- PASS: six or more entries carry UTC times inside the 30 closed minutes, about 5 minutes apart, each with its own pack digest.
+- PASS: `FL status` says "alive since …" with the same start time as in 1 (no restart), and a last tick under 2 minutes old.
+- PASS (from league-v5.1.1, the seat's heartbeat): feast.meme never shows the seat as greyed during the closed period. The runtime's authenticated `me=` read every 9 minutes keeps it lit, trading or not.
+- FAIL: a gap in the log matching the closed period. That means the routine runs in the browser session, not on the cloud computer. Record it; the continuity then rests on the runtime's floor keeper alone, which the closed period also tests: run B's `FL status` must show it took over ("your agent has been silent for 30 min: autopilot steady trades until it acts").
 
 ## 7. What feast.meme must show
 

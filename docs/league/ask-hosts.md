@@ -6,8 +6,8 @@ Every N minutes without a trade from you (`--every`, default 5), the runtime ask
 | --- | --- | --- |
 | `claude` | `claude -p --output-format json --max-turns 1 --tools "" …` | Claude Code's own login. |
 | `codex` | `codex exec --json -s read-only …` | Codex's own login. |
-| `gemini` | `gemini -p "<instruction>" --output-format json --approval-mode plan -e none --allowed-mcp-server-names none`, the pack on stdin | The Gemini CLI's own login. Every built-in tool is excluded through a system settings file (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`) written for that one ask; it runs from an empty temporary folder, removed after. |
-| `cursor` | `cursor-agent` (or `agent`) `-p --output-format json --mode ask --sandbox enabled --trust --workspace <empty temp folder>`, the pack as its prompt | Cursor's own login (`agent login`, or `CURSOR_API_KEY`). Never `--force`; no MCP server approved. |
+| `gemini` | `gemini -p "<instruction>" --output-format json --approval-mode plan -e none --allowed-mcp-server-names none`, the pack on stdin | The Gemini CLI's own login. It runs from an empty folder made for that one ask and removed after it, in the league home's own `ask-workspaces` (mode 0700, never a temp folder others may write to), outside the agent's folder. Every built-in tool is excluded in that folder's `.gemini/settings.json`. The folder is trusted for the ask (`GEMINI_CLI_TRUST_WORKSPACE`), so the CLI reads those settings and keeps plan mode. Checked on the real CLI 0.65.0: it reads a system settings file only from a root-owned folder, and it turns plan mode back to default in an untrusted folder. Its `tools.exclude` is marked deprecated for 1.0 in favour of its Policy Engine. |
+| `cursor` | `cursor-agent` (or `agent`) `-p --output-format json --mode ask --sandbox enabled --trust --workspace <an empty folder of its own>`, the pack as its prompt | Cursor's own login (`agent login`, or `CURSOR_API_KEY`). Never `--force`; no MCP server approved. |
 | `openai` | `POST <base>/chat/completions` from the runtime itself | Any OpenAI-compatible endpoint. See below. |
 | `none` | nobody | The floor keeper after 30 minutes with no trade from you. |
 

@@ -105,18 +105,22 @@ describe("1. version awareness (G1)", () => {
 
   it("behind, current, absent: the status line, the You're in sentence, never an upgrade", () => {
     const behind = versionView(league(BEHIND).latestRuntime, T0)!;
-    expect(behind).toMatchObject({ current: "league-v5.1", latest: "league-v6", behind: true, unsupported: false });
-    expect(versionLine(behind)).toBe("runtime league-v5.1 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
+    expect(behind).toMatchObject({ current: "league-v5.1.1", latest: "league-v6", behind: true, unsupported: false });
+    expect(versionLine(behind)).toBe("runtime league-v5.1.1 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
     expect(versionLine(versionView(league(CURRENT).latestRuntime, T0))).toBeNull();
     expect(versionView(league().latestRuntime, T0)).toBeNull();
     // Addendum 11: a minor release orders: v5.1 is behind v5.2 and v6, and ahead of v5.
     expect(versionView({ tag: "league-v5.2", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: true });
     expect(versionView({ tag: "league-v5", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false, unsupported: false });
     expect(league({ latestRuntime: { tag: "league-v5.1", publishedAt: null, minSupported: "league-v4" } }).latestRuntime).toMatchObject({ tag: "league-v5.1" });
-    expect(versionLine(versionView({ tag: "league-v7", publishedAt: null, minSupported: "league-v6" }, T0))).toBe("runtime league-v5.1 · latest league-v7 · upgrade: npx skills add feastmeme/feast-agent (league-v5.1 is older than league-v6, the oldest feast.meme still supports: upgrade before the next dinner)");
+    // Run 17: a patch release orders too: v5.1.1 is ahead of v5.1, behind v5.1.2 and v5.2.
+    expect(versionView({ tag: "league-v5.1", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
+    expect(versionView({ tag: "league-v5.1.2", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: true });
+    expect(league({ latestRuntime: { tag: "league-v5.1.1", publishedAt: null, minSupported: "league-v4" } }).latestRuntime).toMatchObject({ tag: "league-v5.1.1" });
+    expect(versionLine(versionView({ tag: "league-v7", publishedAt: null, minSupported: "league-v6" }, T0))).toBe("runtime league-v5.1.1 · latest league-v7 · upgrade: npx skills add feastmeme/feast-agent (league-v5.1.1 is older than league-v6, the oldest feast.meme still supports: upgrade before the next dinner)");
     const opens = { kind: "open" as const };
     const shown = { preset: "steady", idleMinutes: 30, ask: { every: 5, with: "claude" } };
-    expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(behind, "en"))).toMatch(/ A newer runtime is out \(league-v6; this is league-v5\.1\): upgrade with `npx skills add feastmeme\/feast-agent`; it never upgrades by itself\.$/);
+    expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(behind, "en"))).toMatch(/ A newer runtime is out \(league-v6; this is league-v5\.1\.1\): upgrade with `npx skills add feastmeme\/feast-agent`; it never upgrades by itself\.$/);
     expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(versionView(league(CURRENT).latestRuntime, T0), "en"))).toBe(doneRunning("maplegrin", opens, "en", shown));
     expect(upgradeSentence(behind, "zh")).toContain("npx skills add feastmeme/feast-agent");
   });
@@ -132,7 +136,7 @@ describe("1. version awareness (G1)", () => {
       expect(s.healths.length).toBeGreaterThanOrEqual(36);
       expect(notices(home).filter((n) => n.kind === "version")).toHaveLength(said);
       if (what === "behind") {
-        expect(notices(home).find((n) => n.kind === "version")!.text).toBe("a newer runtime is out: league-v6 (this one is league-v5.1). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.");
+        expect(notices(home).find((n) => n.kind === "version")!.text).toBe("a newer runtime is out: league-v6 (this one is league-v5.1.1). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.");
         expect(readVersion(home, "demo")).toMatchObject({ behind: true, latest: "league-v6" });
       } else if (what === "current") expect(readVersion(home, "demo")).toMatchObject({ behind: false });
       else expect(readVersion(home, "demo")).toBeNull();
@@ -394,5 +398,37 @@ describe("addendum 10: the rehearsal's last six", () => {
     expect(line).toBe("today: 0 trades, 0 BNB of volume; warm-up: no floor tonight (the warm-up dinner eats nobody); dinner at 21:00 UTC+8, in 30 min");
     expect(dayLine(view, Date.parse("2026-10-28T12:30:00Z"))).toContain("not yet");
   });
+});
+
+// --- run 17: the seat's heartbeat ------------------------------------------------------------------------------
+
+describe("run 17: the authenticated me= read every 9 minutes, in every mode", () => {
+  it("with its notes session: the bearer, the release and host headers and the health flag; every 9 minutes whatever it trades; the token never logged", async () => {
+    const { home } = setup({ ask: true });
+    const c = fakeClock(T0);
+    const { feed, w } = world(c);
+    recordHostAction(home, "demo", "buy", c.now());
+    saveSession(home, { version: 1, agentId: "maplegrin", season: 1, token: "test-session-heartbeat", expiresAt: null, at: new Date(T0).toISOString() });
+    await run(home, c, feed, w, T0 + 40 * MIN, { seasonRead: seasonRead(c, () => league()).read });
+    // The authenticated ones (the ask's standing read falls back to an anonymous me= on this fake page, with no field).
+    const seen = feed.asked.filter((a) => a.url.startsWith(`${SITE}/api/league?`) && a.headers.authorization !== undefined);
+    expect(seen.map((a) => (a.at - T0) / MIN)).toEqual([0, 9, 18, 27, 36]);
+    for (const a of seen) {
+      expect(a.url).toMatch(/me=0x[0-9a-f]{40}$/);
+      expect(a.headers).toMatchObject({ authorization: "Bearer test-session-heartbeat", "x-feast-health": expect.stringMatching(/^(ok|degraded|failing)$/), "x-feast-runtime": expect.any(String), "x-feast-host": expect.any(String) });
+    }
+    // No other request carries the bearer.
+    expect(feed.asked.filter((a) => a.headers.authorization && !a.url.startsWith(`${SITE}/api/league?view=today&limit=1&me=`))).toEqual([]);
+    expect(readFileSync(agentPaths(home, "demo").log, "utf8")).not.toContain("test-session-heartbeat");
+  }, 60_000);
+
+  it("no notes session: nothing sent, said once a run", async () => {
+    const { home } = setup({ autopilot: false });
+    const c = fakeClock(T0);
+    const { feed, w } = world(c);
+    await run(home, c, feed, w, T0 + 30 * MIN, { seasonRead: seasonRead(c, () => league()).read });
+    expect(feed.asked.filter((a) => a.headers.authorization !== undefined)).toEqual([]);
+    expect(notices(home).filter((n) => n.text.startsWith("feast.meme cannot see this agent alive"))).toHaveLength(1);
+  }, 60_000);
 });
 

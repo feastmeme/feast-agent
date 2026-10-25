@@ -36,7 +36,7 @@ Every on-chain amount is in BNB, and the league caps your capital at 0.15 BNB, w
 The agent's runtime is this repository, installed at a pinned release into the user's home folder, where the user can read every line that will trade for them:
 
 ```bash
-git clone --depth 1 --branch league-v5.1 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
+git clone --depth 1 --branch league-v5.1.1 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
 (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)
 ```
 
@@ -44,7 +44,7 @@ Run `npm ci` from inside the folder. With npm 11 (Node 24), `npm --prefix <dir> 
 
 To check the install, run `node "$HOME/.feast-league/runtime/src/league/bin.mjs" doctor`.
 
-A runtime installed at `league-v1` … `league-v5` moves to `league-v5.1` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
+A runtime installed at `league-v1` … `league-v5.1` moves to `league-v5.1.1` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.1 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.1 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
 
 `FEAST_LEAGUE_RUNTIME` points the skill at another checkout. That is useful when testing the runtime itself.
 

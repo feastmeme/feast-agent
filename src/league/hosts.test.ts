@@ -197,6 +197,9 @@ describe("addendum 12: the referral code in FL status", () => {
     const status = await run(["status", "demo", "--no-league"], env);
     expect(status.stdout).toContain("referral: H7KMQ2 (sent with the registration)");
     expect(JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout)).toMatchObject({ referral: "H7KMQ2" });
+    // Run 17: the binding's line; with no wallet to read (this test's), it cannot tell, and says so.
+    expect(status.stdout).toContain("referrer: not bound (the chain could not be read just now)");
+    expect((await run(["status", "demo", "--no-league", "--lang", "zh"], env)).stdout).toContain("引荐人:未绑定（链暂时读不到）");
     const bad = await run(["enter", "--name", "maplegrin.ai", "--ref", "nope!"], env);
     expect(bad.code).toBe(2);
     expect(bad.stdout).toContain("--ref is a referral code");

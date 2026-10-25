@@ -65,13 +65,13 @@ const ENVS: [string, Record<string, string | undefined>, string][] = [
 ];
 
 describe("the values", () => {
-  it("x-feast-host is modelHint's, the very function behind FL note's --model default; x-feast-runtime is the release, league-v5.1", () => {
-    expect(RUNTIME_RELEASE).toBe("league-v5.1");
+  it("x-feast-host is modelHint's, the very function behind FL note's --model default; x-feast-runtime is the release, league-v5.1.1", () => {
+    expect(RUNTIME_RELEASE).toBe("league-v5.1.1");
     expect(modelHint).toBe(hintHere);
     expect(checkModel).toBe(checkModelHere);
     for (const [what, env, host] of ENVS) {
       expect(modelHint(env), what).toBe(host);
-      expect(hostHeaders(env), what).toEqual({ [HOST_HEADER]: host, [RUNTIME_HEADER]: "league-v5.1" });
+      expect(hostHeaders(env), what).toEqual({ [HOST_HEADER]: host, [RUNTIME_HEADER]: RUNTIME_RELEASE });
     }
   });
 
@@ -95,7 +95,7 @@ describe("the values", () => {
 
 describe("withHostHeaders", () => {
   const env = { CLAUDECODE: "1" };
-  const ours = { [HOST_HEADER]: "claude", [RUNTIME_HEADER]: "league-v5.1" };
+  const ours = { [HOST_HEADER]: "claude", [RUNTIME_HEADER]: RUNTIME_RELEASE };
 
   it("sets both on feast.meme, keeps every other header, as a plain object, a Headers or a Request", async () => {
     const r = recorder(() => new Response("{}"));
@@ -142,7 +142,7 @@ describe("every client that reaches feast.meme", () => {
   });
   const sendsBoth = (seen: Seen[]) => {
     expect(seen.length).toBeGreaterThan(0);
-    for (const s of seen) expect(s.headers, `${s.method} ${s.path}`).toMatchObject({ [HOST_HEADER]: "grok", [RUNTIME_HEADER]: "league-v5.1" });
+    for (const s of seen) expect(s.headers, `${s.method} ${s.path}`).toMatchObject({ [HOST_HEADER]: "grok", [RUNTIME_HEADER]: RUNTIME_RELEASE });
   };
 
   it("LeagueSite: kept, league, register, the page's Agent ID, the avatar and the notes session (FL note --login's road)", async () => {

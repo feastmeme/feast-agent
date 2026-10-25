@@ -80,6 +80,7 @@ import { ENTRY_AGENT } from "./enter/constants.ts";
 import { autopilotLine, awakeLine, clean, tradeNowLine } from "./enter/copy.ts";
 import { enter, entryOneShot, readEntry } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
+import { referralDeps } from "./register/referral.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
 import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./script/check.ts";
@@ -511,6 +512,9 @@ async function main(argv: string[]): Promise<number> {
       const usdRef = typeof bnbUsd === "number" && bnbUsd > 0 ? { bnbUsd: Number(bnbUsd.toFixed(4)), at: new Date().toISOString() } : null;
       const sleptAt = lastSleep(home, name);
       const release = (league?.latestRuntime ? versionView(league.latestRuntime, Date.now()) : null) ?? readVersion(home, name) ?? null;
+      // Run 17: the referral binding, read from the registry itself when this entry carries a code.
+      const entryRecord = readEntry(home);
+      const referrerOn = !entryRecord?.ref ? null : statusWallet ? await within(referralDeps({ site: siteFromEnv(), fetch, client: chain.client as never }).referrerOf(statusWallet), 6_000).catch(() => "unreadable" as const) : ("unreadable" as const);
       const signInEnd = signInEndOf(home, name);
       const askState = readAskState(home, name);
       const askNow = { lastAskAt: askState.lastAskAt === null ? null : new Date(askState.lastAskAt).toISOString(), last: askState.last ? { ...askState.last, at: new Date(askState.last.at).toISOString() } : null, failuresInARow: askState.streak, floorKeeperSince: askState.floorKeeperSince === null ? null : new Date(askState.floorKeeperSince).toISOString() };
@@ -559,7 +563,8 @@ async function main(argv: string[]): Promise<number> {
         // Addendum 11: alive since, and the last tick.
         alive: readAlive(home, name),
         // Addendum 12: the referral code sent with the registration, from the entry's record (kept nowhere else).
-        referral: readEntry(home)?.ref ?? null,
+        referral: entryRecord?.ref ?? null,
+        referrer: entryRecord?.ref ? { bound: referrerOn === null || referrerOn === "unreadable" ? (referrerOn === null ? false : null) : true, binding: entryRecord.refBinding ?? null } : null,
         signInEndsAt: signInEnd === null ? null : new Date(signInEnd).toISOString(),
       };
       const gate = data.season;
@@ -617,6 +622,7 @@ async function main(argv: string[]): Promise<number> {
           ...(versionLine(release) ? [versionLine(release)!] : []),
           ...(s.agent!.track !== "entry" && signInLine(signInEnd, utc8) ? [signInLine(signInEnd, utc8)!] : []),
           ...(data.referral ? [`referral: ${data.referral} (sent with the registration)`] : []),
+          ...(data.referrer ? [referrerLine(data.referrer.bound, data.referrer.binding?.state ?? null, lang)] : []),
           // It runs on this machine: say so, and when it last slept (task 975, addendum 3).
           ...(s.agent!.track !== "entry" ? [awakeLine(lang)] : []),
           ...(sleptAt ? [`slept ${sleptAt.minutes} minutes at ${utc8(sleptAt.at)} UTC+8: nothing traded while it slept`] : []),
@@ -993,6 +999,19 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
+/** Run 17: "引荐人:已绑定 / 未绑定" (zh, the coordinator's words), "referrer: bound / not bound" (en), and why. */
+function referrerLine(bound: boolean | null, binding: string | null, lang: Lang): string {
+  const zh = lang === "zh";
+  if (bound === true) return zh ? "引荐人:已绑定" : "referrer: bound";
+  const why =
+    bound === null
+      ? zh ? "链暂时读不到" : "the chain could not be read just now"
+      : binding === "pending" || binding === "sent"
+        ? zh ? "绑定已签名，等 keeper 上链" : "the binding is signed and waits for the keeper"
+        : zh ? "FL enter 会请你签名绑定" : "FL enter asks you to sign the binding";
+  return zh ? `引荐人:未绑定（${why}）` : `referrer: not bound (${why})`;
+}
+
 /** The last `FL ask --print`'s ids (addendum 11), and how long an answer to it is taken. */
 const PRINTED_MAX_AGE_MS = 10 * 60_000;
 function readPrinted(home: string, name: string): { at: number; digest: string; maxBuyBnb: number; ids: [string, { coin: Address; symbol: string | null; held: boolean }][] } | null {
@@ -1105,13 +1124,14 @@ async function leagueStanding(home: string, lang: Lang, agent: StandingInput["ag
 /** `feast-league enter` and `feast-league meme` (tasks 961, 968): `src/league/enter/flow.ts` is the whole of it. */
 async function enterCommand(home: string, values: Values, json: boolean, memeOnly = false): Promise<number> {
   const signer = signerFor(home, ENTRY_AGENT);
+  const entryChain = new LeagueChain(MAINNET, rpc());
   const idle = str(values["idle-minutes"]);
   const concept = str(values.meme);
   const result = await enter(
     {
       home,
       signer,
-      chain: new LeagueChain(MAINNET, rpc()),
+      chain: entryChain,
       // FL enter's GETs back off (task 967): at most 3 asks and 2 minutes each; its POSTs are never asked twice.
       site: new LeagueSite(siteFromEnv(), fetch, 15_000, realRetry(), { home, name: ENTRY_AGENT }),
       retry: realRetry(),
@@ -1120,6 +1140,8 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       // The trading agent, detached as FL start --detach starts it; it waits for the season itself.
       start: async (name, options) => detach(home, name, options.noJitter ? ["--no-jitter"] : []),
       daemon: (name) => enterDaemon(home, name),
+      // Run 17: the referral binding's doors (feast.meme) and the registry's one read (the chain).
+      referrals: referralDeps({ site: siteFromEnv(), fetch, client: entryChain.client as never }),
       waitForExit: (name) => waitForExit(home, name, 150),
       cwd: process.cwd(),
     },

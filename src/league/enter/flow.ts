@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import type { Address, Hex } from "viem";
+import { getAddress, type Address, type Hex } from "viem";
 
 import { confirmAgent, loadAgent, saveAgent, type AgentConfig, type PlanInput } from "../agent.ts";
-import type { RegistrationSigner, Signer, SignOptions } from "../baw.ts";
+import type { RegistrationSigner, Signer, SignOptions, SignOutcome } from "../baw.ts";
 import { renderCard } from "../card.ts";
 import { backoffWait, type Retry } from "../feed/backoff.ts";
 import type { Book } from "../book.ts";
@@ -15,7 +15,8 @@ import { BODY_COIN_QUOTE, BODY_COIN_SPLIT } from "../register/claims.ts";
 import { openSession, notesDev, sessionSaid, type SessionOutcome, type SessionSigner } from "../notes/session.ts";
 import { agentIdUnreadable, noAgentIdCard, noAnswerLine, previewMismatch, refusalLine, seatedLine, signingLine, walletNotReady, type Lang } from "../register/copy.ts";
 import { readWallet, submit, type FlowDeps, type Prepared, type WalletRead } from "../register/flow.ts";
-import { AGENT_ID, nextIssuedAt } from "../register/message.ts";
+import { AGENT_ID, joinSignature, nextIssuedAt } from "../register/message.ts";
+import { bindDeadline, bindSignatureRecovers, REFERRALS_CHAIN_ID, type BindFields, type ReferralDeps } from "../register/referral.ts";
 import type { KeptAgent, LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { tradingOpens } from "../season-gate.ts";
@@ -72,7 +73,9 @@ export type OneShot = (requests: IntentRequest[]) => Promise<OneShotResult>;
 
 export type EnterDeps = {
   home: string;
-  signer: Pick<Signer, "status" | "settings" | "address"> & SessionSigner & Pick<RegistrationSigner, "signRegistration">;
+  signer: Pick<Signer, "status" | "settings" | "address"> & SessionSigner & Pick<RegistrationSigner, "signRegistration"> & { signReferralBind?: (fields: BindFields, options?: SignOptions) => Promise<SignOutcome> };
+  /** Run 17: the site's referral doors and the registry's read, for the referral binding; absent, nothing is bound. */
+  referrals?: ReferralDeps;
   chain: EnterChain;
   site: LeagueSite;
   indexer?: string;
@@ -147,13 +150,15 @@ export type EntryRecord = {
   registered?: { season: number; issuedAt: number; seat: number | null; founding: number | null; at: string } | null;
   /** Addendum 12: the referral code sent with the registration (`FL enter --ref`); here and nowhere else. */
   ref?: string | null;
+  /** Run 17: where the wallet's referral binding stands, after the player's yes; never asked again once kept or bound. */
+  refBinding?: { state: "pending" | "sent" | "bound" | "refused"; referrer: string | null; deadline: number | null; at: string; refusal?: string | null } | null;
   /** Task 968: the meme launched with `--meme` or `FL meme`. */
   meme?: { coin: Address; symbol: string; name: string; txHash: Hex | null; concept: string } | null;
   /** Task 968: the trading agent the entry started. */
   agent?: string | null;
 };
 
-type Stage = "launch" | "notes" | "register" | "meme" | "start";
+type Stage = "launch" | "notes" | "register" | "meme" | "start" | "bind";
 type Pending = { stage: Stage; digest: string; at: string };
 
 const ID_NAME = /^([a-z0-9]{1,64})(\.ai)?$/;
@@ -302,6 +307,71 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const autopilot = agent.preset && agent.autopilot ? { preset: agent.preset, idleMinutes: agent.autopilot.idleMinutes, ...(agent.ask ? { ask: { every: agent.ask.every, with: agent.ask.with } } : {}) } : null;
     return { name, agent, card: checked.kind === "needs-yes" ? checked.card : renderCard(agent), shape: shapeOf(agent), needsYes: checked.kind === "needs-yes", strategy, autopilot };
   };
+  /**
+   * The referral binding (run 17): when this entry carries a referral code (given now, or kept from a v5.1 entry), and
+   * the wallet has no referrer on chain, its own card asks the player once to sign the free `Bind` message; the site
+   * keeps it and the keeper relays it. Never silent, never twice: a wallet bound on chain (to anyone), or a binding
+   * already kept and not expired, is never asked again. `null`: nothing to ask; else the card, or the lines it said.
+   */
+  const bindStep = async (): Promise<EnterResult | string[]> => {
+    const kept = readEntry(deps.home);
+    const code = (refSent ? ref : null) ?? kept?.ref ?? null;
+    if (!code || !deps.referrals || !deps.signer.signReferralBind) return [];
+    const b = kept?.refBinding ?? null;
+    if (b && (b.state === "bound" || b.state === "sent" || (b.state === "pending" && b.deadline !== null && b.deadline * 1_000 > now()))) return [];
+    const keep = (refBinding: NonNullable<EntryRecord["refBinding"]>) => {
+      const latest = readEntry(deps.home);
+      if (latest) writeJsonAtomic(paths.entry, { ...latest, refBinding });
+    };
+    let wallet: Address;
+    try {
+      wallet = getAddress(await deps.signer.address());
+    } catch {
+      return [copy.bindLater("wallet", lang)];
+    }
+    const onChain = await deps.referrals.referrerOf(wallet);
+    if (onChain === "unreadable") return [copy.bindLater("chain", lang)];
+    if (onChain !== null) {
+      keep({ state: "bound", referrer: null, deadline: null, at: new Date(now()).toISOString() });
+      log("enter.bind", { result: "already-bound" });
+      return [copy.bindAlready(lang)];
+    }
+    const resolved = await deps.referrals.resolve(code);
+    if (resolved.kind === "unreadable") return [copy.bindLater("site", lang)];
+    if (resolved.kind === "unknown") return [copy.bindUnknown(code, lang)];
+    if (resolved.referrer.toLowerCase() === wallet.toLowerCase()) return [copy.bindSelf(lang)];
+    const referrer = resolved.referrer;
+    const digest = sha256(JSON.stringify({ stage: "bind", code, referrer: referrer.toLowerCase() }));
+    if (!yesFor("bind", digest)) return ask("bind", digest, copy.bindCard({ code, referrer }, lang), { ref: code });
+    const fields: BindFields = { wallet, referrer, deadline: bindDeadline(now()) };
+    const signed = await deps.signer.signReferralBind(fields, deps.signOptions);
+    if (signed.kind !== "signed") {
+      log("enter.bind", { result: "not-signed", why: signed.kind });
+      return [copy.bindNotSigned(signed.kind, lang)];
+    }
+    const signature = joinSignature(signed.signature, signed.recovery);
+    if (!signature || !(await bindSignatureRecovers(fields, signature))) {
+      log("enter.bind", { result: "local-check-failed" });
+      return [copy.bindNotSigned("local-check", lang)];
+    }
+    const answer = await deps.referrals.submit({ wallet: wallet.toLowerCase(), referrer: referrer.toLowerCase(), deadline: fields.deadline.toString(), signature, chainId: REFERRALS_CHAIN_ID });
+    log("enter.bind", { result: answer.kind, ...(answer.kind === "refused" ? { status: answer.status, refusal: answer.name } : {}) });
+    const at = new Date(now()).toISOString();
+    if (answer.kind === "kept") {
+      keep({ state: answer.status === "sent" ? "sent" : "pending", referrer: referrer.toLowerCase(), deadline: Number(fields.deadline), at });
+      return [copy.bindKept(code, lang)];
+    }
+    if (answer.kind === "already-bound") {
+      keep({ state: "bound", referrer: null, deadline: null, at });
+      return [copy.bindAlready(lang)];
+    }
+    if (answer.kind === "refused") {
+      keep({ state: "refused", referrer: referrer.toLowerCase(), deadline: Number(fields.deadline), at, refusal: answer.name ?? answer.code });
+      return [copy.bindRefused(answer.name ?? answer.code ?? `HTTP ${answer.status}`, lang)];
+    }
+    return [copy.bindLater("site", lang)];
+  };
+
   /** The wallet's sign-in end, for the entry card (addendum 8); null when it cannot be read. */
   const signInEndNow = async () => deps.signer.settings().then((s) => sessionView(s).end).catch(() => null);
   /** Planned once, where its card is needed: after the wallet is read on a first entry, at once on a rerun. */
@@ -341,6 +411,10 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const refused = planOnce();
     if (refused) return refused;
     const head = copy.alreadyEntered({ agentId: given, coin: record!.bodyCoin, notes: record!.notes ?? null, season: record!.registered?.season ?? null, seat: record!.registered?.seat ?? null }, lang);
+    // Run 17: the referral binding, asked once, on a rerun too (a v5.1 entry's recorded code binds here).
+    const bound = input.memeOnly ? [] : await bindStep();
+    if (!Array.isArray(bound)) return bound;
+    lines.push(...bound);
     if (!planned) return end(0, true, "entered", [head, ...refLate(), ...(input.memeOnly ? [] : [copy.doneLine(lang)])], { agentId: given, bodyCoin: record!.bodyCoin, notes: record!.notes ?? null });
     if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, ...refLate(), copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     const rerunRead = await deps.site.league("today", null).catch(() => null);
@@ -428,6 +502,10 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const finish = async (): Promise<EnterResult> => {
     lines.push(...refLate());
     if (planned) lines.push(...(await startStep()));
+    // Run 17: the agent runs; then the referral binding's own card, if this entry carries a code.
+    const bound = await bindStep();
+    if (!Array.isArray(bound)) return bound;
+    lines.push(...bound);
     lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade) : copy.doneLine(lang));
     if (composed) return memeStep(composed);
     // Signed in, and the site has not given the seat yet: "registered", not done; a rerun picks it up.

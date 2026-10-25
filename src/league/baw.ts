@@ -3,6 +3,7 @@ import { getAddress, isAddress, type Address, type Hex } from "viem";
 
 import { noteSessionPreviewDescribes, noteSessionSignRequest, type NoteSessionFields } from "./notes/message.ts";
 import { previewDescribes, signRequestMessage, type RegisterFields } from "./register/message.ts";
+import { bindPreviewDescribes, bindSignRequest, type BindFields } from "./register/referral.ts";
 
 /**
  * The Binance Agentic Wallet, through its `baw` CLI (PLAN.md §2.8).
@@ -260,6 +261,16 @@ export class BawSigner implements Signer, RegistrationSigner {
    */
   async signNoteSession(fields: NoteSessionFields, options: SignOptions = {}): Promise<SignOutcome> {
     return this.signLeagueMessage(noteSessionSignRequest(fields), (parsed) => noteSessionPreviewDescribes(parsed, fields), options);
+  }
+
+  /**
+   * Sign a referral binding (task 975, run 17): the site's EIP-712 `Bind(wallet, referrer, deadline)` on the
+   * FeastReferrals domain, by the same road as Register and the notes session (signed in, Developer Mode on, the
+   * preview reads back exactly these three fields and flags no risk, then execute). Built here from the fields, never
+   * taken raw. No command is added to the allowlist: it is the same `sign-message preview` and `execute`.
+   */
+  async signReferralBind(fields: BindFields, options: SignOptions = {}): Promise<SignOutcome> {
+    return this.signLeagueMessage(bindSignRequest(fields), (parsed) => bindPreviewDescribes(parsed, fields), options);
   }
 
   private async signLeagueMessage(message: string, describes: (parsed: unknown) => { ok: true } | { ok: false; reason: string }, options: SignOptions): Promise<SignOutcome> {

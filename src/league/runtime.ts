@@ -23,6 +23,7 @@ import { guard, warmupActive, warmupAfter, type GuardInput, type GuardVerdict, t
 import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type Limits } from "./limits.ts";
 import { Market } from "./market.ts";
 import { checkNote, flushNotes, notesPath, readNotes } from "./notes/queue.ts";
+import { liveToken } from "./notes/session.ts";
 import { presetStrategy } from "./presets/logic.ts";
 import { PRESETS } from "./presets/specs.ts";
 import { SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
@@ -40,7 +41,7 @@ import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { errorLine } from "./rpc.ts";
 import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, waitingStatusLine, warmUpDinner, writeGate } from "./season-gate.ts";
 import { leagueDayKey, readVersion, versionNotice, versionPath, versionView, writeVersion } from "./version.ts";
-import { healthFlag, modelHint, withHealth, type Health } from "./headers.ts";
+import { healthFlag, modelHint, withHealth, withHostHeaders, type Health } from "./headers.ts";
 import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
 import { freshMemory, pastEnd, sessionStep, sessionView, signInNoteText, type SessionMemory, type SessionView } from "./session.ts";
@@ -1139,6 +1140,39 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         .catch(() => undefined)
         .finally(() => (flushing = false));
     };
+    /**
+     * The seat's heartbeat (task 975, run 17; the coordinator's decision 2; the site's task 995): every 9 minutes, the
+     * authenticated read of its own standing, `/api/league?me=<wallet>` with its notes session's bearer token, which the
+     * site records as seen (one write per seat per 10 minutes), so the seat never greys while this process lives. Never
+     * awaited; its answer is not read; the token is never logged. No notes session: said once, and nothing is sent.
+     */
+    const SEEN_EVERY_MS = 9 * 60_000;
+    let nextSeen = 0;
+    let seenAsking = false;
+    let seenToldNoSession = false;
+    const seenBeat = (now: number) => {
+      if (deps.only || seenAsking || now < nextSeen) return;
+      nextSeen = now + SEEN_EVERY_MS;
+      const token = liveToken(deps.home);
+      if (!token) {
+        log("seen.skipped", { why: "no notes session" });
+        // Said once a run; the next run says it again if it is still missing.
+        if (!seenToldNoSession) notify("notes", "feast.meme cannot see this agent alive without its notes session: run `FL note --login` (one signature, no gas) so its seat does not grey");
+        seenToldNoSession = true;
+        return;
+      }
+      const site = (deps.site ?? siteFromEnv()).replace(/\/+$/, "");
+      const f = withHealth(withHostHeaders(deps.fetch ?? fetch, [site]), healthOf());
+      seenAsking = true;
+      void f(`${site}/api/league?view=today&limit=1&me=${wallet.toLowerCase()}`, { headers: { accept: "application/json", authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) })
+        .then(async (r) => {
+          await r.body?.cancel().catch(() => undefined);
+          if (r.status !== 200) log("seen.failed", { status: r.status });
+        })
+        .catch((error: unknown) => log("seen.failed", { reason: (error as Error).name === "TimeoutError" ? "no answer in time" : "no answer" }))
+        .finally(() => (seenAsking = false));
+    };
+
     // The autopilot's state, said once each way: on after the host's silence, off when it acts.
     let autopilotOn = false;
     /** Why the floor keeper is on (null while off): its switch says each change once (addendum 7). */
@@ -1315,6 +1349,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
       // Notes are not trades: the gate lets them through.
       if (!spreading) flushQueuedNotes(now);
+      // The seat's heartbeat (run 17): in every mode, trading or not, waiting for the season or in it.
+      seenBeat(now);
       if (now >= nextPreflight) {
         await preflight();
         nextPreflight = now + (deps.preflightMs ?? 300_000);
