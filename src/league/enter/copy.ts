@@ -1,5 +1,6 @@
 import { short, utc8, type Lang } from "../register/copy.ts";
 import { LEAGUE_CHAIN_ID, LEAGUE_DOMAIN, shownName, ZERO_ADDRESS } from "../register/message.ts";
+import { utc8Day } from "../season-gate.ts";
 
 /**
  * Every word `FL enter` shows a person, in English and Chinese (task 961). The
@@ -186,10 +187,21 @@ export function notesCard(view: { agentId: string; season: number; wallet?: stri
 /** When trading opens, as the cards say it. */
 export type OpensShown = { kind: "at"; at: number } | { kind: "open" } | { kind: "unknown" };
 
+/**
+ * The opening as the cards say it (addenda 12 and 13): it is the season's start ("the season's start, Tue 10/27
+ * 21:00 UTC+8"), the instant the page counts down to, never a date of the copy's own.
+ */
 const opensText = (opens: OpensShown, lang: Lang) => {
   const zh = lang === "zh";
-  if (opens.kind === "at") return zh ? `${utc8(opens.at)}（UTC+8）` : `${utc8(opens.at)} UTC+8`;
+  if (opens.kind === "at") return zh ? `赛季开始的 ${utc8DayZh(opens.at)}（UTC+8）` : `the season's start, ${utc8Day(opens.at)} UTC+8`;
   return zh ? "feast.meme 宣布开赛的时刻" : "feast.meme announces the start";
+};
+
+/** "10/27（周二）21:00", the zh form of `utc8Day`. */
+const utc8DayZh = (ms: number) => {
+  const d = new Date(ms + 8 * 3_600_000);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(d.getUTCMonth() + 1)}/${two(d.getUTCDate())}（周${"日一二三四五六"[d.getUTCDay()]}）${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
 };
 
 /** Once the season is on (task 975, addendum 1): it trades now, and when the backup would take over. */
@@ -212,7 +224,11 @@ const seasonOn = (lang: Lang, autopilot: AutopilotShown | undefined, sentence: b
 export function waitingLine(opens: OpensShown, lang: Lang, autopilot?: AutopilotShown): string {
   const zh = lang === "zh";
   if (opens.kind === "open") return `${seasonOn(lang, autopilot ?? undefined, true)}${zh ? "。" : "."}`;
-  if (opens.kind === "at") return zh ? `现在就启动，等待赛季开始：${opensText(opens, lang)}之前它不做任何交易。` : `Starts now and waits for the season: it trades nothing before ${opensText(opens, lang)}.`;
+  // Addendum 13: trading opens at the season's start; the first dinner, a day later, is the warm-up.
+  if (opens.kind === "at")
+    return zh
+      ? `现在就启动，等待赛季开始：${opensText(opens, lang)}开放交易，在那之前它不做任何交易。一天之后的第一次开饭是热身，不吃掉任何人。`
+      : `Starts now and waits for the season: trading opens at ${opensText(opens, lang)}, and it trades nothing before. The first dinner, a day later, is the warm-up: it eats nobody.`;
   return zh ? "现在就启动，等待赛季开始：在 feast.meme 宣布开赛之前，它不做任何交易。" : "Starts now and waits for the season: it trades nothing until feast.meme announces the start.";
 }
 
@@ -537,7 +553,7 @@ function doneRunningLine(name: string, opens: OpensShown, lang: Lang, autopilot?
   // The season on: the line ends by telling the host to trade now (addendum 2).
   if (opens.kind === "open") return zh ? `你已报名，「${name}」正在运行。${backup}${after}${tradeNowLine(autopilot ?? null, promptFile, lang)}` : `You're in, and ${name} is running. ${backup}${after} ${tradeNowLine(autopilot ?? null, promptFile, lang)}`;
   const when =
-    opens.kind === "at" ? (zh ? `它等待赛季开始，从 ${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
+    opens.kind === "at" ? (zh ? `它等待赛季开始，从${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
   return zh ? `你已报名，「${name}」正在运行：${when}。${backup}${after}` : `You're in, and ${name} is running: ${when}. ${backup}${after}`;
 }
 

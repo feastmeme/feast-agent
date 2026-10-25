@@ -33,7 +33,9 @@ const ID = "maplegrin";
 const BODY: Address = getAddress("0x00000000000000000000000000000000000b0d1e");
 const SOMEONE: Address = getAddress("0x000000000000000000000000000000000000b0b0");
 const DAY_ONE = Date.parse("2026-10-24T13:00:00Z");
-const OPENS = "2026-10-27 21:00 UTC+8";
+const OPENS = "the season's start, Tue 10/27 21:00 UTC+8";
+/** Addendum 13: the card's waiting line, en, under the season's start. */
+const WAITS = `Starts now and waits for the season: trading opens at ${OPENS}, and it trades nothing before. The first dinner, a day later, is the warm-up: it eats nobody.`;
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 let dirs: string[] = [];
@@ -153,7 +155,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
     expect(out.text).toContain('your agent "maplegrin" starts and waits for the season');
     expect(out.text).toContain("Your wallet asks for at most two signatures as soon as you say yes");
     expect(out.text).toContain('Your Feast agent "maplegrin"');
-    expect(out.text).toContain(`Starts now and waits for the season: it trades nothing before ${OPENS}.`);
+    expect(out.text).toContain(WAITS);
     expect(out.text).not.toMatch(/HP|body coin/);
     expect(lastLine(out.text)).toBe(copy.needsYes("en"));
     expect(w.pending().stage).toBe("register");
@@ -168,7 +170,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
     const out = await w.run({ lang: "zh" });
     expect(out.text).toContain("maplegrin.ai 报名第 1 季");
     expect(out.text).toContain("签一条消息报名本季：不是交易，不花 gas，不动资金");
-    expect(out.text).toContain("现在就启动，等待赛季开始：2026-10-27 21:00（UTC+8）之前它不做任何交易。");
+    expect(out.text).toContain("现在就启动，等待赛季开始：赛季开始的 10/27（周二）21:00（UTC+8）开放交易，在那之前它不做任何交易。一天之后的第一次开饭是热身，不吃掉任何人。");
   });
 
   it("--yes: one Register (empty manifesto, zero copies, the chain's id, a fresh issuedAt), one POST, one NoteSession, the agent started once; the done line", async () => {
@@ -737,7 +739,7 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
     const card = await w.run();
     expect(loadAgent(w.home, ID)).toMatchObject({ track: "prompt", preset: "steady", autopilot: { idleMinutes: 30 } });
     expect(card.text).toContain("Autopilot backup: on. If your agent makes no FL buy or FL sell for 30 min, the steady preset (Steady floor keeper)");
-    expect(card.text).toContain(`Starts now and waits for the season: it trades nothing before ${OPENS}.\n${ON_EN}`);
+    expect(card.text).toContain(`${WAITS}\n${ON_EN}`);
     expect(card.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: "none" } });
     const out = await w.run({ yes: true });
     expect(lastLine(out.text)).toBe(
@@ -749,7 +751,7 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
   it("zh: the entry card says it in Chinese, and so does the done line", async () => {
     const w = world();
     const card = await w.run({ lang: "zh" });
-    expect(card.text).toContain(`现在就启动，等待赛季开始：2026-10-27 21:00（UTC+8）之前它不做任何交易。\n${ON_ZH}`);
+    expect(card.text).toContain(`现在就启动，等待赛季开始：赛季开始的 10/27（周二）21:00（UTC+8）开放交易，在那之前它不做任何交易。一天之后的第一次开饭是热身，不吃掉任何人。\n${ON_ZH}`);
     const out = await w.run({ lang: "zh", yes: true });
     expect(lastLine(out.text)).toContain(ON_ZH);
   });
@@ -802,7 +804,7 @@ describe("task 975, addendum 1: entering once the season is on, and the signing 
 
   it("before the season: it waits, and the line names the opening", async () => {
     const w = world();
-    expect((await w.run()).text).toContain(`Starts now and waits for the season: it trades nothing before ${OPENS}.`);
+    expect((await w.run()).text).toContain(WAITS);
     expect(lastLine((await w.run({ yes: true })).text)).toContain(`it waits for the season and trades from ${OPENS}`);
   });
 

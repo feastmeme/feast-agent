@@ -1023,7 +1023,7 @@ The coordinator's ruling: task 964 makes Register seat a wallet with no coin, co
 
 ### 16.7 The dry run
 
-`npx tsx src/league/enter/dryrun.ts --lang en|zh` runs the real flow and the real runtime loop on the test fakes, with throwaway homes and a fixed clock: (a) the entry card with the default copied to `./strategy.md`; (b) its `--yes` against a register route that seats (two signatures, two POSTs, the agent started); (c) one that answers pending; (d) the compose card; (e) the meme's preview with the host's PNG, (e2) a JPEG, (f) 262,145 bytes, (g) no league creature; (h) the agent under the gate three simulated minutes before trading opens (a queued `FL buy` refused, `season.open` at 20:00:00, the jitter, the first market read after it); (i) no start announced (the league read every 5 minutes, nothing else). Its transcript is `docs/league/entry-dryrun-20261025T0657Z.md`.
+`npx tsx src/league/enter/dryrun.ts --lang en|zh` runs the real flow and the real runtime loop on the test fakes, with throwaway homes and a fixed clock: (a) the entry card with the default copied to `./strategy.md`; (b) its `--yes` against a register route that seats (two signatures, two POSTs, the agent started); (c) one that answers pending; (d) the compose card; (e) the meme's preview with the host's PNG, (e2) a JPEG, (f) 262,145 bytes, (g) no league creature; (h) the agent under the gate three simulated minutes before trading opens (a queued `FL buy` refused, `season.open` at 20:00:00, the jitter, the first market read after it); (i) no start announced (the league read every 5 minutes, nothing else). Its transcript is `docs/league/entry-dryrun-20261025T0714Z.md`.
 
 ### 16.8 What did not change
 

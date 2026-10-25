@@ -38,7 +38,7 @@ import { nextSlowRead, pollCadence, writeCadence, type Cadence } from "./feed/ca
 import { sessionNotice, utc8 } from "./register/copy.ts";
 import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { errorLine } from "./rpc.ts";
-import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, warmUpDinner, writeGate } from "./season-gate.ts";
+import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, waitingStatusLine, warmUpDinner, writeGate } from "./season-gate.ts";
 import { leagueDayKey, readVersion, versionNotice, versionPath, versionView, writeVersion } from "./version.ts";
 import { healthFlag, modelHint, withHealth, type Health } from "./headers.ts";
 import { scriptCheckPassed } from "./script/check.ts";
@@ -1105,7 +1105,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     };
     log("started", { track: agent.track, preset: agent.preset, tickSeconds: agent.tickSeconds, events: loaded.meta.events, warmup: warmup(), autopilot: agent.autopilot ?? null, feed: feed ? feed.mode : null, pollMs: deps.pollMs ?? 5_000, startJitterMs, ...(waits ? { waitForSeason: true, opensAt: gate.opensAt === null ? null : new Date(gate.opensAt).toISOString() } : {}) });
     // A start after the opening (a restart on day 2, a reboot) opens at once: no "waiting" is said for it.
-    if (!gate.open && !(gate.opensAt !== null && gate.opensAt <= clock())) notify("season", gate.opensAt === null ? "waiting for the season: it trades nothing until feast.meme announces the start" : `waiting for the season: it trades nothing before ${utc8(gate.opensAt)} (UTC+8)`);
+    if (!gate.open && !(gate.opensAt !== null && gate.opensAt <= clock())) notify("season", waitingStatusLine(gate.opensAt));
     if (agent.track === "prompt") {
       // Addendum 7: with the asks on, the unified line says what runs; without them, league-v5's first cut is still true.
       if (askMode()) notify("started", `prompt mode; ${autopilotLine({ preset: agent.preset!, idleMinutes: agent.autopilot!.idleMinutes, ask: agent.ask! }, "en")}`);

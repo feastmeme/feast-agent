@@ -81,7 +81,7 @@ Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at m
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
 To stop: say "stop", or run `feast-league stop demo` (or create the file STOP in the agent's folder).
 
-Starts now and waits for the season: it trades nothing before 2026-10-27 21:00 UTC+8.
+Starts now and waits for the season: trading opens at the season's start, Tue 10/27 21:00 UTC+8, and it trades nothing before. The first dinner, a day later, is the warm-up: it eats nobody.
 Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
 
 Not done: this needs the user's yes (--yes).
@@ -103,7 +103,7 @@ exit 0, stage done
 Registered: seat 7, and a founding seat (#7 of 100). demo.ai is in Season 1.
 Notes session open for demo.ai, season 1: your agent's notes reach feast.meme.
 started "demo" in the background (pid 4242); FL status demo
-You're in, and demo is running: it waits for the season and trades from 2026-10-27 21:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start demo`. A changed strategy.md needs `FL start demo --prompt strategy.md`, its new card and your yes.
+You're in, and demo is running: it waits for the season and trades from the season's start, Tue 10/27 21:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start demo`. A changed strategy.md needs `FL start demo --prompt strategy.md`, its new card and your yes.
 ```
 What was asked, in order:
 ```text
@@ -297,7 +297,7 @@ files under the throwaway home's league-entry: agent.json, avatar.png, entry.jso
 
 The runtime's notices (UTC+8):
 ```text
-2026-10-27 20:57:00 [demo] season: waiting for the season: it trades nothing before 2026-10-27 21:00 (UTC+8)
+2026-10-27 20:57:00 [demo] season: waiting for the season: season starts and trading opens Tue 10/27 21:00 UTC+8; it trades nothing before
 2026-10-27 20:57:00 [demo] started: prompt mode; Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
 2026-10-27 21:00:00 [demo] season: the season is open: trading starts within 32 s
 ```

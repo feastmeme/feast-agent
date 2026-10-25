@@ -593,3 +593,20 @@ describe("task 975, addendum 12: trading opens at the start; FL enter --ref", ()
     for (const piece of ["ALTER TABLE league_agents ADD COLUMN IF NOT EXISTS ref text NULL;", "normalizeReferralCode(record.ref)", "REF = COALESCE(LEAGUE_AGENTS.REF, EXCLUDED.REF)"]) expect(patch, piece).toContain(piece);
   });
 });
+
+describe("task 975, addendum 13: the gate's own 23 hours are gone", () => {
+  it("no offset from the start in the gate; the copy names the season's start", async () => {
+    expect(read("src/league/season-gate.ts")).not.toMatch(/23 \* 3_600_000|OPENS_AFTER_START_MS|OPENS_BEFORE_DINNER_MS/);
+    const { tradingOpens } = await import("./season-gate.ts");
+    const { parseLeague } = await import("./register/site.ts");
+    const { leagueWire } = await import("./register/fakes.ts");
+    const { waitingLine, doneRunning } = await import("./enter/copy.ts");
+    // The page's wire as it always was: warm-up, counting down to the start.
+    const opens = tradingOpens(parseLeague(leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-27T13:00:00.000Z" } })));
+    expect(opens).toEqual({ kind: "at", at: Date.parse("2026-10-27T13:00:00Z") });
+    expect(tradingOpens(parseLeague(leagueWire({ state: "season", season: { number: 1, day: 1, countdownTo: "2026-10-28T13:00:00.000Z" } })))).toEqual({ kind: "open" });
+    expect(waitingLine(opens as { kind: "at"; at: number }, "en")).toBe("Starts now and waits for the season: trading opens at the season's start, Tue 10/27 21:00 UTC+8, and it trades nothing before. The first dinner, a day later, is the warm-up: it eats nobody.");
+    expect(doneRunning("maplegrin", opens as { kind: "at"; at: number }, "en", null)).toMatch(/^You're in, and maplegrin is running: it waits for the season and trades from the season's start, Tue 10\/27 21:00 UTC\+8\. /);
+    expect(waitingLine(opens as { kind: "at"; at: number }, "zh")).toContain("赛季开始的 10/27（周二）21:00（UTC+8）开放交易");
+  });
+});
