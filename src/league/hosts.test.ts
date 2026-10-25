@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { confirmAgent, loadAgent, planAgent, saveAgent } from "./agent.ts";
 import { aliveLine } from "./alive.ts";
+import { autopilotLine } from "./enter/copy.ts";
 import { askKeyPath } from "./ask/host.ts";
 import { inTemp, windowsLines } from "./daemon.ts";
 import { checkHost, HOST_DETAIL_HEADER, hostDetailHint, hostHeaders, modelHint } from "./headers.ts";
@@ -133,3 +134,52 @@ describe("staying up", () => {
     expect(aliveLine(null, false, now)).toBe("not running · no tick yet");
   });
 });
+
+describe("FL answer, the Grok routine's hands", () => {
+  const C1 = "0x000000000000000000000000000000000000c0e1";
+  function agent() {
+    const { prompt, home, env } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const printed = (at: number, maxBuyBnb = 0.02) => writeFileSync(join(agentPaths(home, "demo").dir, "printed-pack.json"), JSON.stringify({ at, digest: "sha256:0123456789abcdef", maxBuyBnb, ids: [["c1", { coin: C1, symbol: "NOODFEED", held: false }]] }));
+    return { home, env, printed };
+  }
+  const answer = (a: Record<string, unknown>) => JSON.stringify({ action: "hold", coin: null, amountBnb: null, fraction: null, reason: "r", memo: "", ...a });
+
+  it("a hold: nothing traded; an id the pack does not have: not taken; no fresh pack: says how to get one", async () => {
+    const { env, printed } = agent();
+    expect((await run(["answer", "demo", answer({})], env)).stdout.trim()).toBe("no fresh pack: run FL ask demo --print first (a pack answers for 10 minutes)");
+    printed(Date.now() - 11 * 60_000);
+    expect((await run(["answer", "demo", answer({})], env)).code).toBe(2);
+    printed(Date.now());
+    const held = await run(["answer", "demo", answer({})], env);
+    expect([held.code, held.stdout.trim()]).toEqual([0, "hold: nothing traded (pack sha256:0123456789abcdef)"]);
+    const unknown = await run(["answer", "demo", answer({ action: "buy", coin: "c9", amountBnb: 0.006 })], env);
+    expect(unknown.code).toBe(2);
+    expect(unknown.stdout).toMatch(/^not taken: .*c9/);
+  }, 60_000);
+
+  it("a buy the pack allows goes through FL buy's road: the hard limits still refuse it before any wallet call", async () => {
+    const { home, env, printed } = agent();
+    printed(Date.now(), 1);
+    const out = await run(["answer", "demo", answer({ action: "buy", coin: "c1", amountBnb: 0.5, reason: "big" })], env);
+    expect(out.code).toBe(2);
+    expect(out.stdout).toMatch(/^refused by L1: .*\(nothing was asked of the wallet\)$/m);
+    const log = readFileSync(agentPaths(home, "demo").log, "utf8");
+    expect(log).toContain('"event":"answer.taken"');
+    expect(log).toContain('"event":"intent.refused"');
+  }, 60_000);
+});
+
+describe("the entry's line names the new hosts", () => {
+  it("Gemini CLI, Cursor, your AI endpoint (then that endpoint), en and zh", () => {
+    const line = (w: string, lang: "en" | "zh" = "en") => autopilotLine({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: w } }, lang);
+    expect(line("gemini")).toBe("Every 5 minutes it asks your Gemini CLI what to do (while you are not trading yourself); if Gemini CLI can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.");
+    expect(line("cursor")).toContain("it asks your Cursor what to do");
+    expect(line("openai")).toBe("Every 5 minutes it asks your AI endpoint what to do (while you are not trading yourself); if that endpoint can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.");
+    expect(line("openai", "zh")).toContain("这个接口 联系不上");
+    expect(line("claude")).toBe("Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.");
+  });
+});
+

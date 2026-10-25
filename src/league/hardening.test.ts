@@ -145,7 +145,7 @@ describe("1. version awareness (G1)", () => {
 describe("2. the sign-in's end (G2)", () => {
   it("the entry card's sentence and FL status's line name the date", () => {
     const end = Date.parse("2026-11-01T06:05:00Z");
-    expect(signInSentence(end, "en")).toBe("Wallet sign-in valid until 2026-11-01 14:05 UTC+8: re-scan before then or the agent stops trading (`FL login` says how).");
+    expect(signInSentence(end, "en")).toBe("Wallet sign-in ends at 2026-11-01 14:05 UTC+8: re-scan before then or the agent stops trading, the floor keeper and the stop-loss included (`FL login` says how).");
     expect(signInSentence(end, "zh")).toContain("2026-11-01 14:05 UTC+8");
     expect(signInLine(end, utc8)).toBe("wallet sign-in ends at 2026-11-01 14:05 UTC+8: re-scan before then or the agent stops trading (FL login says how); once it ends nothing trades, not the floor keeper and not a stop-loss, until the player scans again; a day's floor still unmet then is eaten at the dinner");
     const section = agentSection({ strategy: { kind: "own", path: "strategy.md", firstLine: "x" } as never, name: "maplegrin", card: "CARD", opens: { kind: "open" }, autopilot: null, signInEnd: end }, "en");

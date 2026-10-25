@@ -221,7 +221,8 @@ export function waitingLine(opens: OpensShown, lang: Lang, autopilot?: Autopilot
 export type AutopilotShown = { preset: string; idleMinutes: number; ask?: { every: number; with: string } | null } | null;
 
 /** The host as the copy names it. */
-const hostName = (w: string) => (w === "claude" ? "Claude Code" : w === "codex" ? "Codex" : w);
+// Addendum 11: the newer hosts by their own names; an endpoint as one ("your AI endpoint", then "that endpoint").
+const hostName = (w: string) => (w === "claude" ? "Claude Code" : w === "codex" ? "Codex" : w === "gemini" ? "Gemini CLI" : w === "cursor" ? "Cursor" : w === "openai" ? "AI endpoint" : w);
 /** The ask loop is on (a host to ask, not "none"). */
 const asking = (a: AutopilotShown): a is NonNullable<AutopilotShown> & { ask: { every: number; with: string } } => Boolean(a?.ask && a.ask.with !== "none");
 
@@ -231,9 +232,10 @@ export function autopilotLine(autopilot: AutopilotShown, lang: Lang): string {
   // Addendum 4: the three facts: it asks your AI on a timer; the floor keeper covers a failure and the dinner.
   if (asking(autopilot)) {
     const host = hostName(autopilot.ask.with);
+    const again = autopilot.ask.with === "openai" ? "that endpoint" : host;
     return zh
-      ? `它每 ${autopilot.ask.every} 分钟问一次你的 ${host} 该做什么（你自己没在交易的时候）；${host} 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。`
-      : `Every ${autopilot.ask.every} minutes it asks your ${host} what to do (while you are not trading yourself); if ${host} can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.`;
+      ? `它每 ${autopilot.ask.every} 分钟问一次你的 ${host} 该做什么（你自己没在交易的时候）；${autopilot.ask.with === "openai" ? "这个接口" : host} 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。`
+      : `Every ${autopilot.ask.every} minutes it asks your ${host} what to do (while you are not trading yourself); if ${again} can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.`;
   }
   if (autopilot)
     return zh
@@ -321,8 +323,8 @@ export function agentSection(view: { strategy: StrategyShown; name: string; card
 /** The wallet's sign-in on the entry card (task 975, addendum 8): the date to scan again by, en and zh. */
 export function signInSentence(end: number, lang: Lang): string {
   return lang === "zh"
-    ? `钱包登录有效期至 ${utc8(end)} UTC+8：在那之前重新扫码，否则 agent 会停止交易（\`FL login\` 会告诉你怎么做）。`
-    : `Wallet sign-in valid until ${utc8(end)} UTC+8: re-scan before then or the agent stops trading (\`FL login\` says how).`;
+    ? `钱包登录将于 ${utc8(end)} UTC+8 到期：在那之前重新扫码，否则 agent 会停止交易，连守门和止损也不会做（\`FL login\` 会告诉你怎么做）。`
+    : `Wallet sign-in ends at ${utc8(end)} UTC+8: re-scan before then or the agent stops trading, the floor keeper and the stop-loss included (\`FL login\` says how).`;
 }
 
 export function keptUnreadable(reason: string, lang: Lang): string {

@@ -425,7 +425,7 @@ describe("task 975, addenda 4 and 5: the ask loop and the data it decides by", (
   it("SKILL §9 asks the interval in one line, en and zh, verbatim, and passes --every", () => {
     expect(section9).toContain('"How often should your agent be asked what to do? Default every 5 minutes (about 288 asks a day); on a Pro-tier plan 10–15 minutes is safer."');
     expect(section9).toContain("「多久问一次你的 agent？默认 5 分钟（每天约 288 次）；Pro 档额度建议 10–15 分钟。」");
-    expect(section9).toContain("Pass their answer as `--every N` (2–120) on `FL enter`. The model is your own default: do not ask.");
+    expect(section9).toContain("Pass their answers as `--every N` (2–120) and, unless they keep the default, `--ask-model <name>` on `FL enter`.");
   });
 
   it("addendum 7: SKILL §9 says each ask costs real quota, the rehearsal's figures, --ask-model and a longer interval on Pro", () => {
@@ -531,8 +531,8 @@ describe("task 975, addendum 8: ready for the season", () => {
   it("the CHANGELOG's league-v5 says it, the README mirrors the two rows, the sign-in table has its 24 h", () => {
     for (const word of ["latestRuntime", "npx skills add feastmeme/feast-agent", "FL login", "bsc-dataseed1", "x-feast-health", "FL daemon", "warm-up tonight: no floor", "season over"]) expect(v5, word).toContain(word);
     const readme = read("README.md");
-    expect(readme).toContain('| "keep it running after a reboot" | `FL daemon <name> --install` |');
-    expect(readme).toContain("| 「重启后也让它跑」 | `FL daemon <name> --install` |");
+    expect(readme).toContain('| "keep it running after a reboot" | `FL daemon <name> --install` (`FL enter` installs it by default) |');
+    expect(readme).toContain("| 「重启后也让它跑」 | `FL daemon <name> --install`（`FL enter` 默认就会装） |");
     expect(read("skills/feast-league/references/register.md")).toContain("| `24h` | Your wallet's sign-in ends in under 24 hours");
   });
 });
@@ -542,5 +542,37 @@ describe("task 975, addendum 9: the season's start is not a dinner", () => {
     const files = ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "skills/feast-league/references/register.md", "README.md", "docs/CHANGELOG.md", "docs/league/PLAN.md", "src/league/season-gate.ts", "src/league/season-gate.test.ts", "src/league/enter/copy.ts", "src/league/ask/pack.ts"];
     for (const file of files) expect(read(file), file).not.toMatch(/dinner 0|dinner zero|first dinner is (Tue|10\/27)|10\/27[^,.\n]{0,20}\bis (a |the )?(dinner|warm-up)|warm-up[^.\n]{0,30}10\/27/i);
     expect(read("docs/CHANGELOG.md")).toContain("the first dinner, Wednesday 10/28 21:00, is the warm-up (no floor, eats nobody)");
+  });
+});
+
+describe("task 975, addendum 11: the continuity package (league-v5.1)", () => {
+  const skill = read("skills/feast-league/SKILL.md");
+  const section9 = skill.slice(skill.indexOf("## 9."), skill.indexOf("### The older signed path"));
+  const log = read("docs/CHANGELOG.md");
+  const v51 = log.slice(log.indexOf("## league-v5.1"), log.indexOf("## league-v5\n"));
+
+  it("SKILL asks the interval and the model, the owner's cost line byte-exact; the daemon by default; the hosts and how each is asked", () => {
+    expect(section9).toContain("「用哪个模型来问？默认是宿主默认模型。默认模型每问约 0.12–0.21 美元(Claude Code 实测),haiku 约 0.0003」");
+    expect(section9).toContain('"Which model should it ask? Default: your host\'s default model (about 0.12–0.21 USD per ask on Claude Code, measured); a cheap tier such as haiku is about 0.0003 USD per ask."');
+    expect(section9).toContain("`FL model <name> <model|default>`");
+    expect(section9).toContain("**It ends by keeping the agent up**");
+    expect(section9).toContain("Pass `--no-daemon` only if the player says no to that.");
+    for (const row of ["| Gemini CLI | `--host gemini` |", "| Cursor | `--host cursor` |", "`--ask-with openai --ask-base-url <its base URL> --ask-model <its model> --ask-key-env <the variable its key is in>`"]) expect(section9, row).toContain(row);
+    expect(section9).toContain("`FL answer <name> '<the JSON object>'`");
+    expect(skill).toContain("once it ends nothing trades, not the floor keeper and not a stop-loss, until the player scans again");
+    expect(skill).toContain('"alive since … UTC+8 · last tick … UTC+8 (N min ago)"');
+  });
+
+  it("the hosts' doc names the providers by name only, never a key; the Grok Bot script has its PASS lines", () => {
+    const hosts = read("docs/league/ask-hosts.md");
+    for (const p of ["DeepSeek", "Qwen", "Kimi", "xAI", "OpenRouter"]) expect(hosts, p).toContain(p);
+    expect(hosts).not.toMatch(/sk-[A-Za-z0-9]{8,}|https:\/\/api\./);
+    const grok = read("plans/league-autopilot/grok-bot-rehearsal.md");
+    for (const piece of ["FL ask <name> --print", "FL answer <name>", "every 5 minutes", "## 6. The laptop lid", "| 6 lid |", "⏰ 登录到期 · 24 小时后 · 主人需要重新扫码一次"]) expect(grok, piece).toContain(piece);
+    expect(grok).not.toMatch(/0x[0-9a-fA-F]{40}/);
+  });
+
+  it("the CHANGELOG's league-v5.1 says the package; minSupported stays league-v4", () => {
+    for (const word of ["--ask-with gemini", "--ask-with cursor", "--ask-with openai", "FL ask-key", "x-feast-host-detail", "FL model", "--no-daemon", "schtasks", "alive since", "⏰ 登录到期", "`minSupported` stays `league-v4`"]) expect(v51, word).toContain(word);
   });
 });

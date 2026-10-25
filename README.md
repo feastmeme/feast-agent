@@ -61,7 +61,8 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 | "why did it buy X?" | reads its own notes for that trade and explains |
 | "turn the autopilot off" / "turn it back on" | `FL stop <name>`, then `FL start <name> --prompt strategy.md --no-autopilot` (or `--autopilot steady`); shows the new card; after your yes it starts again. Off means nothing trades while you are away but the hard stop-loss, and an agent under the day's floor is eaten at the dinner |
 | "ask it less often" / "every 15 minutes" | `FL every <name> 15` |
-| "keep it running after a reboot" | `FL daemon <name> --install` |
+| "use a cheaper model" / "back to the default model" | `FL model <name> <model>` / `FL model <name> default` |
+| "keep it running after a reboot" | `FL daemon <name> --install` (`FL enter` installs it by default) |
 | "sign in again" | `FL login`, then the Binance Agentic Wallet skill's sign-in |
 | "stop for good" | `FL stop --all` |
 
@@ -76,7 +77,8 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 | 「为什么买 X」 | 读它自己为那笔交易写的笔记并解释 |
 | 「关掉兜底」/「打开兜底」 | `FL stop <name>`，再 `FL start <name> --prompt strategy.md --no-autopilot`（或 `--autopilot steady`）；给出新卡片；你说「好」后重新启动。关掉意味着你不在时除了硬止损什么都不交易，当天没达到活动门槛的 agent 会在开饭时被吃掉 |
 | 「少问几次」/「每 15 分钟问一次」 | `FL every <name> 15` |
-| 「重启后也让它跑」 | `FL daemon <name> --install` |
+| 「换个便宜的模型」/「换回默认模型」 | `FL model <name> <模型>` / `FL model <name> default` |
+| 「重启后也让它跑」 | `FL daemon <name> --install`（`FL enter` 默认就会装） |
 | 「重新登录」 | `FL login`，再用 Binance Agentic Wallet 技能登录 |
 | 「彻底停止」 | `FL stop --all` |
 

@@ -27,6 +27,7 @@ import { refuseEarly } from "./early.ts";
 import { Executor } from "./executor.ts";
 import { impacts, quoteBuy, quoteSell } from "./quote.ts";
 import { ASK_EVERY_MAX, ASK_EVERY_MIN, askKeyPath, hostShown } from "./ask/host.ts";
+import { parseAnswerText, validateAnswer } from "./ask/pack.ts";
 import { gatherPack } from "./ask/gather.ts";
 import { journalPath, readAskState, readJournal } from "./ask/journal.ts";
 import { readSnapshotCache, SnapshotClient, CACHE_FRESH_MS } from "./feed/snapshot.ts";
@@ -87,7 +88,7 @@ import { noFloorTonight, readGate, SEASON_OVER_LINE, startSaysWaiting, type Gate
 import { sessionView, signInEndOf, signInLine } from "./session.ts";
 import { readVersion, versionLine, versionView } from "./version.ts";
 import { askChoice, autopilotChoice, prepareStart } from "./start.ts";
-import { agentPaths, appendJsonl, checkAgentName, leagueHome, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
+import { agentPaths, appendJsonl, checkAgentName, leagueHome, readJson, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
 import type { IntentRequest } from "./strategy.ts";
 
 const HELP = `feast-league — run a Feast agent with your Binance Agentic Wallet
@@ -129,6 +130,8 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   variable --ask-key-env names, or stored once with FL ask-key <name>)
   model <name> <model|default>    change the model the agent's AI is asked with (default: the host's own default)
   ask-key <name>                  read the endpoint's key on stdin and keep it for the agent (mode 0600; never shown)
+  answer <name> '<json>'          a host with no headless CLI answers the last FL ask <name> --print by hand (within 10 min):
+                                  the same check as an asked AI's, then the trade through FL buy's or FL sell's road
   every <name> <minutes>          change how often the agent is asked
   ask <name> [--print] [--json]   one ask now, into the running agent; --print: the exact pack it would send, nothing sent
   quote --coin <0x…|FEAST> --bnb <n> [--sell] [--fraction f] [--json]
@@ -698,29 +701,33 @@ async function main(argv: string[]): Promise<number> {
         command === "buy"
           ? { kind: "buy" as const, coin, bnb: Number(amount), reason: "manual buy" }
           : { kind: "sell" as const, coin, fraction: amount === "all" ? 1 : Number(amount), reason: "manual sale" };
-      // A trade by the user's own agent holds back the autopilot (task 963): the runtime writes it down when the guard
-      // lets it through (task 975, ruling C6), so a refused one does not count.
-      // The limits that need no wallet are checked before anything is asked of the wallet.
-      const early = refuseEarly(home, agent, request);
-      if (early) {
-        appendJsonl(agentPaths(home, name).log, { at: new Date().toISOString(), event: "intent.refused", source: "manual", limit: early.limit, message: early.message, before: "any wallet call" });
-        print(json, { ok: false, refused: early }, () => `refused by ${early.limit}: ${early.message} (nothing was asked of the wallet)`);
+      return manualTrade(home, name, agent, request, json, values["no-wait"] === true);
+    }
+    case "answer": {
+      // Addendum 11 (the Grok Bot routine): the host's own answer to the last `FL ask <name> --print`, checked as the
+      // runtime checks an asked AI's (the pack's ids, the cap), then made through FL buy's and FL sell's road.
+      const name = notEntry(need(args[0], "an agent name"));
+      const agent = loadAgent(home, name);
+      if (!agent?.confirmed || agent.track !== "prompt") throw new Error(`"${name}" is not a confirmed prompt agent`);
+      const printed = readPrinted(home, name);
+      if (!printed || Date.now() - printed.at > PRINTED_MAX_AGE_MS) {
+        const line = `no fresh pack: run FL ask ${name} --print first (a pack answers for 10 minutes)`;
+        print(json, { ok: false, error: line }, () => line);
         return 2;
       }
-      if (statusOf(home, name).running) {
-        const sent = sendRequest(home, name, request);
-        if (values["no-wait"]) {
-          print(json, { ok: true, queued: true, requestId: sent.requestId }, () => `queued for the running agent "${name}"; feast-league status ${name}`);
-          return 0;
-        }
-        const outcome = await waitForOutcome(home, name, sent);
-        const line = outcomeLine(outcome, name);
-        print(json, { ok: line.code === 0, requestId: sent.requestId, outcome }, () => line.text);
-        return line.code;
+      const checked = validateAnswer(parseAnswerText(need(args[1], "the answer: one JSON object in the pack's schema")), { ids: new Map(printed.ids), maxBuyBnb: printed.maxBuyBnb });
+      if (!checked.ok) {
+        print(json, { ok: false, refused: checked.why, pack: printed.digest }, () => `not taken: ${checked.why} (pack ${printed.digest})`);
+        return 2;
       }
-      const outcome = await runAgent({ home, name, signer: signerFor(home, name), rpcUrl: rpc(), only: [request] });
-      console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
-      return outcome.exit === "finished" ? 0 : 2;
+      const d = checked.decision;
+      appendJsonl(agentPaths(home, name).log, { at: new Date().toISOString(), event: "answer.taken", pack: printed.digest, action: d.action, coin: d.coin, amountBnb: d.amountBnb, fraction: d.fraction });
+      if (d.action === "hold") {
+        print(json, { ok: true, action: "hold", pack: printed.digest }, () => `hold: nothing traded (pack ${printed.digest})`);
+        return 0;
+      }
+      const request = d.action === "buy" ? { kind: "buy" as const, coin: d.coin!, bnb: d.amountBnb!, reason: `answer: ${d.reason}` } : { kind: "sell" as const, coin: d.coin!, fraction: d.fraction!, reason: `answer: ${d.reason}` };
+      return manualTrade(home, name, agent, request, json, values["no-wait"] === true);
     }
     case "data": {
       const signer = signerFor(home, null);
@@ -868,6 +875,8 @@ async function main(argv: string[]): Promise<number> {
         const g = readGate(home, name);
         const opensAt = g?.opensAt ? Date.parse(g.opensAt) : null;
         const gathered = await gatherPack({ home, agent, now: Date.now(), wallet, chain, snapshot, fetch, site: siteFromEnv(), gate: { opensAt, open: g ? g.state === "open" : !agent.league?.waitForSeason, noFloorTonight: noFloorTonight(g, Date.now()), signInEndsAt: signInEndOf(home, name) }, feast: MAINNET.platformCoin?.address ?? null, impacts: impacts(quoter, chain) });
+        // Addendum 11: its ids kept 10 minutes, for `FL answer <name> '<json>'` (a host with no headless CLI answers by hand).
+        writeJsonAtomic(join(agentPaths(home, name).dir, "printed-pack.json"), { at: Date.now(), digest: gathered.pack.digest, maxBuyBnb: gathered.pack.maxBuyBnb, ids: [...gathered.pack.ids.entries()] });
         print(json, { ok: true, digest: gathered.pack.digest, chars: gathered.pack.text.length, requests: gathered.requests, pack: gathered.pack.text }, () => gathered.pack.text);
         return 0;
       }
@@ -974,6 +983,41 @@ async function main(argv: string[]): Promise<number> {
       console.error(`unknown command "${command}"\n\n${HELP}`);
       return 1;
   }
+}
+
+/** The last `FL ask --print`'s ids (addendum 11), and how long an answer to it is taken. */
+const PRINTED_MAX_AGE_MS = 10 * 60_000;
+function readPrinted(home: string, name: string): { at: number; digest: string; maxBuyBnb: number; ids: [string, { coin: Address; symbol: string | null; held: boolean }][] } | null {
+  const got = readJson<{ at?: unknown; digest?: unknown; maxBuyBnb?: unknown; ids?: unknown }>(join(agentPaths(home, name).dir, "printed-pack.json"));
+  if (!got || typeof got.at !== "number" || typeof got.digest !== "string" || typeof got.maxBuyBnb !== "number" || !Array.isArray(got.ids)) return null;
+  return got as never;
+}
+
+/** FL buy's and FL sell's road (and FL answer's): the early refusals, then the running agent's inbox or a one-shot. */
+async function manualTrade(home: string, name: string, agent: AgentConfig, request: IntentRequest, json: boolean, noWait: boolean): Promise<number> {
+  // A trade by the user's own agent holds back the autopilot (task 963): the runtime writes it down when the guard
+  // lets it through (task 975, ruling C6), so a refused one does not count.
+  // The limits that need no wallet are checked before anything is asked of the wallet.
+  const early = refuseEarly(home, agent, request);
+  if (early) {
+    appendJsonl(agentPaths(home, name).log, { at: new Date().toISOString(), event: "intent.refused", source: "manual", limit: early.limit, message: early.message, before: "any wallet call" });
+    print(json, { ok: false, refused: early }, () => `refused by ${early.limit}: ${early.message} (nothing was asked of the wallet)`);
+    return 2;
+  }
+  if (statusOf(home, name).running) {
+    const sent = sendRequest(home, name, request);
+    if (noWait) {
+      print(json, { ok: true, queued: true, requestId: sent.requestId }, () => `queued for the running agent "${name}"; feast-league status ${name}`);
+      return 0;
+    }
+    const outcome = await waitForOutcome(home, name, sent);
+    const line = outcomeLine(outcome, name);
+    print(json, { ok: line.code === 0, requestId: sent.requestId, outcome }, () => line.text);
+    return line.code;
+  }
+  const outcome = await runAgent({ home, name, signer: signerFor(home, name), rpcUrl: rpc(), only: [request] });
+  console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
+  return outcome.exit === "finished" ? 0 : 2;
 }
 
 /** The machine's supervisor for FL daemon and FL enter's last step (addendum 11): launchctl or systemctl, as a child. */
