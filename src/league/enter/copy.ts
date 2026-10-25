@@ -286,7 +286,7 @@ export function strategyLine(view: StrategyShown, name: string, lang: Lang): str
 }
 
 /** The entry card: the Register signature, the notes signature, and the agent's start, under one yes. */
-export function entryCard(view: { agentId: string; season: number; notes: boolean; agent: string | null; wallet?: string; seasonOn?: boolean }, lang: Lang): string {
+export function entryCard(view: { agentId: string; season: number; notes: boolean; agent: string | null; wallet?: string; seasonOn?: boolean; ref?: string | null }, lang: Lang): string {
   const zh = lang === "zh";
   const who = shownName(view.agentId);
   const rows: [string, string][] = [
@@ -294,6 +294,8 @@ export function entryCard(view: { agentId: string; season: number; notes: boolea
     [zh ? "消息里有" : "It carries", zh ? `这个钱包、Agent ID ${who}、一段空的公开宣言、签名时间（EIP-712 Register）` : `this wallet, the Agent ID ${who}, an empty public manifesto, the time (EIP-712 Register)`],
     [zh ? "发送到" : "Sent to", zh ? "feast.meme（/api/league/register）" : "feast.meme (/api/league/register)"],
   ];
+  // Addendum 12: the tutorial's referral code goes beside the signature, never in it.
+  if (view.ref) rows.push([zh ? "推荐码" : "Referral", zh ? `${view.ref}：随报名一起发送（不签进消息）` : `${view.ref}: sent with the registration (not part of the signed message)`]);
   if (view.notes) rows.push([zh ? "然后" : "Then", zh ? `再签一条消息，开通 ${who} 第 ${view.season} 季的笔记会话（EIP-712 NoteSession），同一个「好」` : `one more message, under the same yes, that opens ${who}'s notes session for season ${view.season} (EIP-712 NoteSession)`]);
   if (view.agent)
     rows.push([
@@ -380,6 +382,11 @@ export function daemonLine(name: string, lang: Lang): string {
 /** Addendum 11: the player said no to the daemon. */
 export function noDaemonLine(name: string, lang: Lang): string {
   return lang === "zh" ? `没有装守护进程：这台电脑重启后，运行 \`FL start ${name}\`。` : `No daemon: after this machine restarts, run \`FL start ${name}\`.`;
+}
+
+/** Addendum 12: a code given once the wallet is registered: a referral goes with the registration only. */
+export function refNotSent(ref: string, lang: Lang): string {
+  return lang === "zh" ? `推荐码 ${ref} 没有发送：这个钱包已经报名，推荐码只能随报名一起发送。` : `The referral code ${ref} was not sent: this wallet is registered already, and a code goes with the registration only.`;
 }
 
 export function alreadyRunning(name: string, lang: Lang): string {

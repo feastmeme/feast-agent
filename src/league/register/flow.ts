@@ -146,7 +146,7 @@ export async function check(deps: FlowDeps, options: { named?: string | null } =
   };
 }
 
-export type Prepared = { fields: RegisterFields; bodyCoin: CoinShown | null; xHandle: string | null; view: RegisterView };
+export type Prepared = { fields: RegisterFields; bodyCoin: CoinShown | null; xHandle: string | null; view: RegisterView; /** Addendum 12: `FL enter --ref`, sent beside the signature, never signed. */ ref?: string | null };
 
 export type PrepareProblem =
   | { kind: "manifesto"; reason: Extract<Manifesto, { ok: false }>["reason"]; length: number }
@@ -225,8 +225,10 @@ export async function submit(deps: FlowDeps, prepared: Prepared, options: SignOp
     ...(bare.length === 128 && signed.recovery !== null ? { signature: bare, signatureRecovery: signed.recovery } : { signature: joined }),
     ...(prepared.bodyCoin ? { bodyCoin: prepared.bodyCoin.coin.toLowerCase() } : {}),
     ...(prepared.xHandle ? { xHandle: prepared.xHandle } : {}),
+    ...(prepared.ref ? { ref: prepared.ref } : {}),
   };
-  deps.log?.("register.sent", { issuedAt: fields.issuedAt, bodyCoin: body.bodyCoin ?? null, xHandle: body.xHandle !== undefined });
+  // Whether a referral went with it, never the code (it is kept in one place: the entry's record).
+  deps.log?.("register.sent", { issuedAt: fields.issuedAt, bodyCoin: body.bodyCoin ?? null, xHandle: body.xHandle !== undefined, ref: body.ref !== undefined });
   let answer = await deps.site.register(body);
   let reconciled: boolean | null = null;
   // A lost answer, a replay, or a 5xx (the route's last 503 comes after its save is tried): did it land?

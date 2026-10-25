@@ -62,6 +62,8 @@ export type RegisterBody = {
   signatureRecovery?: string;
   bodyCoin?: string;
   xHandle?: string;
+  /** Addendum 12: a tutorial's referral code (or a wallet), an unsigned claim like `xHandle`; the site's web field name. */
+  ref?: string;
 };
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);

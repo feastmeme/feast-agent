@@ -153,6 +153,8 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   enter --name <id>.ai [--prompt <strategy.md>] [--meme "<concept>"] [--image <path>] [--no-start] [--yes] [--lang en|zh] [--json]
         [--coin-name "<…feed>" --symbol T --description "…"] [--autopilot <preset> | --no-autopilot] [--idle-minutes N]
         [--agent <name>] [--host <claude|codex|grok|other|gemini|cursor|opencode|openai>] [--no-jitter] [--no-daemon]
+        [--ref <code>]                  a tutorial's referral code (or the pasted line with ?ref=<code> or ref: <code>):
+                                  sent with the registration, unsigned; FL status shows it
                                   one command enters the league and runs your AI: one card and one yes sign the league's
                                   Register (no coin needed, no gas) and the notes session, then start the agent detached,
                                   waiting for the season: it trades nothing before. Without --prompt, the season-1 default
@@ -255,6 +257,8 @@ async function main(argv: string[]): Promise<number> {
       status: { type: "boolean", default: false },
       supervised: { type: "boolean", default: false },
       "no-daemon": { type: "boolean", default: false },
+      // Addendum 12: a tutorial's referral code (bare, or the pasted line).
+      ref: { type: "string" },
       coin: { type: "string" },
       bnb: { type: "string" },
       home: { type: "string" },
@@ -554,6 +558,8 @@ async function main(argv: string[]): Promise<number> {
         runtime: release,
         // Addendum 11: alive since, and the last tick.
         alive: readAlive(home, name),
+        // Addendum 12: the referral code sent with the registration, from the entry's record (kept nowhere else).
+        referral: readEntry(home)?.ref ?? null,
         signInEndsAt: signInEnd === null ? null : new Date(signInEnd).toISOString(),
       };
       const gate = data.season;
@@ -610,6 +616,7 @@ async function main(argv: string[]): Promise<number> {
           ...(s.agent!.track === "prompt" && !mine?.day && noFloorTonight(gate?.at ? (gate as GateState) : null, Date.now()) ? ["warm-up tonight: no floor (the warm-up dinner eats nobody); the floor counts from tomorrow"] : []),
           ...(versionLine(release) ? [versionLine(release)!] : []),
           ...(s.agent!.track !== "entry" && signInLine(signInEnd, utc8) ? [signInLine(signInEnd, utc8)!] : []),
+          ...(data.referral ? [`referral: ${data.referral} (sent with the registration)`] : []),
           // It runs on this machine: say so, and when it last slept (task 975, addendum 3).
           ...(s.agent!.track !== "entry" ? [awakeLine(lang)] : []),
           ...(sleptAt ? [`slept ${sleptAt.minutes} minutes at ${utc8(sleptAt.at)} UTC+8: nothing traded while it slept`] : []),
@@ -1131,6 +1138,7 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       askBaseUrl: str(values["ask-base-url"]),
       askKeyEnv: str(values["ask-key-env"]),
       noDaemon: values["no-daemon"] === true,
+      ref: str(values.ref),
       idleMinutes: idle !== undefined ? Number(idle) : undefined,
       noJitter: values["no-jitter"] === true,
       meme: concept !== undefined ? { concept, name: str(values["coin-name"]), symbol: str(values.symbol), description: str(values.description), image: str(values.image) } : undefined,

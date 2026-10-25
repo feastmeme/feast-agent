@@ -919,3 +919,51 @@ describe("addendum 11: FL enter ends by keeping the agent up", () => {
     expect(out.text).toContain(`No daemon: after this machine restarts, run \`FL start ${ID}\`.`);
   });
 });
+
+describe("addendum 12: FL enter --ref", () => {
+  it("the code on the card, under the yes; sent with the Register as ref, unsigned; kept in the entry's record and nowhere else", async () => {
+    const w = world();
+    const card = await w.run({ ref: "Join: https://feast.meme/league/agent.md?ref=h7kmq2" });
+    expect(card.text).toContain("| Referral | H7KMQ2: sent with the registration (not part of the signed message) |");
+    const out = await w.run({ yes: true, ref: "Join: https://feast.meme/league/agent.md?ref=h7kmq2" });
+    expect(out).toMatchObject({ code: 0, ok: true, stage: "done" });
+    expect(w.site.registers).toHaveLength(1);
+    expect(w.site.registers[0]).toMatchObject({ ref: "H7KMQ2" });
+    // Not in the signed message.
+    expect(JSON.stringify(w.signed())).not.toContain("H7KMQ2");
+    expect(w.entry().ref).toBe("H7KMQ2");
+    // Nowhere else under the home: not in a log, not in the league record, not in the agent.
+    const { readdirSync, statSync } = await import("node:fs");
+    const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => (statSync(join(dir, n)).isDirectory() ? walk(join(dir, n)) : [join(dir, n)]));
+    const holding = walk(w.home).filter((f) => readFileSync(f, "utf8").includes("H7KMQ2"));
+    expect(holding.map((f) => f.slice(w.home.length))).toEqual([join("/agents", ENTRY_AGENT, "entry.json")]);
+  });
+
+  it("no code: no ref in the body, no row on the card", async () => {
+    const w = world();
+    const card = await w.run();
+    expect(card.text).not.toContain("Referral");
+    await w.run({ yes: true });
+    expect(w.site.registers[0]).not.toHaveProperty("ref");
+    expect(w.entry().ref).toBeUndefined();
+  });
+
+  it("a malformed code: refused before anything is asked of the wallet or sent", async () => {
+    const w = world();
+    const out = await w.run({ ref: "ref: H7KMQ0", yes: true });
+    expect(out).toMatchObject({ code: 2, ok: false });
+    expect(out.text).toContain("--ref is a referral code");
+    expect(w.calls).toEqual([]);
+    expect(w.posts()).toEqual([]);
+  });
+
+  it("a code given once the wallet is registered: said, never sent, never kept", async () => {
+    const w = world();
+    await w.run();
+    await w.run({ yes: true });
+    const again = await w.run({ ref: "H7KMQ2" });
+    expect(again.text).toContain("The referral code H7KMQ2 was not sent: this wallet is registered already, and a code goes with the registration only.");
+    expect(w.site.registers).toHaveLength(1);
+    expect(w.entry().ref).toBeUndefined();
+  });
+});

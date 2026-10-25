@@ -28,6 +28,7 @@ import { upgradeSentence, versionView } from "../version.ts";
 import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { composeMeme, hostPicture, type Meme } from "./meme.ts";
+import { parseRef } from "./ref.ts";
 import { ensureStrategy } from "./strategy.ts";
 
 /**
@@ -122,6 +123,8 @@ export type EnterInput = {
   askKeyEnv?: string;
   /** Addendum 11: the player said no to the daemon. */
   noDaemon?: boolean;
+  /** Addendum 12: a tutorial's referral code: bare, or the pasted line with `?ref=<code>` or `ref: <code>`. */
+  ref?: string;
   idleMinutes?: number;
   noJitter?: boolean;
   meme?: MemeInput;
@@ -142,6 +145,8 @@ export type EntryRecord = {
   buy?: { coin: Address; txHash: Hex; bnb: number; usdtAtBuy?: number; at: string } | null;
   /** Task 968: the Register the site keeps for this season; `seat` null while the site has not given one. */
   registered?: { season: number; issuedAt: number; seat: number | null; founding: number | null; at: string } | null;
+  /** Addendum 12: the referral code sent with the registration (`FL enter --ref`); here and nowhere else. */
+  ref?: string | null;
   /** Task 968: the meme launched with `--meme` or `FL meme`. */
   meme?: { coin: Address; symbol: string; name: string; txHash: Hex | null; concept: string } | null;
   /** Task 968: the trading agent the entry started. */
@@ -220,6 +225,13 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   if (!choice.ok) return end(2, false, "plan", choice.error);
   const asked = askChoice({ noAutopilot: input.noAutopilot, every: input.every, askWith: input.askWith, askModel: input.askModel, askBaseUrl: input.askBaseUrl, askKeyEnv: input.askKeyEnv, host: modelHint(), detail: hostDetailHint() });
   if (!asked.ok) return end(2, false, "plan", asked.error);
+  // Addendum 12: a tutorial's referral code, bare or in the pasted line; a malformed one stops here, nothing asked or sent.
+  const refRead = parseRef(input.ref);
+  if (!refRead.ok) return end(2, false, "input", refRead.reason);
+  const ref = refRead.ref;
+  let refSent = false;
+  /** A code given when the registration is already behind this wallet: said, never sent, never kept. */
+  const refLate = () => (ref && !refSent && readEntry(deps.home)?.ref !== ref ? [copy.refNotSent(ref, lang)] : []);
   let agentName: string | null = null;
   if (startWanted) {
     if (input.agent !== undefined) {
@@ -329,8 +341,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const refused = planOnce();
     if (refused) return refused;
     const head = copy.alreadyEntered({ agentId: given, coin: record!.bodyCoin, notes: record!.notes ?? null, season: record!.registered?.season ?? null, seat: record!.registered?.seat ?? null }, lang);
-    if (!planned) return end(0, true, "entered", [head, ...(input.memeOnly ? [] : [copy.doneLine(lang)])], { agentId: given, bodyCoin: record!.bodyCoin, notes: record!.notes ?? null });
-    if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
+    if (!planned) return end(0, true, "entered", [head, ...refLate(), ...(input.memeOnly ? [] : [copy.doneLine(lang)])], { agentId: given, bodyCoin: record!.bodyCoin, notes: record!.notes ?? null });
+    if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, ...refLate(), copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     const rerunRead = await deps.site.league("today", null).catch(() => null);
     const opens = tradingOpens(rerunRead);
     const upgrade = upgradeSentence(versionView(rerunRead?.latestRuntime, now()), lang);
@@ -338,11 +350,11 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (planned.needsYes) {
       const digest = sha256(JSON.stringify({ stage: "start", agentId: given, start: planned.shape }));
       if (!yesFor("start", digest)) {
-        lines.push(head);
+        lines.push(head, ...refLate());
         return ask("start", digest, [copy.startCard(lang), "", copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot, signInEnd }, lang)].join("\n"), { agent: planned.name });
       }
     }
-    lines.push(head, ...(await startStep()));
+    lines.push(head, ...refLate(), ...(await startStep()));
     return end(0, true, "done", copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade), { agent: planned.name });
   }
 
@@ -414,6 +426,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const registeredFrom = (kept: KeptAgent): NonNullable<EntryRecord["registered"]> => ({ season: kept.season ?? season, issuedAt: kept.issuedAt, seat: kept.seatNo, founding: kept.foundingNo, at: new Date(now()).toISOString() });
   const agentSection = () => (planned ? copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot, signInEnd }, lang) : null);
   const finish = async (): Promise<EnterResult> => {
+    lines.push(...refLate());
     if (planned) lines.push(...(await startStep()));
     lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade) : copy.doneLine(lang));
     if (composed) return memeStep(composed);
@@ -518,9 +531,10 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   }
 
   // --- the entry card: the Register signature, the notes, the start, under one yes ---------------------------
-  const digest = sha256(JSON.stringify({ stage: "register", agentId, season, notes: dev ? "dev" : season, start: planned?.shape ?? null }));
+  // The yes covers the referral code too: it is in the card and in its digest.
+  const digest = sha256(JSON.stringify({ stage: "register", agentId, season, notes: dev ? "dev" : season, start: planned?.shape ?? null, ...(ref ? { ref } : {}) }));
   if (!yesFor("register", digest)) {
-    const card = [copy.entryCard({ agentId, season, notes: !dev, agent: planned?.name ?? null, wallet, seasonOn: opens.kind === "open" }, lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
+    const card = [copy.entryCard({ agentId, season, notes: !dev, agent: planned?.name ?? null, wallet, seasonOn: opens.kind === "open", ref }, lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
     return ask("register", digest, card, { season, agent: planned?.name ?? null, opens: opens.kind === "at" ? new Date(opens.at).toISOString() : opens.kind });
   }
   confirmEntry();
@@ -530,7 +544,9 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     bodyCoin: null,
     xHandle: null,
     view: { agentId, bodyCoin: null, manifesto: "", length: 0, xHandle: null, issuedAt, replaces: kept.agent ? { issuedAt: kept.agent.issuedAt, seated: kept.agent.seatNo !== null } : null },
+    ref,
   };
+  refSent = ref !== null;
   const flowDeps: FlowDeps = { home: deps.home, name: ENTRY_AGENT, signer: deps.signer, chain: deps.chain, site: deps.site, now, log };
   const outcome = await submit(flowDeps, prepared, deps.signOptions);
   if (outcome.kind === "not-signed") {
@@ -553,7 +569,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (again.state === "read" && again.agent && again.agent.agentId === agentId && again.agent.seatNo !== null) seating = { kind: "seated", seatNo: again.agent.seatNo, founding: again.agent.founding, foundingNo: again.agent.foundingNo, waitlisted: again.agent.waitlisted, place: null };
   }
   const coin = answer.agent?.bodyCoin ?? null;
-  save({ ...base(), registered: { season: answer.agent?.season ?? season, issuedAt, seat: seating.kind === "seated" ? seating.seatNo : null, founding: seating.kind === "seated" ? seating.foundingNo : null, at: new Date(now()).toISOString() }, bodyCoin: base().bodyCoin ?? coin });
+  save({ ...base(), registered: { season: answer.agent?.season ?? season, issuedAt, seat: seating.kind === "seated" ? seating.seatNo : null, founding: seating.kind === "seated" ? seating.foundingNo : null, at: new Date(now()).toISOString() }, bodyCoin: base().bodyCoin ?? coin, ...(ref ? { ref } : {}) });
   if (seating.kind === "seated") {
     lines.push(seatedLine(seating, agentId, season, lang));
     lines.push(await notesStep());

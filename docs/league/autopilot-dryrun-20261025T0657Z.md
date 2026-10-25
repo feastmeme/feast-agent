@@ -121,8 +121,8 @@ Enter maplegrin.ai in season 1
 | Then | one more message, under the same yes, that opens maplegrin.ai's notes session for season 1 (EIP-712 NoteSession) |
 | Last | your agent "maplegrin" starts and waits for the season (its card is below) |
 | Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |
-| Register | wallet `0xA669…c4d0`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
-| NoteSession | wallet `0xA669…c4d0`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
+| Register | wallet `0x0859…dc29`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
+| NoteSession | wallet `0x0859…dc29`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
 ```
 ### `FL enter --name maplegrin.ai --lang en`, before the season (Saturday): the agent section under the entry card
 
@@ -187,13 +187,13 @@ Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at m
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
 To stop: say "stop", or run `feast-league stop maplegrin` (or create the file STOP in the agent's folder).
 
-Starts now and waits for the season: it trades nothing before 2026-10-28 20:00 UTC+8.
+Starts now and waits for the season: it trades nothing before 2026-10-27 21:00 UTC+8.
 Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
 ```
 ### `FL enter … --yes --lang en`, before the season (Saturday): the last line
 
 ```text
-You're in, and maplegrin is running: it waits for the season and trades from 2026-10-28 20:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
+You're in, and maplegrin is running: it waits for the season and trades from 2026-10-27 21:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30,"ask":{"every":5,"with":"claude"}}`
 ### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the entry card's table, with the signing domain and both messages' fields
@@ -209,8 +209,8 @@ maplegrin.ai 报名第 1 季
 | 然后 | 再签一条消息，开通 maplegrin.ai 第 1 季的笔记会话（EIP-712 NoteSession），同一个「好」 |
 | 最后 | 启动你的 agent「maplegrin」，等待赛季开始（它的卡片在下面） |
 | 签名域 | EIP-712 typed data（V4）：name `Feast League`，version `1`，chainId `56`（BNB Smart Chain），没有 verifying contract |
-| Register | wallet `0x0A0D…e509`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
-| NoteSession | wallet `0x0A0D…e509`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
+| Register | wallet `0x55D0…1388`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
+| NoteSession | wallet `0x55D0…1388`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
 ```
 ### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the agent section under the entry card
 
@@ -275,13 +275,13 @@ Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at m
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
 To stop: say "stop", or run `feast-league stop maplegrin` (or create the file STOP in the agent's folder).
 
-现在就启动，等待赛季开始：2026-10-28 20:00（UTC+8）之前它不做任何交易。
+现在就启动，等待赛季开始：2026-10-27 21:00（UTC+8）之前它不做任何交易。
 它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。
 ```
 ### `FL enter … --yes --lang zh`, before the season (Saturday): the last line
 
 ```text
-你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-28 20:00（UTC+8）起交易。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
+你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-27 21:00（UTC+8）起交易。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
 ```
 `FL enter --json`'s `autopilot`: `{"preset":"steady","idleMinutes":30,"ask":{"every":5,"with":"claude"}}`
 ### `FL enter --name maplegrin.ai --lang en`, once the season is on (Thursday 14:00 UTC+8): the last row of the entry card, and the lines under the agent's card
@@ -430,17 +430,15 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
 
 
-## (g) Entered on Saturday, the host quiet since: the opening instant, Wednesday 20:00 UTC+8
+## (g) Entered on Saturday, the host quiet since: the opening instant, the season's start, Tuesday 21:00 UTC+8
 
-- 20:00 `season.open`
-- 20:00 `autopilot.on` (preset steady, idle 30 min)
+- 21:00 `season.open`
+- 21:00 `autopilot.on` (preset steady, idle 30 min)
 
 | time (UTC+8) | by | side | coin | BNB | the day's count after it |
 | --- | --- | --- | --- | --- | --- |
-| 21:00 | steady | buy | NOODFEED 0x0000…c0e1 | 0.006 | 1 trade, 0.006 BNB: not yet |
-| 21:15 | steady | buy | KOIFEED 0x0000…c0e2 | 0.006 | 2 trades, 0.012 BNB: not yet |
 
-The silence counts from the yes, so the backup is on at the opening instant (here with `--no-jitter`; `FL enter` starts with the jitter, 0–120 s). The opening hour is the last hour before dinner 1, the warm-up dinner: it eats nobody and asks no floor (addendum 8), so the backup stands on but makes no trade for the floor; the league's clock says which dinner it is (`warmUpDinnerAt` in `season.json`), never a date. From the next day the floor counts.
+The silence counts from the yes, so the backup is on at the opening instant (here with `--no-jitter`; `FL enter` starts with the jitter, 0–120 s). Trading opens at the season's start (addendum 12), a day before dinner 1, the warm-up dinner: it eats nobody and asks no floor (addendum 8), so all that first day the backup stands on but makes no trade for the floor; the league's clock says which dinner it is (`warmUpDinnerAt` in `season.json`), never a date. From the next day the floor counts.
 
 ## (h) The ask loop's words: the card and the "You're in" line under Claude Code
 
@@ -453,12 +451,12 @@ Floor keeper: the steady preset (Steady floor keeper) trades only when Claude Co
 ### `FL enter … --yes --lang en`, before the season: the last line
 
 ```text
-You're in, and maplegrin is running: it waits for the season and trades from 2026-10-28 20:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
+You're in, and maplegrin is running: it waits for the season and trades from 2026-10-27 21:00 UTC+8. Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.
 ```
 ### `FL enter … --yes --lang zh`, before the season: the last line
 
 ```text
-你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-28 20:00（UTC+8）起交易。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
+你已报名，「maplegrin」正在运行：它等待赛季开始，从 2026-10-27 21:00（UTC+8）起交易。它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。如果它停了，运行 `FL start maplegrin`。改了 strategy.md 之后，`FL start maplegrin --prompt strategy.md` 会给出新卡片，需要你说「好」。
 ```
 ### `FL enter … --yes --lang en`, once the season is on: the last line
 
@@ -660,13 +658,13 @@ The release is told once a league day: once before 21:00 UTC+8 and once after it
 ## (n) The warm-up dinner: day 1, the AI only holds, the floor unmet at 20:40 UTC+8
 
 
-The same hour as (k), a day earlier: no `autopilot.on`, 0 fills. 12 asks; the last pack's floor line:
+The same hour as (k), a day earlier: no `autopilot.on`, 0 fills. 14 asks; the last pack's floor line:
 
 ```text
 today's floor: warm-up tonight: no floor. Tonight's dinner is the warm-up and eats nobody; from tomorrow the floor is 3 trades and 0.02 BNB a day (buys and sells of any Feast coin count, your own coin left out). So far today: 0 trades, 0 BNB.
 ```
 
-`season.json`: {"state":"open","opensAt":"2026-10-28T12:00:00.000Z","warmUpDinnerAt":"2026-10-28T13:00:00.000Z","day":1}
+`season.json`: {"state":"open","opensAt":"2026-10-28T11:50:00.000Z","warmUpDinnerAt":"2026-10-28T13:00:00.000Z","day":1}
 
 ## (o) Killed between the send and the receipt, then restarted
 

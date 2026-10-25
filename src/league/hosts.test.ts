@@ -183,3 +183,22 @@ describe("the entry's line names the new hosts", () => {
   });
 });
 
+
+describe("addendum 12: the referral code in FL status", () => {
+  it("shown from the entry's record; absent, no line", async () => {
+    const { prompt, home, env } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    expect((await run(["status", "demo", "--no-league"], env)).stdout).not.toContain("referral:");
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(agentPaths(home, "league-entry").dir, { recursive: true });
+    writeFileSync(join(agentPaths(home, "league-entry").dir, "entry.json"), JSON.stringify({ agentId: "maplegrin", bodyCoin: null, launchTx: null, ref: "H7KMQ2" }));
+    const status = await run(["status", "demo", "--no-league"], env);
+    expect(status.stdout).toContain("referral: H7KMQ2 (sent with the registration)");
+    expect(JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout)).toMatchObject({ referral: "H7KMQ2" });
+    const bad = await run(["enter", "--name", "maplegrin.ai", "--ref", "nope!"], env);
+    expect(bad.code).toBe(2);
+    expect(bad.stdout).toContain("--ref is a referral code");
+  }, 60_000);
+});

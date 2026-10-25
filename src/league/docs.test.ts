@@ -576,3 +576,20 @@ describe("task 975, addendum 11: the continuity package (league-v5.1)", () => {
     for (const word of ["--ask-with gemini", "--ask-with cursor", "--ask-with openai", "FL ask-key", "x-feast-host-detail", "FL model", "--no-daemon", "schtasks", "alive since", "⏰ 登录到期", "`minSupported` stays `league-v4`"]) expect(v51, word).toContain(word);
   });
 });
+
+describe("task 975, addendum 12: trading opens at the start; FL enter --ref", () => {
+  it("no copy a player reads says Wednesday 20:00 or an hour before the first dinner", () => {
+    for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md", "plans/league-autopilot/grok-bot-rehearsal.md", "docs/league/release-v5.1.md"]) expect(read(file), file).not.toMatch(/10\/28[ ,]*20:00|Wednesday 20:00|Wed 10\/28 20:00|an hour before the first dinner|one hour before the first dinner/);
+    expect(read("plans/league-autopilot/grok-bot-rehearsal.md")).toContain("season starts and trading opens Tue 10/27 21:00 UTC+8");
+  });
+
+  it("SKILL says how a tutorial's code is passed; the CHANGELOG and the site patch say the rest", () => {
+    const skill = read("skills/feast-league/SKILL.md");
+    expect(skill).toContain("add `--ref <code>` to that command");
+    expect(skill).toContain('"referral: <code> (sent with the registration)"');
+    const log = read("docs/CHANGELOG.md");
+    expect(log.slice(log.indexOf("## league-v5.1"), log.indexOf("## league-v5\n"))).toContain("`FL enter --ref <code>`");
+    const patch = read("plans/league-autopilot/out-of-surface/register-ref.md");
+    for (const piece of ["ALTER TABLE league_agents ADD COLUMN IF NOT EXISTS ref text NULL;", "normalizeReferralCode(record.ref)", "REF = COALESCE(LEAGUE_AGENTS.REF, EXCLUDED.REF)"]) expect(patch, piece).toContain(piece);
+  });
+});
