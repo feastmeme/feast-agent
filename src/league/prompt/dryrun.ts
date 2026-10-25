@@ -534,14 +534,14 @@ async function requests(): Promise<void> {
 // --- (g) entered days ahead: the opening instant ----------------------------------------------------------------
 
 async function opening(): Promise<void> {
-  section("(g) Entered on Saturday, the host quiet since: the opening instant, Wednesday 20:00 UTC+8");
-  const opensAt = Date.parse("2026-10-28T12:00:00Z");
+  section("(g) Entered on Saturday, the host quiet since: the opening instant, the season's start, Tuesday 21:00 UTC+8");
+  const opensAt = Date.parse("2026-10-27T13:00:00Z");
   const s = scene(opensAt - 10 * MIN, { confirmedAt: Date.parse("2026-10-24T13:00:00Z"), league: () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(Date.parse("2026-10-27T13:00:00Z")).toISOString() } }) });
   await run(s, opensAt + 90 * MIN);
   events(s.home, ["season.open", "autopilot.on"]);
   say("");
   fillTable(fills(s.home));
-  say("\nThe silence counts from the yes, so the backup is on at the opening instant (here with `--no-jitter`; `FL enter` starts with the jitter, 0–120 s). The opening hour is the last hour before dinner 1, the warm-up dinner: it eats nobody and asks no floor (addendum 8), so the backup stands on but makes no trade for the floor; the league's clock says which dinner it is (`warmUpDinnerAt` in `season.json`), never a date. From the next day the floor counts.");
+  say("\nThe silence counts from the yes, so the backup is on at the opening instant (here with `--no-jitter`; `FL enter` starts with the jitter, 0–120 s). Trading opens at the season's start (addendum 12), a day before dinner 1, the warm-up dinner: it eats nobody and asks no floor (addendum 8), so all that first day the backup stands on but makes no trade for the floor; the league's clock says which dinner it is (`warmUpDinnerAt` in `season.json`), never a date. From the next day the floor counts.");
 }
 
 // --- addendum 8: the season's end, the warm-up dinner, a run killed mid-send ------------------------------------

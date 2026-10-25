@@ -142,7 +142,8 @@ export type BackedRow = { rank: number | null; wallet: string; name: string; hp:
 export type LeagueRead = {
   schema: number;
   state: LeagueState;
-  season: { number: number; day: number | null; countdownTo: number | null };
+  /** `tradingOpensAt` (addendum 12): the page's own opening instant, when it sends one; else undefined. */
+  season: { number: number; day: number | null; countdownTo: number | null; tradingOpensAt?: number | null };
   seats: { taken: number; cap: number; founding: number; foundingCap: number; waitlist: number } | null;
   earners: EarnerRow[];
   backed: BackedRow[];
@@ -261,7 +262,7 @@ export function parseLeague(body: unknown): LeagueRead | null {
   const read: LeagueRead = {
     schema: 2,
     state: b.state as LeagueState,
-    season: { number: num(season.number) ?? 1, day: num(season.day), countdownTo: Number.isFinite(countdown) ? countdown : null },
+    season: { number: num(season.number) ?? 1, day: num(season.day), countdownTo: Number.isFinite(countdown) ? countdown : null, ...(typeof season.tradingOpensAt === "string" && Number.isFinite(Date.parse(season.tradingOpensAt)) ? { tradingOpensAt: Date.parse(season.tradingOpensAt) } : {}) },
     seats: seats && num(seats.taken) !== null ? { taken: num(seats.taken)!, cap: num(seats.cap) ?? SEAT_CAP, founding: num(seats.founding) ?? 0, foundingCap: num(seats.foundingCap) ?? 100, waitlist: num(seats.waitlist) ?? 0 } : null,
     earners: (boards.earners ?? []).map(earnerRow).filter((r): r is EarnerRow => r !== null),
     backed: (boards.backed ?? []).map(backedRow).filter((r): r is BackedRow => r !== null),

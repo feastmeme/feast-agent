@@ -33,7 +33,7 @@ const ID = "maplegrin";
 const BODY: Address = getAddress("0x00000000000000000000000000000000000b0d1e");
 const SOMEONE: Address = getAddress("0x000000000000000000000000000000000000b0b0");
 const DAY_ONE = Date.parse("2026-10-24T13:00:00Z");
-const OPENS = "2026-10-28 20:00 UTC+8";
+const OPENS = "2026-10-27 21:00 UTC+8";
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 let dirs: string[] = [];
@@ -168,7 +168,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
     const out = await w.run({ lang: "zh" });
     expect(out.text).toContain("maplegrin.ai 报名第 1 季");
     expect(out.text).toContain("签一条消息报名本季：不是交易，不花 gas，不动资金");
-    expect(out.text).toContain("现在就启动，等待赛季开始：2026-10-28 20:00（UTC+8）之前它不做任何交易。");
+    expect(out.text).toContain("现在就启动，等待赛季开始：2026-10-27 21:00（UTC+8）之前它不做任何交易。");
   });
 
   it("--yes: one Register (empty manifesto, zero copies, the chain's id, a fresh issuedAt), one POST, one NoteSession, the agent started once; the done line", async () => {
@@ -749,7 +749,7 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
   it("zh: the entry card says it in Chinese, and so does the done line", async () => {
     const w = world();
     const card = await w.run({ lang: "zh" });
-    expect(card.text).toContain(`现在就启动，等待赛季开始：2026-10-28 20:00（UTC+8）之前它不做任何交易。\n${ON_ZH}`);
+    expect(card.text).toContain(`现在就启动，等待赛季开始：2026-10-27 21:00（UTC+8）之前它不做任何交易。\n${ON_ZH}`);
     const out = await w.run({ lang: "zh", yes: true });
     expect(lastLine(out.text)).toContain(ON_ZH);
   });

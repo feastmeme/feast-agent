@@ -9,11 +9,12 @@ import { FEAST, fakeClock, tradeWorld } from "./prompt/fakes.ts";
 import { leagueWire } from "./register/fakes.ts";
 import { parseLeague, type LeagueRead } from "./register/site.ts";
 import { runAgent } from "./runtime.ts";
-import { OPENS_AFTER_START_MS, readGate, tradingOpens } from "./season-gate.ts";
+import { utc8 } from "./register/copy.ts";
+import { readGate, tradingOpens, utc8Day, waitingStatusLine } from "./season-gate.ts";
 import { agentPaths, writeJsonAtomic } from "./store.ts";
 
 /**
- * The season gate (task 968; ruling C8): an agent `FL enter` started trades nothing until one hour before dinner 1,
+ * The season gate (task 968; ruling C8): an agent `FL enter` started trades nothing until the season starts (addendum 12),
  * then runs as `FL start` would. The loop's own fakes: a made-up wallet, a chain that fills a trade end to end, a
  * clock the loop's sleep moves, feast.meme's snapshot and its league page served in process.
  */
@@ -31,21 +32,31 @@ afterEach(() => {
 const read = (state: LeagueRead["state"], countdownTo: number | null, day: number | null = null): LeagueRead => parseLeague(leagueWire({ state, season: { number: 1, day, countdownTo: countdownTo === null ? null : new Date(countdownTo).toISOString() } }))!;
 
 describe("when trading opens, from /api/league", () => {
-  it("before the start: the start plus 23 hours (season 1: Wednesday 20:00 UTC+8)", () => {
+  it("addendum 12: before the start, at the start itself (season 1: Tuesday 10/27 21:00 UTC+8)", () => {
     const start = Date.parse("2026-10-27T13:00:00Z");
-    expect(tradingOpens(read("warm-up", start))).toEqual({ kind: "at", at: Date.parse("2026-10-28T12:00:00Z") });
-    expect(tradingOpens(read("coming-soon", start))).toEqual({ kind: "at", at: start + OPENS_AFTER_START_MS });
+    expect(tradingOpens(read("warm-up", start))).toEqual({ kind: "at", at: start });
+    expect(tradingOpens(read("coming-soon", start))).toEqual({ kind: "at", at: start });
   });
-  it("on day 1, an hour before dinner 1; from day 2, and when it is over: open", () => {
+  it("from the start on (day 1 included), and when it is over: open", () => {
     const dinner1 = Date.parse("2026-10-28T13:00:00Z");
-    expect(tradingOpens(read("season", dinner1, 1))).toEqual({ kind: "at", at: Date.parse("2026-10-28T12:00:00Z") });
+    expect(tradingOpens(read("season", dinner1, 1))).toEqual({ kind: "open" });
     expect(tradingOpens(read("season", dinner1 + 86_400_000, 2))).toEqual({ kind: "open" });
     expect(tradingOpens(read("over", null))).toEqual({ kind: "open" });
+  });
+  it("the page's own tradingOpensAt, when it sends one, is the rule", () => {
+    const at = Date.parse("2026-10-27T13:00:00Z");
+    const wire = leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: "2026-10-27T13:00:00.000Z", tradingOpensAt: "2026-10-27T13:00:00.000Z" } });
+    expect(tradingOpens(parseLeague(wire))).toEqual({ kind: "at", at });
   });
   it("no start announced, or no page: unknown, so it waits until told", () => {
     expect(tradingOpens(read("coming-soon", null))).toEqual({ kind: "unknown" });
     expect(tradingOpens(read("unavailable", null))).toEqual({ kind: "unknown" });
     expect(tradingOpens(null)).toEqual({ kind: "unknown" });
+  });
+  it("FL status's waiting line names the one instant, from the page, never a date of its own", () => {
+    expect(waitingStatusLine(Date.parse("2026-10-27T13:00:00Z"))).toBe("waiting for the season: season starts and trading opens Tue 10/27 21:00 UTC+8; it trades nothing before");
+    expect(utc8Day(Date.parse("2026-11-03T13:00:00Z"))).toBe("Tue 11/03 21:00");
+    expect(waitingStatusLine(null)).toBe("waiting for the season: it trades nothing until feast.meme announces the start");
   });
 });
 
@@ -93,7 +104,7 @@ describe("the waiting agent trades nothing", () => {
     const { home } = agent({ promptPath: join(dir, "strategy.md"), preset: "sniper", idleMinutes: 1 });
     const c = fakeClock(T0);
     const w = tradeWorld({ now: c.now });
-    // The start is tomorrow at 21:00 UTC+8 (not a dinner), so trading opens 23 hours after it: far past this hour.
+    // The start is 4 hours away, and trading opens at it (addendum 12): past this hour.
     const start = T0 + 4 * HOUR;
     const s = site(c, () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(start).toISOString() } }));
     c.at(T0 + 20 * MIN, () => inbox(home, "1-buy.json", { type: "intent", requestId: "req-1", request: { kind: "buy", coin: FEAST, bnb: 0.002, reason: "manual buy" } }));
@@ -103,12 +114,12 @@ describe("the waiting agent trades nothing", () => {
     expect(log.filter((l) => l.event.startsWith("autopilot.") || l.event.startsWith("strategy.") || l.event === "season.open")).toEqual([]);
     expect(w.calls.filter((call) => call === "preview" || call === "execute")).toEqual([]);
     const refused = log.find((l) => l.event === "request.outcome" && l.requestId === "req-1");
-    expect(refused).toMatchObject({ outcome: "refused", kind: "buy", message: "the season has not started; it opens at 2026-10-29 21:00 (UTC+8)" });
+    expect(refused).toMatchObject({ outcome: "refused", kind: "buy", message: `the season has not started; it opens at ${utc8(start)} (UTC+8)` });
     expect(Date.parse(refused!.at) - T0).toBeLessThan(21 * MIN);
     // It read the league every 5 minutes, no more.
     expect(s.leagueReads().length).toBeGreaterThanOrEqual(12);
     expect(s.leagueReads().length).toBeLessThanOrEqual(13);
-    expect(readGate(home, "maplegrin")).toMatchObject({ state: "waiting", opensAt: new Date(start + OPENS_AFTER_START_MS).toISOString() });
+    expect(readGate(home, "maplegrin")).toMatchObject({ state: "waiting", opensAt: new Date(start).toISOString() });
   });
 
   it("FL buy into a stopped waiting agent (the one-shot) is refused before the wallet is asked to trade", async () => {
@@ -128,7 +139,7 @@ describe("it opens at the instant, then runs as FL start would", () => {
     const c = fakeClock(T0);
     const w = tradeWorld({ now: c.now });
     const opens = T0 + 3 * MIN;
-    const s = site(c, () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(opens - OPENS_AFTER_START_MS).toISOString() } }));
+    const s = site(c, () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(opens).toISOString() } }));
     const said: string[] = [];
     await runAgent({ home, name: "maplegrin", signer: w.signer, chain: w.chain, fetch: s.feed.fetch, site: SITE, indexer: INDEXER, now: c.now, sleep: c.sleep, random: seeded(3), loopMs: S, maxRuntimeMs: 8 * MIN, out: (l) => said.push(l) });
     const log = lines(home);
@@ -154,7 +165,7 @@ describe("it opens at the instant, then runs as FL start would", () => {
     const c = fakeClock(T0);
     const w = tradeWorld({ now: c.now });
     const opens = T0 + 2 * MIN;
-    const s = site(c, () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(opens - OPENS_AFTER_START_MS).toISOString() } }));
+    const s = site(c, () => leagueWire({ state: "warm-up", season: { number: 1, day: null, countdownTo: new Date(opens).toISOString() } }));
     await runAgent({ home, name: "maplegrin", signer: w.signer, chain: w.chain, fetch: s.feed.fetch, site: SITE, indexer: INDEXER, now: c.now, sleep: c.sleep, random: seeded(4), loopMs: S, maxRuntimeMs: 4 * MIN, noJitter: true, out: () => {} });
     expect(lines(home).find((l) => l.event === "season.open")).toMatchObject({ jitterMs: 0 });
     expect(s.marketReads()[0]!.at - opens).toBeLessThanOrEqual(S);

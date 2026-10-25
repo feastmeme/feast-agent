@@ -84,7 +84,7 @@ import { LeagueSite, seatingOfKept, siteFromEnv, type LeagueRead } from "./regis
 import { runAgent, statusOf } from "./runtime.ts";
 import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./script/check.ts";
 import { standingLines, type StandingInput } from "./season-card.ts";
-import { noFloorTonight, readGate, SEASON_OVER_LINE, startSaysWaiting, type GateState } from "./season-gate.ts";
+import { noFloorTonight, readGate, SEASON_OVER_LINE, startSaysWaiting, waitingStatusLine, type GateState } from "./season-gate.ts";
 import { sessionView, signInEndOf, signInLine } from "./session.ts";
 import { readVersion, versionLine, versionView } from "./version.ts";
 import { askChoice, autopilotChoice, prepareStart } from "./start.ts";
@@ -558,7 +558,8 @@ async function main(argv: string[]): Promise<number> {
       };
       const gate = data.season;
       const seasonOverNow = gate?.state === "over";
-      const waiting = gate && gate.state === "waiting" ? [`waiting for the season (${gate.opensAt ? `opens ${utc8(Date.parse(gate.opensAt))} UTC+8` : "opens when feast.meme announces the start"}): it trades nothing before`] : [];
+      // Addendum 12: the season starts and trading opens at one instant.
+      const waiting = gate && gate.state === "waiting" ? [waitingStatusLine(gate.opensAt ? Date.parse(gate.opensAt) : null)] : [];
       const ago = (at: string | null) => (at ? `${duration(Date.now() - Date.parse(at), "en")} ago` : "never");
       const signed = (n: number) => `${n >= 0 ? "+" : ""}${Number(n.toPrecision(6))} BNB`;
       const selfLines = mine

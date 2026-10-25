@@ -7,14 +7,14 @@ import { agentPaths, readJson, writeJsonAtomic } from "./store.ts";
 /**
  * When an agent `FL enter` started may trade (task 968; the coordinator's ruling C8). feast.meme's season starts at
  * 21:00 UTC+8 (the start, not a dinner: addendum 9), and the clients learn it only as `/api/league`'s countdown: the
- * start before it, the next dinner during the season. The first dinner, dinner 1, is a day after the start and is the
- * warm-up (no floor, eats nobody). Trading opens one hour before it: the start plus 23 hours (season 1: Wednesday
- * 10/28, 20:00 UTC+8, as the owner moved it on 2026-10-24; the runtime reads it from `/api/league`, never from here). Until then the waiting agent trades nothing; with no start announced it waits until
- * told. The gate only holds trading back: it loosens nothing.
+ * start before it, the next dinner during the season. Trading opens at the start itself (addendum 12, the owner's
+ * ruling of 2026-10-25 14:4x: no wait of 23 hours; season 1 starts Tuesday 10/27, 21:00 UTC+8, and the runtime reads
+ * it from `/api/league`, never from here). The first dinner, a day after the start, is still the warm-up (no floor,
+ * eats nobody). An explicit `season.tradingOpensAt` from the page, when it sends one, is taken over the countdown.
+ * Until then the waiting agent trades nothing; with no start announced it waits until told. The gate only holds
+ * trading back: it loosens nothing.
  */
 
-export const OPENS_AFTER_START_MS = 23 * 3_600_000;
-export const OPENS_BEFORE_DINNER_MS = 3_600_000;
 /** How often a closed gate reads the league again. */
 export const GATE_READ_MS = 5 * 60_000;
 
@@ -24,14 +24,27 @@ export type Opening = { kind: "open" } | { kind: "at"; at: number } | { kind: "u
 export function tradingOpens(read: LeagueRead | null): Opening {
   if (!read) return { kind: "unknown" };
   if (read.state === "over") return { kind: "open" };
+  // The page's own instant, when it names one (addendum 12): it is the rule.
+  if (read.season.tradingOpensAt !== undefined && read.season.tradingOpensAt !== null) return { kind: "at", at: read.season.tradingOpensAt };
+  // The season has started: trading is open, from day 1 on.
+  if (read.state === "season") return { kind: "open" };
+  // Before it: the countdown is the start, and trading opens at that instant.
   const countdown = read.season.countdownTo;
-  if (read.state === "season") {
-    // Day 2 on, dinner 1 is behind: open. On day 1 the countdown is dinner 1.
-    if ((read.season.day !== null && read.season.day >= 2) || countdown === null) return { kind: "open" };
-    return { kind: "at", at: countdown - OPENS_BEFORE_DINNER_MS };
-  }
-  if ((read.state === "warm-up" || read.state === "coming-soon") && countdown !== null) return { kind: "at", at: countdown + OPENS_AFTER_START_MS };
+  if ((read.state === "warm-up" || read.state === "coming-soon") && countdown !== null) return { kind: "at", at: countdown };
   return { kind: "unknown" };
+}
+
+/** "Tue 10/27 21:00", the copy's short form of an instant in UTC+8 (addendum 12). */
+export function utc8Day(ms: number): string {
+  const d = new Date(ms + 8 * 3_600_000);
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${day} ${two(d.getUTCMonth() + 1)}/${two(d.getUTCDate())} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
+}
+
+/** `FL status` while the gate waits (addendum 12): the start and the opening are one instant. */
+export function waitingStatusLine(opensAt: number | null): string {
+  return opensAt === null ? "waiting for the season: it trades nothing until feast.meme announces the start" : `waiting for the season: season starts and trading opens ${utc8Day(opensAt)} UTC+8; it trades nothing before`;
 }
 
 /**

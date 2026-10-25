@@ -65,7 +65,7 @@ import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExt
  * the stop files, the inbox, the preflight, L6 and L8 run from the start.
  *
  * An agent `FL enter` started (task 968, `agent.league.waitForSeason`) waits for the season behind a gate: until
- * feast.meme's season opens (one hour before dinner 1) it reads no market, asks no strategy or autopilot, and answers
+ * feast.meme's season opens (at its start, addendum 12) it reads no market, asks no strategy or autopilot, and answers
  * every `FL buy`, `FL sell` and launch request as refused; the stop files, the preflight, L6 and L8 run. At the
  * opening instant it draws the start jitter, logs `season.open` once, and runs as `FL start` would.
  *
