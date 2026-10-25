@@ -1,9 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ASK_INSTRUCTION, askArgv, askDirs, askKeyPath, askWithFor, callHost, checkBaseUrl, childEnv, endpointKey, LOGIN_KEPT } from "./host.ts";
+import { ASK_INSTRUCTION, geminiSettings, askArgv, askDirs, askKeyPath, askWithFor, callHost, checkBaseUrl, childEnv, endpointKey, LOGIN_KEPT } from "./host.ts";
 import { ANSWER_SCHEMA } from "./pack.ts";
 
 /**
@@ -217,7 +217,7 @@ describe("callHost, against the stub CLIs", () => {
 
 describe("addendum 11: the new adapters", () => {
   it("argv: Gemini headless in plan mode, JSON out; Cursor in print, ask mode, its sandbox on, never --force; -m/--model only when named", () => {
-    expect(askArgv("gemini", { cwd: "/w", schemaPath: "", lastMessagePath: "" })).toEqual({ command: "gemini", args: ["-p", ASK_INSTRUCTION, "--output-format", "json", "--approval-mode", "plan"] });
+    expect(askArgv("gemini", { cwd: "/w", schemaPath: "", lastMessagePath: "" })).toEqual({ command: "gemini", args: ["-p", ASK_INSTRUCTION, "--output-format", "json", "--approval-mode", "plan", "-e", "none", "--allowed-mcp-server-names", "none"] });
     expect(askArgv("gemini", { cwd: "/w", schemaPath: "", lastMessagePath: "", model: "gemini-2.5-flash" }).args.slice(-2)).toEqual(["-m", "gemini-2.5-flash"]);
     const cursor = askArgv("cursor", { cwd: "/w", schemaPath: "", lastMessagePath: "", pack: "PACK", env: { PATH: "/nowhere" } });
     expect(cursor.command).toBe("agent");
@@ -238,6 +238,14 @@ describe("addendum 11: the new adapters", () => {
     const seen = s.read("gemini");
     expect(seen.stdin).toBe("THE PACK");
     expect(seen.env.CLAUDECODE).toBeUndefined();
+    // After the security review: its tools off by system settings, in a fresh temp workspace outside the agent's home, gone after.
+    const settingsPath = seen.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH!;
+    expect(settingsPath).toMatch(/feast-ask-/);
+    expect(existsSync(settingsPath)).toBe(false);
+    expect(geminiSettings()).toMatchObject({ tools: { exclude: expect.arrayContaining(["run_shell_command", "read_file", "read_many_files", "web_fetch", "google_web_search", "write_file", "glob", "grep_search", "list_directory"]) }, admin: { extensions: { enabled: false } } });
+    expect(seen.cwd).toMatch(/feast-ask-[^/]+\/w$/);
+    expect(seen.cwd.includes(s.home.replace(/^\/private/, ""))).toBe(false);
+    expect(existsSync(seen.cwd)).toBe(false);
     const e = stubs("is-error");
     expect(await callHost({ with: "gemini", pack: "p", home: e.home, name: "demo", env: e.env })).toEqual({ ok: false, cause: "Gemini CLI answered an error: Please set an Auth method" });
     const b = stubs("bad-json");
@@ -252,7 +260,12 @@ describe("addendum 11: the new adapters", () => {
     const seen = s.read("agent");
     expect(seen.stdin).toBe("");
     expect(seen.args.at(-1)).toContain("THE PACK");
-    expect(seen.args[seen.args.indexOf("--workspace") + 1]!.endsWith(askDirs(s.home, "demo").cwd.replace(/^\/private/, ""))).toBe(true);
+    const workspace = seen.args[seen.args.indexOf("--workspace") + 1]!;
+    expect(workspace).toMatch(/feast-ask-[^/]+\/w$/);
+    expect(workspace.includes(s.home.replace(/^\/private/, ""))).toBe(false);
+    expect(seen.cwd.replace(/^\/private/, "")).toBe(workspace.replace(/^\/private/, ""));
+    expect(existsSync(workspace)).toBe(false);
+    expect(seen.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeUndefined();
     const e = stubs("is-error");
     expect(await callHost({ with: "cursor", pack: "p", home: e.home, name: "demo", env: e.env })).toEqual({ ok: false, cause: "Cursor answered an error: Not logged in · Please run /login" });
   }, 30_000);

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { clean } from "../enter/copy.ts";
@@ -60,15 +61,47 @@ export function askDirs(home: string, name: string): { cwd: string; io: string }
   return { cwd: join(dir, "ask-cwd"), io: join(dir, "ask-io") };
 }
 
+/**
+ * The Gemini CLI's tools, every built-in one (addendum 11, after a security review): off, through a system settings
+ * file (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`): the system level overrides the user's and the project's settings (its
+ * configuration reference). Not rehearsed on a real Gemini CLI here (none is installed): the coordinator's rehearsal
+ * checks that a pack asking it to read a file is answered without one.
+ */
+export const GEMINI_TOOLS = [
+  // Its tools reference (geminicli.com/docs/reference/tools): every one, the legacy names too.
+  "run_shell_command", "glob", "grep_search", "search_file_content", "list_directory", "read_file", "read_many_files", "replace", "edit", "write_file",
+  "ask_user", "write_todos", "save_memory", "activate_skill", "get_internal_docs", "list_mcp_resources", "read_mcp_resource",
+  "google_web_search", "web_fetch", "enter_plan_mode", "exit_plan_mode", "complete_task", "update_topic",
+  "tracker_create_task", "tracker_update_task", "tracker_get_task", "tracker_list_tasks", "tracker_add_dependency", "tracker_visualize",
+];
+export function geminiSettings(): Record<string, unknown> {
+  // `tools.exclude` (its settings reference), the flat `excludeTools` older releases read, and no extension at all.
+  return { tools: { exclude: GEMINI_TOOLS }, excludeTools: GEMINI_TOOLS, admin: { extensions: { enabled: false } } };
+}
+
+/**
+ * Where Gemini and Cursor run (addendum 11): a fresh empty folder in the system's temp folder, made for one ask and
+ * removed after it, never inside the agent's home (its key file, its notes token): the pack's untrusted text finds
+ * nothing to read there, whatever a tool were to do.
+ */
+function freshWorkspace(): { root: string; cwd: string; remove: () => void } {
+  const root = mkdtempSync(join(tmpdir(), "feast-ask-"));
+  const cwd = join(root, "w");
+  mkdirSync(cwd);
+  return { root, cwd, remove: () => rmSync(root, { recursive: true, force: true }) };
+}
+
 /** What the Gemini CLI and Cursor are told besides the pack: the pack itself says the rest. */
 export const ASK_INSTRUCTION = "Answer the Feast league pack above with exactly one JSON object in its schema, and nothing else. Use no tool.";
 
 export function askArgv(w: CliAsk, o: { cwd: string; schemaPath: string; lastMessagePath: string; model?: string | null; pack?: string; env?: NodeJS.ProcessEnv }): { command: string; args: string[] } {
   // Gemini CLI: the pack on stdin, the instruction appended by -p (non-interactive); plan mode (it changes nothing);
   // JSON out. Headless, a tool that needs approval is refused; plan mode leaves it read-only besides.
-  if (w === "gemini") return { command: "gemini", args: ["-p", ASK_INSTRUCTION, "--output-format", "json", "--approval-mode", "plan", ...(o.model ? ["-m", o.model] : [])] };
+  // No extension, no MCP server (an allowlist naming none); its tools off by the system settings `geminiSettings` writes.
+  if (w === "gemini") return { command: "gemini", args: ["-p", ASK_INSTRUCTION, "--output-format", "json", "--approval-mode", "plan", "-e", "none", "--allowed-mcp-server-names", "none", ...(o.model ? ["-m", o.model] : [])] };
   // Cursor's agent: print mode, JSON out, ask mode (no edits), its sandbox on, never --force (nothing runs without an
-  // approval no one gives), the empty folder as its workspace; the pack is the prompt (its docs name no stdin).
+  // approval no one gives), no MCP approved, a fresh empty temp folder as its workspace (`--trust` trusts only that
+  // empty folder, which headless needs); the pack is the prompt (its docs name no stdin).
   if (w === "cursor") return { command: cursorCommand(o.env), args: ["-p", "--output-format", "json", "--mode", "ask", "--sandbox", "enabled", "--trust", "--workspace", o.cwd, ...(o.model ? ["--model", o.model] : []), `${o.pack ?? ""}\n\n${ASK_INSTRUCTION}`] };
   if (w === "claude")
     return {
@@ -260,7 +293,18 @@ export async function callHost(o: CallInput): Promise<HostCall> {
 }
 
 async function callCli(o: CallInput & { with: CliAsk }): Promise<HostCall> {
-  const { cwd, io } = askDirs(o.home, o.name);
+  const fresh = o.with === "gemini" || o.with === "cursor" ? freshWorkspace() : null;
+  try {
+    return await callCliIn(o, fresh);
+  } finally {
+    fresh?.remove();
+  }
+}
+
+async function callCliIn(o: CallInput & { with: CliAsk }, fresh: { root: string; cwd: string } | null): Promise<HostCall> {
+  const dirs = askDirs(o.home, o.name);
+  const cwd = fresh?.cwd ?? dirs.cwd;
+  const io = dirs.io;
   mkdirSync(cwd, { recursive: true });
   mkdirSync(io, { recursive: true });
   const schemaPath = join(io, "answer.schema.json");
@@ -268,6 +312,13 @@ async function callCli(o: CallInput & { with: CliAsk }): Promise<HostCall> {
   writeFileSync(schemaPath, JSON.stringify(ANSWER_SCHEMA));
   rmSync(lastMessagePath, { force: true });
   const { command, args } = askArgv(o.with, { cwd, schemaPath, lastMessagePath, model: o.model, pack: o.pack, env: o.env });
+  // Gemini's tools off: its system settings, beside (not in) its workspace.
+  const extraEnv: NodeJS.ProcessEnv = {};
+  if (o.with === "gemini" && fresh) {
+    const settings = join(fresh.root, "system-settings.json");
+    writeFileSync(settings, JSON.stringify(geminiSettings()), { mode: 0o600 });
+    extraEnv.GEMINI_CLI_SYSTEM_SETTINGS_PATH = settings;
+  }
   const who = hostShown(o.with);
   // Cursor takes the pack as its prompt; the others read it on stdin.
   const stdin = o.with === "cursor" ? "" : o.pack;
@@ -289,7 +340,7 @@ async function callCli(o: CallInput & { with: CliAsk }): Promise<HostCall> {
     };
     try {
       // Its own process group (addendum 7): a grandchild that keeps stdout open goes with it when the timer fires.
-      child = spawn(command, args, { cwd, env: childEnv(o.env ?? process.env), stdio: ["pipe", "pipe", "pipe"], detached: true });
+      child = spawn(command, args, { cwd, env: { ...childEnv(o.env ?? process.env), ...extraEnv }, stdio: ["pipe", "pipe", "pipe"], detached: true });
     } catch (error) {
       finish({ code: null, error: error as NodeJS.ErrnoException, timedOut: false });
       return;
