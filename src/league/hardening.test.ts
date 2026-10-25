@@ -105,14 +105,18 @@ describe("1. version awareness (G1)", () => {
 
   it("behind, current, absent: the status line, the You're in sentence, never an upgrade", () => {
     const behind = versionView(league(BEHIND).latestRuntime, T0)!;
-    expect(behind).toMatchObject({ current: "league-v5", latest: "league-v6", behind: true, unsupported: false });
-    expect(versionLine(behind)).toBe("runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
+    expect(behind).toMatchObject({ current: "league-v5.1", latest: "league-v6", behind: true, unsupported: false });
+    expect(versionLine(behind)).toBe("runtime league-v5.1 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
     expect(versionLine(versionView(league(CURRENT).latestRuntime, T0))).toBeNull();
     expect(versionView(league().latestRuntime, T0)).toBeNull();
-    expect(versionLine(versionView({ tag: "league-v7", publishedAt: null, minSupported: "league-v6" }, T0))).toBe("runtime league-v5 · latest league-v7 · upgrade: npx skills add feastmeme/feast-agent (league-v5 is older than league-v6, the oldest feast.meme still supports: upgrade before the next dinner)");
+    // Addendum 11: a minor release orders: v5.1 is behind v5.2 and v6, and ahead of v5.
+    expect(versionView({ tag: "league-v5.2", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: true });
+    expect(versionView({ tag: "league-v5", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false, unsupported: false });
+    expect(league({ latestRuntime: { tag: "league-v5.1", publishedAt: null, minSupported: "league-v4" } }).latestRuntime).toMatchObject({ tag: "league-v5.1" });
+    expect(versionLine(versionView({ tag: "league-v7", publishedAt: null, minSupported: "league-v6" }, T0))).toBe("runtime league-v5.1 · latest league-v7 · upgrade: npx skills add feastmeme/feast-agent (league-v5.1 is older than league-v6, the oldest feast.meme still supports: upgrade before the next dinner)");
     const opens = { kind: "open" as const };
     const shown = { preset: "steady", idleMinutes: 30, ask: { every: 5, with: "claude" } };
-    expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(behind, "en"))).toMatch(/ A newer runtime is out \(league-v6; this is league-v5\): upgrade with `npx skills add feastmeme\/feast-agent`; it never upgrades by itself\.$/);
+    expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(behind, "en"))).toMatch(/ A newer runtime is out \(league-v6; this is league-v5\.1\): upgrade with `npx skills add feastmeme\/feast-agent`; it never upgrades by itself\.$/);
     expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(versionView(league(CURRENT).latestRuntime, T0), "en"))).toBe(doneRunning("maplegrin", opens, "en", shown));
     expect(upgradeSentence(behind, "zh")).toContain("npx skills add feastmeme/feast-agent");
   });
@@ -128,7 +132,7 @@ describe("1. version awareness (G1)", () => {
       expect(s.healths.length).toBeGreaterThanOrEqual(36);
       expect(notices(home).filter((n) => n.kind === "version")).toHaveLength(said);
       if (what === "behind") {
-        expect(notices(home).find((n) => n.kind === "version")!.text).toBe("a newer runtime is out: league-v6 (this one is league-v5). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.");
+        expect(notices(home).find((n) => n.kind === "version")!.text).toBe("a newer runtime is out: league-v6 (this one is league-v5.1). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.");
         expect(readVersion(home, "demo")).toMatchObject({ behind: true, latest: "league-v6" });
       } else if (what === "current") expect(readVersion(home, "demo")).toMatchObject({ behind: false });
       else expect(readVersion(home, "demo")).toBeNull();
@@ -143,7 +147,7 @@ describe("2. the sign-in's end (G2)", () => {
     const end = Date.parse("2026-11-01T06:05:00Z");
     expect(signInSentence(end, "en")).toBe("Wallet sign-in valid until 2026-11-01 14:05 UTC+8: re-scan before then or the agent stops trading (`FL login` says how).");
     expect(signInSentence(end, "zh")).toContain("2026-11-01 14:05 UTC+8");
-    expect(signInLine(end, utc8)).toBe("wallet sign-in valid until 2026-11-01 14:05 UTC+8; re-scan before then or the agent stops trading (FL login says how)");
+    expect(signInLine(end, utc8)).toBe("wallet sign-in ends at 2026-11-01 14:05 UTC+8: re-scan before then or the agent stops trading (FL login says how); once it ends nothing trades, not the floor keeper and not a stop-loss, until the player scans again; a day's floor still unmet then is eaten at the dinner");
     const section = agentSection({ strategy: { kind: "own", path: "strategy.md", firstLine: "x" } as never, name: "maplegrin", card: "CARD", opens: { kind: "open" }, autopilot: null, signInEnd: end }, "en");
     expect(section.split("\n").at(-1)).toBe(signInSentence(end, "en"));
     expect(autopilotLine(null, "en")).not.toContain("sign-in");
@@ -160,6 +164,14 @@ describe("2. the sign-in's end (G2)", () => {
     await run(home, c, feed, w, end - 30 * MIN, { askHost: (async ({ pack }: { pack: string }) => (packs.push({ at: c.now(), pack }), hold())) as never, seasonRead: seasonRead(c, () => league()).read });
     const said = notices(home).filter((n) => n.kind === "session");
     expect(said.map((n) => n.code)).toEqual(["24h", "6h", "1h"]);
+    // Addendum 11: the same three steps as public notes, their prefix byte-exact, queued for the notes stream.
+    const noted = readFileSync(join(agentPaths(home, "demo").dir, "notes.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { text?: string }).filter((n) => typeof n.text === "string").map((n) => n.text);
+    expect(noted).toEqual(["⏰ 登录到期 · 24 小时后 · 主人需要重新扫码一次", "⏰ 登录到期 · 6 小时后 · 主人需要重新扫码一次", "⏰ 登录到期 · 1 小时后 · 主人需要重新扫码一次"]);
+    expect(Buffer.from(noted[0]!).subarray(0, Buffer.byteLength("⏰ 登录到期")).toString("hex")).toBe(Buffer.from("⏰ 登录到期").toString("hex"));
+    // The heartbeat: alive since the start, its last tick a safety pass of this run.
+    const alive = JSON.parse(readFileSync(join(agentPaths(home, "demo").dir, "alive.json"), "utf8")) as { since: string; lastTick: string };
+    expect(Date.parse(alive.since)).toBe(DINNER - 30 * HOUR);
+    expect(Date.parse(alive.lastTick)).toBeGreaterThan(end - 2 * HOUR);
     expect(said[0]!.text).toContain("Your wallet's sign-in ends in under 24 hours");
     const before = packs.filter((p) => end - p.at > 24 * HOUR);
     const inside = packs.filter((p) => end - p.at < 23 * HOUR);

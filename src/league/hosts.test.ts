@@ -1,0 +1,135 @@
+import { execFile } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { confirmAgent, loadAgent, planAgent, saveAgent } from "./agent.ts";
+import { aliveLine } from "./alive.ts";
+import { askKeyPath } from "./ask/host.ts";
+import { inTemp, windowsLines } from "./daemon.ts";
+import { checkHost, HOST_DETAIL_HEADER, hostDetailHint, hostHeaders, modelHint } from "./headers.ts";
+import { askChoice } from "./start.ts";
+import { agentPaths } from "./store.ts";
+
+/**
+ * Task 975, addendum 11: the hosts beyond Claude Code and Codex (the site's header contract kept), the endpoint's
+ * plan, FL model and FL ask-key through the binary, the daemon's temp-home rule and the Windows line, the heartbeat.
+ */
+
+const BIN = join(import.meta.dirname, "bin.mjs");
+let dirs: string[] = [];
+afterEach(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  dirs = [];
+});
+function setup() {
+  const dir = mkdtempSync(join(tmpdir(), "feast-league-975-hosts-"));
+  dirs.push(dir);
+  const prompt = join(dir, "strategy.md");
+  writeFileSync(prompt, "Keep it small.\n");
+  const home = join(dir, "home");
+  const env = { FEAST_LEAGUE_HOME: home, FEAST_LEAGUE_MODEL: "other", FEAST_LEAGUE_BAW: "/nonexistent", FEAST_MAINNET_RPC_URL: "http://127.0.0.1:9", FEAST_LEAGUE_SITE: "http://127.0.0.1:9", FEAST_LEAGUE_DAEMON: "off" };
+  return { dir, prompt, home, env };
+}
+function run(args: string[], env: Record<string, string>, stdin?: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = execFile(process.execPath, [BIN, ...args], { env: { ...process.env, ...env }, timeout: 60_000 }, (error, stdout, stderr) => resolve({ code: error ? ((error as { code?: number }).code ?? 1) : 0, stdout, stderr }));
+    if (stdin !== undefined) child.stdin?.end(stdin);
+    else child.stdin?.end();
+  });
+}
+
+describe("the site's header contract", () => {
+  it("a new host is other to x-feast-host, and itself in x-feast-host-detail; the four keep their header and send no detail", () => {
+    expect(checkHost("gemini")).toEqual({ ok: true, model: "other", detail: "gemini" });
+    expect(checkHost("Claude")).toEqual({ ok: true, model: "claude", detail: null });
+    expect(checkHost("gpt").ok).toBe(false);
+    expect(hostHeaders({ FEAST_LEAGUE_HOST: "cursor" })).toEqual({ "x-feast-host": "other", "x-feast-runtime": expect.any(String), [HOST_DETAIL_HEADER]: "cursor" });
+    expect(hostHeaders({ FEAST_LEAGUE_HOST: "codex" })).not.toHaveProperty(HOST_DETAIL_HEADER);
+    expect(hostHeaders({ GEMINI_CLI: "1" })[HOST_DETAIL_HEADER]).toBe("gemini");
+    expect(modelHint({ FEAST_LEAGUE_HOST: "opencode" })).toBe("other");
+    expect(hostDetailHint({})).toBeNull();
+  });
+});
+
+describe("the ask's plan", () => {
+  it("defaults by host: Gemini and Cursor their CLI; OpenCode and the rest nobody until an endpoint is named; an endpoint named is openai", () => {
+    expect(askChoice({ host: "other", detail: "gemini" })).toEqual({ ok: true, ask: { every: 5, with: "gemini", model: null } });
+    expect(askChoice({ host: "other", detail: "cursor", askModel: "auto", every: 10 })).toEqual({ ok: true, ask: { every: 10, with: "cursor", model: "auto" } });
+    expect(askChoice({ host: "other", detail: "opencode" })).toEqual({ ok: true, ask: { every: 5, with: "none", model: null } });
+    expect(askChoice({ host: "grok", askBaseUrl: "https://llm.example/v1", askModel: "grok-4", askKeyEnv: "XAI_API_KEY" })).toEqual({ ok: true, ask: { every: 5, with: "openai", model: "grok-4", baseUrl: "https://llm.example/v1", keyEnv: "XAI_API_KEY" } });
+  });
+
+  it("openai needs a base URL and a model; the URL never carries a key; a key variable is a name; the others take neither", () => {
+    const { prompt } = setup();
+    const plan = (ask: Record<string, unknown>) => planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: ask as never });
+    expect(plan({ with: "openai", model: "deepseek-chat", baseUrl: "https://llm.example/v1/", keyEnv: "DEEPSEEK_API_KEY" })).toMatchObject({ ok: true, agent: { ask: { with: "openai", model: "deepseek-chat", baseUrl: "https://llm.example/v1", keyEnv: "DEEPSEEK_API_KEY" } } });
+    expect(plan({ with: "openai", model: "openrouter/auto", baseUrl: "https://llm.example/api/v1" }).ok).toBe(true);
+    const errors = (ask: Record<string, unknown>) => {
+      const out = plan(ask);
+      return out.ok ? [] : out.errors;
+    };
+    expect(errors({ with: "openai", model: "m" })).toContain("--ask-with openai needs --ask-base-url <the endpoint's OpenAI-compatible base URL>");
+    expect(errors({ with: "openai", baseUrl: "https://llm.example/v1" })).toContain("--ask-with openai needs --ask-model <the endpoint's model name>");
+    expect(errors({ with: "openai", model: "m", baseUrl: "https://llm.example/v1?api_key=sk-1" }).join()).toMatch(/carries no credentials/);
+    expect(errors({ with: "openai", model: "m", baseUrl: "https://llm.example/v1", keyEnv: "sk-live-123 456" }).join()).toMatch(/an environment variable's name/);
+    expect(errors({ with: "claude", baseUrl: "https://llm.example/v1" })).toContain("--ask-base-url and --ask-key-env go with --ask-with openai");
+  });
+});
+
+describe("FL model and FL ask-key, through the binary", () => {
+  it("FL model changes the model without a new card; default is the host's; an endpoint has no default", async () => {
+    const { prompt, home, env } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "claude", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const set = await run(["model", "demo", "claude-haiku-5-5"], env);
+    expect(set.code).toBe(0);
+    expect(set.stdout.trim()).toBe('"demo" asks Claude Code with claude-haiku-5-5 from its next ask on');
+    expect(loadAgent(home, "demo")).toMatchObject({ ask: { model: "claude-haiku-5-5" }, confirmed: { at: expect.any(String) } });
+    expect((await run(["model", "demo", "default"], env)).stdout.trim()).toBe('"demo" asks Claude Code with its default model from its next ask on');
+    expect(loadAgent(home, "demo")!.ask!.model).toBeNull();
+    const bad = await run(["model", "demo", "--rm"], env);
+    expect(bad.code).not.toBe(0);
+  }, 60_000);
+
+  it("FL ask-key reads the key on stdin, keeps it at mode 0600, never prints it; refuses a host that needs none", async () => {
+    const { prompt, home, env } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "openai", model: "deepseek-chat", baseUrl: "https://llm.example/v1", keyEnv: "DEEPSEEK_API_KEY" } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const KEY = "sk-test-0123456789";
+    const kept = await run(["ask-key", "demo"], env, `${KEY}\n`);
+    expect(kept.code).toBe(0);
+    expect(kept.stdout + kept.stderr).not.toContain(KEY);
+    expect(readFileSync(askKeyPath(home, "demo"), "utf8").trim()).toBe(KEY);
+    expect(statSync(askKeyPath(home, "demo")).mode & 0o777).toBe(0o600);
+    expect(readFileSync(agentPaths(home, "demo").log, "utf8")).not.toContain(KEY);
+    const status = await run(["status", "demo", "--no-league"], env);
+    expect(status.stdout).toContain("asking your AI endpoint every 5 min with deepseek-chat");
+    expect(status.stdout + status.stderr).not.toContain(KEY);
+    const other = planAgent({ name: "other", promptPath: prompt, preset: "steady", ask: { every: 5, with: "claude", model: null } });
+    if (!other.ok) throw new Error(other.errors.join("; "));
+    saveAgent(home, confirmAgent(other.agent));
+    expect((await run(["ask-key", "other"], env, "x\n")).code).not.toBe(0);
+  }, 60_000);
+});
+
+describe("staying up", () => {
+  it("no daemon for a league home in the temp folder (a reboot clears it); the Windows line to run once", () => {
+    expect(inTemp(join(tmpdir(), "x", "home"))).toBe(true);
+    expect(inTemp("/Users/someone/.feast-league", "/var/folders/zz/T")).toBe(false);
+    const lines = windowsLines({ name: "maplegrin", node: "C:\\Program Files\\nodejs\\node.exe", bin: "C:\\feast-agent\\src\\league\\bin.mjs" });
+    expect(lines[1]).toBe('schtasks /Create /SC ONLOGON /TN "FeastLeague-maplegrin" /TR "\\"C:\\Program Files\\nodejs\\node.exe\\" \\"C:\\feast-agent\\src\\league\\bin.mjs\\" run maplegrin --supervised" /RL LIMITED /F');
+    expect(lines[2]).toContain('schtasks /Delete /TN "FeastLeague-maplegrin" /F');
+  });
+
+  it("alive since … · last tick …, and after a stop the last tick stays", () => {
+    const now = Date.parse("2026-10-29T06:30:00Z");
+    const a = { since: "2026-10-29T04:00:00.000Z", lastTick: "2026-10-29T06:29:00.000Z", lastLoop: "2026-10-29T06:29:30.000Z", pid: 1 };
+    expect(aliveLine(a, true, now)).toBe("alive since 2026-10-29 12:00 UTC+8 · last tick 2026-10-29 14:29 UTC+8 (1 min ago)");
+    expect(aliveLine(a, false, now + 3 * 3_600_000)).toBe("not running · last tick 2026-10-29 14:29 UTC+8 (3 h 1 min ago)");
+    expect(aliveLine(null, false, now)).toBe("not running · no tick yet");
+  });
+});

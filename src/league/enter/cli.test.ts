@@ -140,13 +140,15 @@ describe("league-entry is FL enter's own", () => {
 });
 
 describe("task 975: FL enter --host", () => {
-  it("one of the four is kept for this home; anything else is one line, exit 2, nothing kept", async () => {
+  it("one of the four, or (addendum 11) a host the site sees as other, is kept for this home; anything else is one line, exit 2, nothing kept", async () => {
     const { env, home } = setup();
     const bad = await run(["enter", "--name", "maplegrin.ai", "--host", "gpt"], env);
     expect(bad.code).toBe(2);
-    expect(bad.stdout.trim()).toBe("--host is one of grok, codex, claude, other");
+    expect(bad.stdout.trim()).toBe("--host is one of grok, codex, claude, other, gemini, cursor, opencode, openai");
     expect(existsSync(join(home, "league-host.json"))).toBe(false);
     await run(["enter", "--name", "maplegrin.ai", "--host", "grok"], env);
     expect(JSON.parse(readFileSync(join(home, "league-host.json"), "utf8"))).toMatchObject({ host: "grok" });
+    await run(["enter", "--name", "maplegrin.ai", "--host", "gemini"], env);
+    expect(JSON.parse(readFileSync(join(home, "league-host.json"), "utf8"))).toMatchObject({ host: "gemini" });
   }, 60_000);
 });

@@ -62,7 +62,7 @@ describe("install, status, uninstall", () => {
   it("macOS: written, bootstrapped into the user's GUI domain; status reads it; uninstall boots it out and removes it", async () => {
     const w = where();
     const r = runner();
-    const base = { platform: "darwin" as const, name: "maplegrin", ...w, uid: 501, run: r.run, running: false };
+    const base = { platform: "darwin" as const, name: "maplegrin", ...w, uid: 501, run: r.run, running: false, tempOk: true };
     const installed = await daemon({ ...base, action: "install" });
     expect(installed).toMatchObject({ ok: true, installed: true, loaded: true });
     expect(r.calls).toEqual([`launchctl bootstrap gui/501 ${installed.unit}`]);
@@ -83,7 +83,7 @@ describe("install, status, uninstall", () => {
   it("Linux: daemon-reload, enable --now; a failure to load is said in one line", async () => {
     const w = where();
     const r = runner();
-    const base = { platform: "linux" as const, name: "maplegrin", ...w, uid: 1000, run: r.run, running: true };
+    const base = { platform: "linux" as const, name: "maplegrin", ...w, uid: 1000, run: r.run, running: true, tempOk: true };
     const installed = await daemon({ ...base, action: "install" });
     expect(r.calls).toEqual(["systemctl --user daemon-reload", "systemctl --user enable --now feast-league-maplegrin.service"]);
     expect(installed.lines).toContain("to start it at boot before anyone logs in: loginctl enable-linger (once, your choice)");

@@ -188,7 +188,7 @@ describe("task 975: the autopilot backup by default, through the binary", () => 
   it("--help names --no-autopilot, the default steady and 30 min", async () => {
     const { env } = setup();
     const out = await run(["--help"], env);
-    for (const word of ["--no-autopilot", "default steady, after 30 min", "enter --name <id>.ai", "--host <claude|codex|grok|other>"]) expect(out.stdout, word).toContain(word);
+    for (const word of ["--no-autopilot", "default steady, after 30 min", "enter --name <id>.ai", "--host <claude|codex|grok|other|gemini|cursor|opencode|openai>", "--no-daemon"]) expect(out.stdout, word).toContain(word);
     expect(out.stdout).not.toContain("default 60");
   }, 60_000);
 });
@@ -358,7 +358,7 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
     const human = await run(["status", "demo", "--no-league"], env);
     const { utc8 } = await import("../register/copy.ts");
     expect(human.stdout).toContain("runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
-    expect(human.stdout).toContain(`wallet sign-in valid until ${utc8(end)} UTC+8; re-scan before then or the agent stops trading (FL login says how)`);
+    expect(human.stdout).toContain(`wallet sign-in ends at ${utc8(end)} UTC+8: re-scan before then or the agent stops trading (FL login says how); once it ends nothing trades, not the floor keeper and not a stop-loss`);
     expect(human.stdout).toContain("season over: nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left");
     const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as Record<string, unknown>;
     expect(data.runtime).toMatchObject({ behind: true, latest: "league-v6" });
@@ -380,8 +380,10 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
     writeJsonAtomic(join(agentPaths(home, "demo").dir, "ask-state.json"), { lastAskAt: at, streak: 2, floorKeeperSince: at, cause: "Claude Code did not answer within 120 s", memo: "m", promptSha: null, last: { at, action: "none", reason: "", result: "error: Claude Code did not answer within 120 s" } });
     const human = await run(["status", "demo", "--no-league"], env);
     const { utc8 } = await import("../register/copy.ts");
-    expect(human.stdout).toContain(`asking Claude Code every 5 min · last ask ${utc8(at)} UTC+8 → none: error: Claude Code did not answer within 120 s · failures in a row 2 · on floor keeper since ${utc8(at)} UTC+8`);
+    expect(human.stdout).toContain(`asking Claude Code every 5 min with its default model · last ask ${utc8(at)} UTC+8 → none: error: Claude Code did not answer within 120 s · failures in a row 2 · on floor keeper since ${utc8(at)} UTC+8`);
     expect(human.stdout).toContain("floor keeper: steady, when Claude Code fails twice in a row, and 20 min before dinner with the floor unmet");
+    // Addendum 11: not running, with no heartbeat yet: it says so.
+    expect(human.stdout).toContain("not running · no tick yet");
     // Addendum 7: the floor-unmet line is the unified one, not league-v5's first cut.
     expect(human.stdout).toContain("Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.");
     expect(human.stdout).not.toMatch(/backup takes over|min of silence/);
@@ -394,6 +396,6 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
   it("--help names the ask loop and its commands", async () => {
     const { env } = setup();
     const out = await run(["--help"], env);
-    for (const word of ["[--every N] [--ask-with claude|codex|none] [--ask-model <name>]", "every <name> <minutes>", "ask <name> [--print] [--json]", "quote --coin <0x…|FEAST> --bnb <n> [--sell]"]) expect(out.stdout, word).toContain(word);
+    for (const word of ["[--every N] [--ask-with claude|codex|gemini|cursor|openai|none] [--ask-model <name>]", "every <name> <minutes>", "ask <name> [--print] [--json]", "quote --coin <0x…|FEAST> --bnb <n> [--sell]", "model <name> <model|default>", "ask-key <name>", "[--ask-base-url <url> [--ask-key-env <NAME>]]"]) expect(out.stdout, word).toContain(word);
   }, 60_000);
 });

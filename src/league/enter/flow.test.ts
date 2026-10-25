@@ -884,3 +884,38 @@ describe("task 975, addendum 4: FL enter under Claude Code plans the ask loop", 
     expect(await off.run({ noAutopilot: true, every: 5 })).toMatchObject({ code: 2, text: "--every and --ask-with go with the autopilot: --no-autopilot means no asks and no floor keeper" });
   });
 });
+
+describe("addendum 11: FL enter ends by keeping the agent up", () => {
+  it("the daemon first: it starts the agent itself, so nothing is started in the background; the line says so", async () => {
+    const w = world();
+    const kept: string[] = [];
+    w.deps.daemon = async (name) => (kept.push(name), { ok: true, lines: [] });
+    await w.run();
+    const out = await w.run({ yes: true });
+    expect(out).toMatchObject({ code: 0, ok: true, stage: "done" });
+    expect(kept).toEqual([ID]);
+    expect(w.starts).toEqual([]);
+    expect(out.text).toContain(`"${ID}" is started by this machine's daemon: it comes back by itself after a reboot or a crash; \`FL daemon ${ID} --uninstall\` removes it.`);
+  });
+
+  it("a daemon that cannot be installed (Windows, a home in the temp folder): its lines, and the background start as before", async () => {
+    const w = world();
+    w.deps.daemon = async () => ({ ok: false, lines: ["Windows: no daemon is installed by FL. …"] });
+    await w.run();
+    const out = await w.run({ yes: true });
+    expect(w.starts).toEqual([{ name: ID, noJitter: false }]);
+    expect(out.text).toContain(`started "${ID}" in the background (pid 4242)`);
+    expect(out.text).toContain("Windows: no daemon is installed by FL. …");
+  });
+
+  it("--no-daemon: never asked; the background start, and how to restart it after a reboot", async () => {
+    const w = world();
+    let asked = 0;
+    w.deps.daemon = async () => (asked++, { ok: true, lines: [] });
+    await w.run({ noDaemon: true });
+    const out = await w.run({ yes: true, noDaemon: true });
+    expect(asked).toBe(0);
+    expect(w.starts).toHaveLength(1);
+    expect(out.text).toContain(`No daemon: after this machine restarts, run \`FL start ${ID}\`.`);
+  });
+});

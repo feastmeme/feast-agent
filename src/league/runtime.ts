@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getAddress, isAddress, type Address, type Hex } from "viem";
 
 import { MAINNET, type FeastNetwork } from "../sdk/networks.ts";
+import { alivePath } from "./alive.ts";
 import { loadAgent, type AgentConfig } from "./agent.ts";
 import { sha256Of } from "./audit/static.ts";
 import { auditRefusal } from "./audit/verdict.ts";
@@ -21,7 +22,7 @@ import { drawStartJitter } from "./feed/snapshot.ts";
 import { guard, warmupActive, warmupAfter, type GuardInput, type GuardVerdict, type Intent, type WalletState } from "./guard.ts";
 import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type Limits } from "./limits.ts";
 import { Market } from "./market.ts";
-import { flushNotes, readNotes } from "./notes/queue.ts";
+import { checkNote, flushNotes, notesPath, readNotes } from "./notes/queue.ts";
 import { presetStrategy } from "./presets/logic.ts";
 import { PRESETS } from "./presets/specs.ts";
 import { SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
@@ -39,10 +40,10 @@ import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { errorLine } from "./rpc.ts";
 import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, warmUpDinner, writeGate } from "./season-gate.ts";
 import { leagueDayKey, readVersion, versionNotice, versionPath, versionView, writeVersion } from "./version.ts";
-import { healthFlag, withHealth, type Health } from "./headers.ts";
+import { healthFlag, modelHint, withHealth, type Health } from "./headers.ts";
 import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
-import { freshMemory, pastEnd, sessionStep, sessionView, type SessionMemory, type SessionView } from "./session.ts";
+import { freshMemory, pastEnd, sessionStep, sessionView, signInNoteText, type SessionMemory, type SessionView } from "./session.ts";
 import { addToLedger, acquireWalletLock, agentPaths, bootId, otherBoot, pidAlive, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
 import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExtras, type Snapshot, type StrategyEvent } from "./strategy.ts";
 
@@ -226,12 +227,26 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     // The sign-in (PLAN-941 §7): what the reminder has said for it, kept on disk so a restart never repeats it.
     let session: SessionMemory = readJson<SessionMemory>(paths.session) ?? freshMemory();
     let signedOut = false;
+    /** A note queued by the runtime itself (the sign-in's, addendum 11): the next pass flushes the notes at once. */
+    let notesDue = false;
+    const publicNote = (text: string, why: string) => {
+      const checked = checkNote(text, wallet);
+      if (!checked.ok) return log("note.skipped", { why, problem: checked.reason });
+      appendJsonl(notesPath(deps.home, deps.name), { id: randomUUID(), ts: new Date(clock()).toISOString(), text: checked.text, tx: null, model: modelHint(), sent: false });
+      log("note.queued", { by: "runtime", why });
+      notesDue = true;
+    };
     const sessionSay = (reading: { connected: boolean; view: SessionView | null }) => {
       const step = sessionStep(session, reading, clock());
       session = step.memory;
       signedOut = step.signedOut;
       writeJsonAtomic(paths.session, session);
-      for (const code of step.say) notify("session", sessionNotice(code, session.end, "en"), { code, endsAt: session.end !== null ? new Date(session.end).toISOString() : null });
+      for (const code of step.say) {
+        notify("session", sessionNotice(code, session.end, "en"), { code, endsAt: session.end !== null ? new Date(session.end).toISOString() : null });
+        // Addendum 11: at 24 h, 6 h and 1 h, said outside the terminal too: a public note the league's reminder reads.
+        const note = signInNoteText(code);
+        if (note) publicNote(note, `sign-in ${code}`);
+      }
     };
     const preflight = async (): Promise<void> => {
       let status: { connected: boolean; status: string };
@@ -1106,6 +1121,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     let nextNotesFlush = 0;
     let flushing = false;
     const flushQueuedNotes = (now: number) => {
+      if (notesDue && !flushing) {
+        notesDue = false;
+        nextNotesFlush = 0;
+      }
       if (flushing || now < nextNotesFlush) return;
       nextNotesFlush = now + 10 * 60_000;
       if (!readNotes(deps.home, deps.name).some((n) => n.state === "queued")) return;
@@ -1156,7 +1175,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         appendJournal(deps.home, deps.name, row({ result: `error: ${cause}` }));
         log("ask", { pack: pack.digest, result: "error", cause, streak: askState.streak });
       };
-      const call = await (deps.askHost ?? callHost)({ with: ask.with as "claude" | "codex", pack: pack.text, home: deps.home, name: deps.name, model: ask.model });
+      const call = await (deps.askHost ?? callHost)({ with: ask.with as Exclude<typeof ask.with, "none">, pack: pack.text, home: deps.home, name: deps.name, model: ask.model, baseUrl: ask.baseUrl ?? null, keyEnv: ask.keyEnv ?? null, fetch: deps.fetch });
       if (!call.ok) return failed(call.cause);
       const checked = validateAnswer(call.answer, pack);
       if (!checked.ok) return failed(`invalid answer: ${checked.why}`);
@@ -1200,6 +1219,18 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
     };
 
+    /** Addendum 11: alive since this start, and the last safety pass that worked, for `FL status` and `FL card`. */
+    const aliveSince = new Date(clock()).toISOString();
+    let lastAliveWrite = 0;
+    const beat = (tickAt: number | null) => {
+      const now = clock();
+      if (tickAt === null && now - lastAliveWrite < 60_000) return;
+      lastAliveWrite = now;
+      const kept = readJson<{ lastTick?: string | null }>(alivePath(deps.home, deps.name));
+      writeJsonAtomic(alivePath(deps.home, deps.name), { since: aliveSince, lastTick: tickAt !== null ? new Date(tickAt).toISOString() : (kept?.lastTick ?? null), lastLoop: new Date(now).toISOString(), pid: process.pid });
+    };
+    beat(null);
+
     // The one word the league read carries (addendum 8), from what the loop knows now.
     healthOf = () => {
       const oldest = book.unresolved.length > 0 ? clock() - Math.min(...book.unresolved.map((u) => u.at)) : null;
@@ -1208,6 +1239,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
 
     for (;;) {
       const now = clock();
+      beat(null);
       const stop = stopReason(deps.home, deps.name);
       if (stop) {
         log("halted", { reason: stop });
@@ -1360,6 +1392,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             await runStrategy("onTick", snapshot);
           } else save();
           tickFails = 0;
+          beat(clock());
         } catch (error) {
           // Redacted before it is written (addendum 10): no URL (a keyed primary's), no request body, no address.
           const reason = errorLine(error, 300);

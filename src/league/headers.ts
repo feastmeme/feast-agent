@@ -16,7 +16,7 @@ import { readJson, writeJsonAtomic } from "./store.ts";
 export const HOST_HEADER = "x-feast-host";
 export const RUNTIME_HEADER = "x-feast-runtime";
 /** The release this runtime is; a docs test holds it equal to the CHANGELOG's newest `## league-vN`. */
-export const RUNTIME_RELEASE = "league-v5";
+export const RUNTIME_RELEASE = "league-v5.1";
 
 /** The AI a note says wrote it (the owner's ruling, 2026-10-24), and the host the headers name: declared, never checked. */
 export const MODELS = ["grok", "codex", "claude", "other"] as const;
@@ -43,9 +43,36 @@ export function modelHint(env: Record<string, string | undefined> = process.env)
   return "other";
 }
 
-/** The two headers' values under an environment. */
+/**
+ * Hosts beyond the four (addendum 11): the site's `x-feast-host` keeps its accepted set (claude, codex, grok, other:
+ * these four say `other` there), and the host itself goes in a second header, `x-feast-host-detail`, that an older
+ * site simply ignores.
+ */
+export const HOST_DETAILS = ["gemini", "cursor", "opencode", "openai"] as const;
+export type HostDetail = (typeof HOST_DETAILS)[number];
+export const HOST_DETAIL_HEADER = "x-feast-host-detail";
+
+/** `FL enter --host`: one of the four, or one of the details (which is `other` to the site). */
+export function checkHost(raw: string): { ok: true; model: Model; detail: HostDetail | null } | { ok: false; reason: string } {
+  const v = raw.trim().toLowerCase();
+  if ((HOST_DETAILS as readonly string[]).includes(v)) return { ok: true, model: "other", detail: v as HostDetail };
+  const m = checkModel(v);
+  return m.ok ? { ok: true, model: m.model, detail: null } : { ok: false, reason: `--host is one of ${[...MODELS, ...HOST_DETAILS].join(", ")}` };
+}
+
+/** The detail, when the host is one of them: declared (`FEAST_LEAGUE_HOST`), else the Gemini CLI's own marker. */
+export function hostDetailHint(env: Record<string, string | undefined> = process.env): HostDetail | null {
+  const declared = (env.FEAST_LEAGUE_HOST ?? "").trim().toLowerCase();
+  if ((HOST_DETAILS as readonly string[]).includes(declared)) return declared as HostDetail;
+  if (checkModel(declared).ok) return null;
+  if (env.GEMINI_CLI === "1") return "gemini";
+  return null;
+}
+
+/** The headers' values under an environment: the two, and the detail when there is one. */
 export function hostHeaders(env: Record<string, string | undefined> = process.env): Record<string, string> {
-  return { [HOST_HEADER]: modelHint(env), [RUNTIME_HEADER]: RUNTIME_RELEASE };
+  const detail = hostDetailHint(env);
+  return { [HOST_HEADER]: modelHint(env), [RUNTIME_HEADER]: RUNTIME_RELEASE, ...(detail ? { [HOST_DETAIL_HEADER]: detail } : {}) };
 }
 
 const originOf = (url: string): string | null => {
@@ -72,7 +99,7 @@ export function withHostHeaders(fetchImpl: typeof fetch, sites: readonly string[
     const given = init?.headers;
     if (!(input instanceof Request) && (given === undefined || (typeof given === "object" && !(given instanceof Headers) && !Array.isArray(given)))) {
       // A plain object stays a plain object, its own keys as they were, so a caller (or a test) reading it keeps working.
-      const kept = Object.fromEntries(Object.entries((given ?? {}) as Record<string, string>).filter(([k]) => k.toLowerCase() !== HOST_HEADER && k.toLowerCase() !== RUNTIME_HEADER));
+      const kept = Object.fromEntries(Object.entries((given ?? {}) as Record<string, string>).filter(([k]) => k.toLowerCase() !== HOST_HEADER && k.toLowerCase() !== RUNTIME_HEADER && k.toLowerCase() !== HOST_DETAIL_HEADER));
       return fetchImpl(input, { ...init, headers: { ...kept, ...ours } });
     }
     const headers = new Headers(input instanceof Request ? input.headers : undefined);
@@ -86,18 +113,18 @@ export function withHostHeaders(fetchImpl: typeof fetch, sites: readonly string[
 
 export const declaredHostPath = (home: string) => join(home, "league-host.json");
 
-/** The host `FL enter --host` declared here, or null. */
-export function readDeclaredHost(home: string): Model | null {
+/** The host `FL enter --host` declared here (one of the four, or a detail), or null. */
+export function readDeclaredHost(home: string): Model | HostDetail | null {
   try {
     const got = readJson<{ host?: unknown }>(declaredHostPath(home));
-    const checked = checkModel(typeof got?.host === "string" ? got.host : "");
-    return checked.ok ? checked.model : null;
+    const checked = checkHost(typeof got?.host === "string" ? got.host : "");
+    return checked.ok ? (checked.detail ?? checked.model) : null;
   } catch {
     return null;
   }
 }
 
-export function declareHost(home: string, host: Model, now = Date.now()): void {
+export function declareHost(home: string, host: Model | HostDetail, now = Date.now()): void {
   writeJsonAtomic(declaredHostPath(home), { host, at: new Date(now).toISOString() });
 }
 

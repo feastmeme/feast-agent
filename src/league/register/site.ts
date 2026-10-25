@@ -278,7 +278,7 @@ export function parseLeague(body: unknown): LeagueRead | null {
   return read;
 }
 
-const RELEASE_TAG = /^league-v\d{1,4}$/;
+const RELEASE_TAG = /^league-v\d{1,4}(\.\d{1,4})?$/;
 /** `latestRuntime: { tag, publishedAt, minSupported }`, checked: a tag that is not `league-vN` is no answer. */
 export function latestRuntimeOf(raw: unknown): LeagueRead["latestRuntime"] | null {
   if (typeof raw !== "object" || raw === null) return null;

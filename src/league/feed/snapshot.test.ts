@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { RUNTIME_RELEASE } from "../headers.ts";
 import type { LeagueChain } from "../chain.ts";
 import { cursorAt } from "../events.ts";
 import { Market } from "../market.ts";
@@ -88,7 +89,7 @@ describe("the snapshot client", () => {
     const feed = new FakeFeed(now);
     await new SnapshotClient({ site: SITE, fetch: feed.fetch, now, random: seeded(3) }).read();
     expect(Object.keys(feed.snapshots()[0]!.headers).sort()).toEqual(["accept", "x-feast-host", "x-feast-runtime"]);
-    expect(feed.snapshots()[0]!.headers["x-feast-runtime"]).toBe("league-v5");
+    expect(feed.snapshots()[0]!.headers["x-feast-runtime"]).toBe(RUNTIME_RELEASE);
   });
 
   it("the interval is poll × 1000 + U(0, 3000), drawn afresh: within [5 s, 8 s] by default and [3 s, 6 s] at --poll 3", async () => {

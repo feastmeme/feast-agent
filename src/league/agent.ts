@@ -6,7 +6,7 @@ import { DEFAULT_LIMITS, loosenedBeyond, resolveLimits, type Limits } from "./li
 import { PRESETS, resolveParams, type PresetId } from "./presets/specs.ts";
 import { CAP_REFUSAL, DEFAULT_IDLE_MINUTES, IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, LEAGUE_CAP_BNB, SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
 import { readPrompt } from "./prompt/host.ts";
-import { ASK_EVERY_DEFAULT, ASK_EVERY_MAX, ASK_EVERY_MIN, ASK_WITH, type AskWith } from "./ask/host.ts";
+import { ASK_EVERY_DEFAULT, ASK_EVERY_MAX, ASK_EVERY_MIN, ASK_WITH, checkBaseUrl, type AskWith } from "./ask/host.ts";
 import { agentPaths, checkAgentName, readJson, writeJsonAtomic } from "./store.ts";
 
 /**
@@ -40,7 +40,7 @@ export type AgentConfig = {
    * preset is then the floor keeper: it trades when the asks fail twice in a row, and 20 minutes before the dinner
    * with the day's floor unmet. Prompt track with an autopilot only; null or absent: no asks.
    */
-  ask?: { every: number; with: AskWith; model: string | null } | null;
+  ask?: { every: number; with: AskWith; model: string | null; /** Addendum 11, `openai` only: the endpoint, and the name of the variable its key is in (never the key). */ baseUrl?: string | null; keyEnv?: string | null } | null;
   params: Record<string, unknown>;
   /** Which parameters came from the user's sentence (the rest are defaults). */
   given: string[];
@@ -69,7 +69,7 @@ export type PlanInput = {
   /** Prompt mode with an autopilot: the host's silence, in minutes, before the preset trades. */
   idleMinutes?: number;
   /** Task 975, addendum 4: the ask loop (prompt mode with an autopilot only). */
-  ask?: { every?: number; with?: string; model?: string | null } | null;
+  ask?: { every?: number; with?: string; model?: string | null; baseUrl?: string | null; keyEnv?: string | null } | null;
   params?: Record<string, unknown>;
   limits?: Record<string, unknown>;
   tickSeconds?: number;
@@ -178,9 +178,22 @@ function planPrompt(input: PlanInput, limits: Limits, errors: string[], now: Dat
       const model = input.ask.model ?? null;
       if (!Number.isInteger(every) || every < ASK_EVERY_MIN || every > ASK_EVERY_MAX) errors.push(`--every is ${ASK_EVERY_MIN}–${ASK_EVERY_MAX} whole minutes (got ${every})`);
       if (!(ASK_WITH as readonly string[]).includes(w)) errors.push(`--ask-with is one of ${ASK_WITH.join(", ")}`);
-      // A model's name goes on the child's argv: a plain token, never a flag.
-      if (model !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(model)) errors.push("--ask-model is a model's name: letters, digits, dots, dashes, colons");
-      ask = { every, with: w as AskWith, model };
+      // A model's name goes on the child's argv: a plain token, never a flag (a slash for a router's provider/model).
+      if (model !== null && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/.test(model)) errors.push("--ask-model is a model's name: letters, digits, dots, dashes, colons, slashes");
+      // Addendum 11: the endpoint's base URL and its key's variable, for `openai` and only for it.
+      const baseUrl = input.ask.baseUrl ?? null;
+      const keyEnv = input.ask.keyEnv ?? null;
+      if (w === "openai") {
+        if (baseUrl === null) errors.push("--ask-with openai needs --ask-base-url <the endpoint's OpenAI-compatible base URL>");
+        else {
+          const checked = checkBaseUrl(baseUrl);
+          if (!checked.ok) errors.push(checked.reason);
+        }
+        if (model === null) errors.push("--ask-with openai needs --ask-model <the endpoint's model name>");
+      } else if (baseUrl !== null || keyEnv !== null) errors.push("--ask-base-url and --ask-key-env go with --ask-with openai");
+      if (keyEnv !== null && !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(keyEnv)) errors.push("--ask-key-env is an environment variable's name (the key itself is never given on the command line)");
+      const url = baseUrl !== null && checkBaseUrl(baseUrl).ok ? (checkBaseUrl(baseUrl) as { url: string }).url : baseUrl;
+      ask = { every, with: w as AskWith, model, ...(w === "openai" ? { baseUrl: url, keyEnv } : {}) };
     }
   } else {
     if (input.idleMinutes !== undefined) errors.push("--idle-minutes needs --autopilot <preset>: without one, nothing trades on its own");

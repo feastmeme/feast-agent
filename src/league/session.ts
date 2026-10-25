@@ -100,9 +100,23 @@ export function signInWarning(end: number | null, now: number): string | null {
   return `WALLET SIGN-IN EXPIRES IN ${hours} H: the agent will stop; tell the player to run FL login.`;
 }
 
+/**
+ * The public note at 24 h, 6 h and 1 h before the sign-in ends (addendum 11): written to the notes stream, where the
+ * league's group reminder (lane 983) reads it by its prefix, which stays byte-exact.
+ */
+export const SIGN_IN_NOTE_PREFIX = "⏰ 登录到期";
+export function signInNoteText(code: SessionCode): string | null {
+  const hours = code === "24h" ? 24 : code === "6h" ? 6 : code === "1h" ? 1 : null;
+  return hours === null ? null : `${SIGN_IN_NOTE_PREFIX} · ${hours} 小时后 · 主人需要重新扫码一次`;
+}
+
+/** What happens once it has ended (addendum 11), said where the end is shown. */
+export const AFTER_SIGN_IN_ENDS = "once it ends nothing trades, not the floor keeper and not a stop-loss, until the player scans again; a day's floor still unmet then is eaten at the dinner";
+
 /** The re-scan line for the entry card and `FL status` (addendum 8). */
 export function signInLine(end: number | null, utc8: (ms: number) => string): string | null {
-  return end === null ? null : `wallet sign-in valid until ${utc8(end)} UTC+8; re-scan before then or the agent stops trading (FL login says how)`;
+  // Addendum 11: "sign-in ends at …", and what happens after it, where the end is shown.
+  return end === null ? null : `wallet sign-in ends at ${utc8(end)} UTC+8: re-scan before then or the agent stops trading (FL login says how); ${AFTER_SIGN_IN_ENDS}`;
 }
 
 /** The sign-in's end as the running agent last read it (its `session.json`); null when not known. */

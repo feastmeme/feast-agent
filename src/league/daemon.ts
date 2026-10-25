@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { delimiter, dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 import { checkAgentName } from "./store.ts";
 
@@ -108,12 +109,41 @@ export function unitFile(u: UnitInput): { path: string; text: string } {
 
 export type DaemonResult = { ok: boolean; installed: boolean; loaded: boolean | null; unit: string | null; lines: string[] };
 
-export async function daemon(o: UnitInput & { action: "install" | "uninstall" | "status"; uid: number; run: Runner; running: boolean }): Promise<DaemonResult> {
+/**
+ * A league home in the system's temporary folder (addendum 11) is gone after a reboot, and a unit pointing at it would
+ * start an agent with no book: no daemon is installed for one (`tempOk` is the tests' own, for their fake supervisor).
+ */
+export function inTemp(path: string, temp: string = tmpdir()): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  // Both the path as given and its real one (macOS's /var is /private/var), against both forms of each temp folder.
+  const paths = [resolve(path), real(path)];
+  const temps = [temp, "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"].flatMap((t) => [resolve(t), real(t)]);
+  return paths.some((p) => temps.some((t) => p === t || p.startsWith(`${t}/`)));
+}
+
+/** Windows has no FL daemon (addendum 11): the Task Scheduler line the player runs once, at log-on, and its removal. */
+export function windowsLines(o: { name: string; node: string; bin: string }): string[] {
+  const task = `FeastLeague-${o.name}`;
+  return [
+    `Windows: no daemon is installed by FL. To start "${o.name}" at every log-on, run once in a Command Prompt:`,
+    `schtasks /Create /SC ONLOGON /TN "${task}" /TR "\\"${o.node}\\" \\"${o.bin}\\" run ${o.name} --supervised" /RL LIMITED /F`,
+    `(remove it with: schtasks /Delete /TN "${task}" /F). A machine that sleeps still stops it: keep it awake for the season.`,
+  ];
+}
+
+export async function daemon(o: UnitInput & { action: "install" | "uninstall" | "status"; uid: number; run: Runner; running: boolean; tempOk?: boolean }): Promise<DaemonResult> {
   try {
     checkAgentName(o.name);
   } catch (error) {
     return { ok: false, installed: false, loaded: null, unit: null, lines: [(error as Error).message] };
   }
+  if (o.action === "install" && !o.tempOk && inTemp(o.home)) return { ok: false, installed: false, loaded: null, unit: null, lines: [`no daemon: the league home is in the temporary folder, which a reboot clears (${o.home}); FEAST_LEAGUE_HOME elsewhere first`] };
   const unit = unitFile(o);
   const domain = `gui/${o.uid}`;
   const loaded = async (): Promise<boolean | null> => {

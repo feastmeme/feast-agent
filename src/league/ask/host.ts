@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 
 import { clean } from "../enter/copy.ts";
-import type { Model } from "../headers.ts";
+import type { HostDetail, Model } from "../headers.ts";
 import { agentPaths } from "../store.ts";
 import { ANSWER_SCHEMA, parseAnswerText } from "./pack.ts";
 
@@ -20,8 +20,16 @@ import { ANSWER_SCHEMA, parseAnswerText } from "./pack.ts";
  * whole point. The empty working directory keeps project CLAUDE.md files out instead.
  */
 
-export const ASK_WITH = ["claude", "codex", "none"] as const;
+/**
+ * Addendum 11: besides `claude` and `codex`, the Gemini CLI headless (`gemini`), Cursor's agent CLI headless (`cursor`),
+ * and any OpenAI-compatible chat endpoint the player names (`openai`: DeepSeek, Qwen, Kimi, xAI, OpenRouter, a local
+ * server; the runtime asks it over HTTP, no CLI). The same answer contract, the same 120 s, the same check of the
+ * answer, and the pack's untrusted text drives nothing: no tool is offered to any of them.
+ */
+export const ASK_WITH = ["claude", "codex", "gemini", "cursor", "openai", "none"] as const;
 export type AskWith = (typeof ASK_WITH)[number];
+/** The adapters that run a CLI as a child process. */
+export type CliAsk = "claude" | "codex" | "gemini" | "cursor";
 export const ASK_TIMEOUT_MS = 120_000;
 /** After the host exits, how long its pipes may stay open (a grandchild holding them) before the group is killed. */
 export const EXIT_GRACE_MS = 2_000;
@@ -29,11 +37,22 @@ export const ASK_EVERY_DEFAULT = 5;
 export const ASK_EVERY_MIN = 2;
 export const ASK_EVERY_MAX = 120;
 
-/** The adapter for a host: Claude Code and Codex have a headless CLI; Grok and the rest are asked by nobody (none). */
-export const askWithFor = (host: Model): AskWith => (host === "claude" ? "claude" : host === "codex" ? "codex" : "none");
+/**
+ * The adapter for a host by default: Claude Code, Codex, the Gemini CLI and Cursor have a headless CLI; OpenCode's
+ * endpoint is asked directly (`openai`, once its base URL and model are given); Grok and the rest are asked by nobody
+ * (none) unless the player names an endpoint.
+ */
+export const askWithFor = (host: Model, detail: HostDetail | null = null): AskWith =>
+  detail === "gemini" ? "gemini" : detail === "cursor" ? "cursor" : detail === "opencode" || detail === "openai" ? "openai" : host === "claude" ? "claude" : host === "codex" ? "codex" : "none";
 
 /** How the copy names the host. */
-export const hostShown = (w: AskWith) => (w === "claude" ? "Claude Code" : w === "codex" ? "Codex" : "no host");
+export const hostShown = (w: AskWith) => (w === "claude" ? "Claude Code" : w === "codex" ? "Codex" : w === "gemini" ? "Gemini CLI" : w === "cursor" ? "Cursor" : w === "openai" ? "your AI endpoint" : "no host");
+
+/** Cursor's agent CLI: `cursor-agent` where it is installed under that name, else `agent` (its newer name). */
+export function cursorCommand(env: NodeJS.ProcessEnv = process.env): string {
+  for (const dir of (env.PATH ?? "").split(":")) if (dir && existsSync(join(dir, "cursor-agent"))) return "cursor-agent";
+  return "agent";
+}
 
 /** The ask's folders: an empty working directory, and beside it the files Codex reads and writes. */
 export function askDirs(home: string, name: string): { cwd: string; io: string } {
@@ -41,7 +60,16 @@ export function askDirs(home: string, name: string): { cwd: string; io: string }
   return { cwd: join(dir, "ask-cwd"), io: join(dir, "ask-io") };
 }
 
-export function askArgv(w: "claude" | "codex", o: { cwd: string; schemaPath: string; lastMessagePath: string; model?: string | null }): { command: string; args: string[] } {
+/** What the Gemini CLI and Cursor are told besides the pack: the pack itself says the rest. */
+export const ASK_INSTRUCTION = "Answer the Feast league pack above with exactly one JSON object in its schema, and nothing else. Use no tool.";
+
+export function askArgv(w: CliAsk, o: { cwd: string; schemaPath: string; lastMessagePath: string; model?: string | null; pack?: string; env?: NodeJS.ProcessEnv }): { command: string; args: string[] } {
+  // Gemini CLI: the pack on stdin, the instruction appended by -p (non-interactive); plan mode (it changes nothing);
+  // JSON out. Headless, a tool that needs approval is refused; plan mode leaves it read-only besides.
+  if (w === "gemini") return { command: "gemini", args: ["-p", ASK_INSTRUCTION, "--output-format", "json", "--approval-mode", "plan", ...(o.model ? ["-m", o.model] : [])] };
+  // Cursor's agent: print mode, JSON out, ask mode (no edits), its sandbox on, never --force (nothing runs without an
+  // approval no one gives), the empty folder as its workspace; the pack is the prompt (its docs name no stdin).
+  if (w === "cursor") return { command: cursorCommand(o.env), args: ["-p", "--output-format", "json", "--mode", "ask", "--sandbox", "enabled", "--trust", "--workspace", o.cwd, ...(o.model ? ["--model", o.model] : []), `${o.pack ?? ""}\n\n${ASK_INSTRUCTION}`] };
   if (w === "claude")
     return {
       command: "claude",
@@ -80,6 +108,95 @@ export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
     if (/^(FEAST_|LEAGUE_|BAW)/.test(key) || SESSION.test(key)) delete out[key];
   }
   return out;
+}
+
+// --- the OpenAI-compatible endpoint (addendum 11) -----------------------------------------------------------------
+
+/** The agent's own key file for the endpoint (`FL ask-key`): mode 0600, beside its book; read at each ask, never shown. */
+export const askKeyPath = (home: string, name: string) => join(agentPaths(home, name).dir, "ask-key");
+
+/** A base URL the runtime may send a key to: https, or http on this machine (a local server); no credentials in it. */
+export function checkBaseUrl(raw: string): { ok: true; url: string } | { ok: false; reason: string } {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return { ok: false, reason: "--ask-base-url is not a URL" };
+  }
+  const local = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(u.hostname);
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) return { ok: false, reason: "--ask-base-url is https (http only on this machine)" };
+  if (u.username || u.password || u.search || u.hash) return { ok: false, reason: "--ask-base-url carries no credentials, query or fragment: the key goes in an environment variable (--ask-key-env) or FL ask-key" };
+  return { ok: true, url: u.href.replace(/\/+$/, "") };
+}
+
+/** The key, from the named environment variable, else the agent's key file; null when neither has one. */
+export function endpointKey(o: { home: string; name: string; keyEnv?: string | null; env?: NodeJS.ProcessEnv }): string | null {
+  const env = o.env ?? process.env;
+  const fromEnv = o.keyEnv ? env[o.keyEnv]?.trim() : undefined;
+  if (fromEnv) return fromEnv;
+  const path = askKeyPath(o.home, o.name);
+  const fromFile = existsSync(path) ? readFileSync(path, "utf8").trim() : "";
+  return fromFile || null;
+}
+
+/**
+ * One ask of an OpenAI-compatible endpoint: `POST <base>/chat/completions`, the pack as the one user message, the
+ * answer's JSON schema as `response_format` (an endpoint that refuses it, a 400 or 422, is asked once more without
+ * it: the pack itself asks for the JSON), no tools, no stream, 120 s. The key goes to that endpoint only, never to a
+ * log, a notice or an error line.
+ */
+async function callEndpoint(o: CallInput): Promise<HostCall> {
+  const who = "your AI endpoint";
+  const base = o.baseUrl ? checkBaseUrl(o.baseUrl) : { ok: false as const, reason: "no --ask-base-url" };
+  if (!base.ok) return { ok: false, cause: `${who} is not set up: ${base.reason}` };
+  if (!o.model) return { ok: false, cause: `${who} is not set up: no --ask-model` };
+  const key = endpointKey(o);
+  if (!key) return { ok: false, cause: `${who} has no key: set ${o.keyEnv ?? "the variable --ask-key-env names"} or run FL ask-key ${o.name}` };
+  const timeoutMs = o.timeoutMs ?? ASK_TIMEOUT_MS;
+  const doFetch = o.fetch ?? fetch;
+  const hide = (text: string) => tail(text.split(key).join("<key>"));
+  const ask = async (structured: boolean) => {
+    const body = {
+      model: o.model,
+      messages: [{ role: "user", content: o.pack }],
+      stream: false,
+      max_tokens: 2_000,
+      ...(structured ? { response_format: { type: "json_schema", json_schema: { name: "feast_answer", strict: true, schema: ANSWER_SCHEMA } } } : {}),
+    };
+    return doFetch(`${base.url}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
+  };
+  let response: Response;
+  try {
+    response = await ask(true);
+    if (response.status === 400 || response.status === 422) {
+      await response.body?.cancel().catch(() => undefined);
+      response = await ask(false);
+    }
+  } catch (error) {
+    const name = (error as Error).name;
+    if (name === "TimeoutError" || name === "AbortError") return { ok: false, cause: `${who} did not answer within ${Math.round(timeoutMs / 1_000)} s` };
+    return { ok: false, cause: `${who} could not be reached: ${hide((error as Error).message ?? String(error))}` };
+  }
+  const text = await response.text().catch(() => "");
+  if (response.status !== 200) {
+    const said = (() => {
+      try {
+        const e = (JSON.parse(text) as { error?: { message?: unknown } | string }).error;
+        return typeof e === "string" ? e : typeof e?.message === "string" ? e.message : text;
+      } catch {
+        return text;
+      }
+    })();
+    return { ok: false, cause: `${who} answered HTTP ${response.status}: ${hide(said)}` };
+  }
+  let content: unknown;
+  try {
+    content = (JSON.parse(text) as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content;
+  } catch {
+    content = undefined;
+  }
+  const answer = typeof content === "string" ? parseAnswerText(content) : undefined;
+  return answer === undefined ? { ok: false, cause: `${who}'s answer was not JSON` } : { ok: true, answer };
 }
 
 /** A child's words, fit to show: the tail, one line, no URL (it may carry a key). */
@@ -123,7 +240,26 @@ function killGroup(child: ReturnType<typeof spawn>): void {
 
 export type HostCall = { ok: true; answer: unknown } | { ok: false; cause: string };
 
-export async function callHost(o: { with: "claude" | "codex"; pack: string; home: string; name: string; model?: string | null; timeoutMs?: number; env?: NodeJS.ProcessEnv }): Promise<HostCall> {
+export type CallInput = {
+  with: CliAsk | "openai";
+  pack: string;
+  home: string;
+  name: string;
+  model?: string | null;
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+  /** `openai`: the endpoint, and where its key is (an environment variable's name; else the agent's key file). */
+  baseUrl?: string | null;
+  keyEnv?: string | null;
+  fetch?: typeof fetch;
+};
+
+export async function callHost(o: CallInput): Promise<HostCall> {
+  if (o.with === "openai") return callEndpoint(o);
+  return callCli({ ...o, with: o.with });
+}
+
+async function callCli(o: CallInput & { with: CliAsk }): Promise<HostCall> {
   const { cwd, io } = askDirs(o.home, o.name);
   mkdirSync(cwd, { recursive: true });
   mkdirSync(io, { recursive: true });
@@ -131,8 +267,10 @@ export async function callHost(o: { with: "claude" | "codex"; pack: string; home
   const lastMessagePath = join(io, "last-message.json");
   writeFileSync(schemaPath, JSON.stringify(ANSWER_SCHEMA));
   rmSync(lastMessagePath, { force: true });
-  const { command, args } = askArgv(o.with, { cwd, schemaPath, lastMessagePath, model: o.model });
-  const who = o.with === "claude" ? "Claude Code" : "Codex";
+  const { command, args } = askArgv(o.with, { cwd, schemaPath, lastMessagePath, model: o.model, pack: o.pack, env: o.env });
+  const who = hostShown(o.with);
+  // Cursor takes the pack as its prompt; the others read it on stdin.
+  const stdin = o.with === "cursor" ? "" : o.pack;
   const timeoutMs = o.timeoutMs ?? ASK_TIMEOUT_MS;
   const run = await new Promise<{ code: number | null; stdout: string; stderr: string; error: NodeJS.ErrnoException | null; timedOut: boolean }>((resolve) => {
     let stdout = "";
@@ -178,12 +316,20 @@ export async function callHost(o: { with: "claude" | "codex"; pack: string; home
       killGroup(proc);
       finish({ code, error: null, timedOut: false });
     });
-    proc.stdin?.end(o.pack);
+    proc.stdin?.end(stdin);
   });
   if (run.error?.code === "ENOENT") return { ok: false, cause: `${who} is not installed here (no \`${command}\` on PATH)` };
   if (run.error) return { ok: false, cause: `${who} could not be started: ${tail(run.error.message)}` };
   if (run.timedOut) return { ok: false, cause: `${who} did not answer within ${Math.round(timeoutMs / 1_000)} s` };
-  if (o.with === "claude") {
+  if (o.with === "gemini") {
+    // `{ response, stats, error? }` (its headless docs).
+    const out = parseAnswerText(run.stdout) as { response?: unknown; error?: { message?: unknown } | null } | undefined;
+    if (run.code !== 0 || (out && out.error)) return { ok: false, cause: `${who} answered an error: ${tail(typeof out?.error?.message === "string" ? out.error.message : run.stderr || run.stdout || `exit ${run.code}`)}` };
+    const answer = typeof out?.response === "string" ? parseAnswerText(out.response) : undefined;
+    return answer === undefined ? { ok: false, cause: `${who}'s answer was not JSON` } : { ok: true, answer };
+  }
+  if (o.with === "claude" || o.with === "cursor") {
+    // Both print one result object (`type: "result"`, `is_error`, `result`).
     const out = parseAnswerText(run.stdout);
     const result = Array.isArray(out) ? [...out].reverse().find((e) => (e as { type?: unknown })?.type === "result") : out;
     const r = (result ?? {}) as { is_error?: unknown; result?: unknown; structured_output?: unknown };

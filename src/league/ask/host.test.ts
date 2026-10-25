@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { askArgv, askDirs, callHost, childEnv, LOGIN_KEPT } from "./host.ts";
+import { ASK_INSTRUCTION, askArgv, askDirs, askKeyPath, askWithFor, callHost, checkBaseUrl, childEnv, endpointKey, LOGIN_KEPT } from "./host.ts";
 import { ANSWER_SCHEMA } from "./pack.ts";
 
 /**
@@ -49,9 +49,12 @@ process.stdin.on("end", () => {
   if (mode === "sleep") return setTimeout(() => {}, 60000);
   if (mode === "exit") { process.stderr.write("You have hit your usage limit. Try again later.\\n"); process.exit(3); }
   const answer = ${JSON.stringify(JSON.stringify(ANSWER))};
-  if ("${name}" === "claude") {
+  if ("${name}" === "claude" || "${name}" === "agent") {
     if (mode === "is-error") return console.log(JSON.stringify({ type: "result", is_error: true, result: "Not logged in · Please run /login" }));
     console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: mode === "bad-json" ? "I think you should buy something" : answer }));
+  } else if ("${name}" === "gemini") {
+    if (mode === "is-error") { console.log(JSON.stringify({ response: null, error: { type: "AuthError", message: "Please set an Auth method" } })); process.exit(1); }
+    console.log(JSON.stringify({ response: mode === "bad-json" ? "buy something" : "\\u0060\\u0060\\u0060json\\n" + answer + "\\n\\u0060\\u0060\\u0060", stats: { models: {} } }));
   } else {
     const o = args[args.indexOf("-o") + 1];
     fs.writeFileSync(o, mode === "bad-json" ? "not json at all" : answer);
@@ -59,7 +62,7 @@ process.stdin.on("end", () => {
   }
 });
 `;
-  for (const name of ["claude", "codex"]) {
+  for (const name of ["claude", "codex", "gemini", "agent"]) {
     writeFileSync(join(bin, name), body(name));
     chmodSync(join(bin, name), 0o755);
   }
@@ -209,3 +212,123 @@ describe("callHost, against the stub CLIs", () => {
     expect(await gone(s.grandchild())).toBe(true);
   }, 30_000);
 });
+
+// --- addendum 11: Gemini CLI, Cursor's agent, an OpenAI-compatible endpoint --------------------------------------
+
+describe("addendum 11: the new adapters", () => {
+  it("argv: Gemini headless in plan mode, JSON out; Cursor in print, ask mode, its sandbox on, never --force; -m/--model only when named", () => {
+    expect(askArgv("gemini", { cwd: "/w", schemaPath: "", lastMessagePath: "" })).toEqual({ command: "gemini", args: ["-p", ASK_INSTRUCTION, "--output-format", "json", "--approval-mode", "plan"] });
+    expect(askArgv("gemini", { cwd: "/w", schemaPath: "", lastMessagePath: "", model: "gemini-2.5-flash" }).args.slice(-2)).toEqual(["-m", "gemini-2.5-flash"]);
+    const cursor = askArgv("cursor", { cwd: "/w", schemaPath: "", lastMessagePath: "", pack: "PACK", env: { PATH: "/nowhere" } });
+    expect(cursor.command).toBe("agent");
+    expect(cursor.args.slice(0, 9)).toEqual(["-p", "--output-format", "json", "--mode", "ask", "--sandbox", "enabled", "--trust", "--workspace"]);
+    expect(cursor.args).not.toContain("--force");
+    expect(cursor.args).not.toContain("--yolo");
+    expect(cursor.args).not.toContain("--approve-mcps");
+    expect(cursor.args.at(-1)).toBe(`PACK\n\n${ASK_INSTRUCTION}`);
+    expect(askWithFor("other", "gemini")).toBe("gemini");
+    expect(askWithFor("other", "cursor")).toBe("cursor");
+    expect(askWithFor("other", "opencode")).toBe("openai");
+    expect(askWithFor("grok")).toBe("none");
+  });
+
+  it("Gemini CLI: the pack on stdin, the answer read from its JSON's response (fenced or not); its errors in plain words", async () => {
+    const s = stubs("answer");
+    expect(await callHost({ with: "gemini", pack: "THE PACK", home: s.home, name: "demo", env: s.env })).toEqual({ ok: true, answer: ANSWER });
+    const seen = s.read("gemini");
+    expect(seen.stdin).toBe("THE PACK");
+    expect(seen.env.CLAUDECODE).toBeUndefined();
+    const e = stubs("is-error");
+    expect(await callHost({ with: "gemini", pack: "p", home: e.home, name: "demo", env: e.env })).toEqual({ ok: false, cause: "Gemini CLI answered an error: Please set an Auth method" });
+    const b = stubs("bad-json");
+    expect(await callHost({ with: "gemini", pack: "p", home: b.home, name: "demo", env: b.env })).toEqual({ ok: false, cause: "Gemini CLI's answer was not JSON" });
+    const slow = stubs("grandchild-hangs");
+    expect(await callHost({ with: "gemini", pack: "p", home: slow.home, name: "demo", env: slow.env, timeoutMs: 1_000 })).toEqual({ ok: false, cause: "Gemini CLI did not answer within 1 s" });
+  }, 30_000);
+
+  it("Cursor: the pack as its prompt, an empty stdin, the result read; the same timeout", async () => {
+    const s = stubs("answer");
+    expect(await callHost({ with: "cursor", pack: "THE PACK", home: s.home, name: "demo", env: s.env })).toEqual({ ok: true, answer: ANSWER });
+    const seen = s.read("agent");
+    expect(seen.stdin).toBe("");
+    expect(seen.args.at(-1)).toContain("THE PACK");
+    expect(seen.args[seen.args.indexOf("--workspace") + 1]!.endsWith(askDirs(s.home, "demo").cwd.replace(/^\/private/, ""))).toBe(true);
+    const e = stubs("is-error");
+    expect(await callHost({ with: "cursor", pack: "p", home: e.home, name: "demo", env: e.env })).toEqual({ ok: false, cause: "Cursor answered an error: Not logged in · Please run /login" });
+  }, 30_000);
+
+  describe("an OpenAI-compatible endpoint", () => {
+    const KEY = "sk-test-0000";
+    const BASE = "https://llm.example/v1";
+    function endpoint(answer: (body: Record<string, unknown>, n: number) => Response | Promise<Response>) {
+      const asked: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
+      const f = (async (url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        asked.push({ url, headers: Object.fromEntries(new Headers(init?.headers).entries()), body });
+        return answer(body, asked.length);
+      }) as unknown as typeof fetch;
+      return { asked, f };
+    }
+    const ok = (content: string) => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), { status: 200 });
+    const home = () => {
+      const dir = mkdtempSync(join(tmpdir(), "feast-league-975-openai-"));
+      dirs.push(dir);
+      return dir;
+    };
+
+    it("the pack as the one user message, the schema as response_format, no tools, the key in the header only, from the variable named", async () => {
+      const e = endpoint(() => ok(JSON.stringify(ANSWER)));
+      const out = await callHost({ with: "openai", pack: "THE PACK", home: home(), name: "demo", model: "deepseek-chat", baseUrl: BASE, keyEnv: "DEEPSEEK_API_KEY", env: { DEEPSEEK_API_KEY: KEY }, fetch: e.f });
+      expect(out).toEqual({ ok: true, answer: ANSWER });
+      expect(e.asked).toHaveLength(1);
+      const [a] = e.asked;
+      expect(a!.url).toBe(`${BASE}/chat/completions`);
+      expect(a!.headers.authorization).toBe(`Bearer ${KEY}`);
+      expect(a!.body).toMatchObject({ model: "deepseek-chat", messages: [{ role: "user", content: "THE PACK" }], stream: false, response_format: { type: "json_schema", json_schema: { name: "feast_answer", strict: true, schema: ANSWER_SCHEMA } } });
+      expect(a!.body).not.toHaveProperty("tools");
+      expect(JSON.stringify(a!.body)).not.toContain(KEY);
+    });
+
+    it("an endpoint that refuses response_format is asked once more without it; a fenced answer is read", async () => {
+      const e = endpoint((body) => (body.response_format ? new Response(JSON.stringify({ error: { message: "response_format is not supported" } }), { status: 400 }) : ok("```json\n" + JSON.stringify(ANSWER) + "\n```")));
+      expect(await callHost({ with: "openai", pack: "p", home: home(), name: "demo", model: "m", baseUrl: BASE, keyEnv: "K", env: { K: KEY }, fetch: e.f })).toEqual({ ok: true, answer: ANSWER });
+      expect(e.asked.map((a) => "response_format" in a.body)).toEqual([true, false]);
+    });
+
+    it("the key from FL ask-key's file when the variable is not set (as under FL daemon); none at all: one plain line", async () => {
+      const h = home();
+      const e = endpoint(() => ok(JSON.stringify(ANSWER)));
+      expect(await callHost({ with: "openai", pack: "p", home: h, name: "demo", model: "m", baseUrl: BASE, keyEnv: "K", env: {}, fetch: e.f })).toEqual({ ok: false, cause: "your AI endpoint has no key: set K or run FL ask-key demo" });
+      expect(e.asked).toHaveLength(0);
+      mkdirSync(join(h, "agents", "demo"), { recursive: true });
+      writeFileSync(askKeyPath(h, "demo"), `${KEY}\n`, { mode: 0o600 });
+      expect(endpointKey({ home: h, name: "demo", keyEnv: "K", env: {} })).toBe(KEY);
+      expect(await callHost({ with: "openai", pack: "p", home: h, name: "demo", model: "m", baseUrl: BASE, keyEnv: "K", env: {}, fetch: e.f })).toEqual({ ok: true, answer: ANSWER });
+    });
+
+    it("its failures in plain words, the key never in them; the timeout holds", async () => {
+      const h = home();
+      const says = (r: () => Response | Promise<Response>) => callHost({ with: "openai", pack: "p", home: h, name: "demo", model: "m", baseUrl: BASE, keyEnv: "K", env: { K: KEY }, fetch: endpoint(r).f, timeoutMs: 300 });
+      expect(await says(() => new Response(JSON.stringify({ error: { message: `Incorrect API key provided: ${KEY}` } }), { status: 401 }))).toEqual({ ok: false, cause: "your AI endpoint answered HTTP 401: Incorrect API key provided: <key>" });
+      expect(await says(() => ok("I would buy"))).toEqual({ ok: false, cause: "your AI endpoint's answer was not JSON" });
+      const hung = endpoint((_b) => new Promise<Response>(() => {}));
+      const started = Date.now();
+      const timed = await callHost({ with: "openai", pack: "p", home: h, name: "demo", model: "m", baseUrl: BASE, keyEnv: "K", env: { K: KEY }, fetch: (async (u: string, i?: RequestInit) => {
+        const signal = i?.signal;
+        return new Promise<Response>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason)));
+      }) as unknown as typeof fetch, timeoutMs: 300 });
+      expect(timed).toEqual({ ok: false, cause: "your AI endpoint did not answer within 0 s" });
+      expect(Date.now() - started).toBeLessThan(3_000);
+      expect(hung.asked).toHaveLength(0);
+    });
+
+    it("a base URL the key may go to: https, or http on this machine; never one carrying credentials", () => {
+      expect(checkBaseUrl("https://llm.example/v1/")).toEqual({ ok: true, url: "https://llm.example/v1" });
+      expect(checkBaseUrl("http://127.0.0.1:8080/v1")).toEqual({ ok: true, url: "http://127.0.0.1:8080/v1" });
+      expect(checkBaseUrl("http://llm.example/v1").ok).toBe(false);
+      expect(checkBaseUrl("https://user:pass@llm.example/v1").ok).toBe(false);
+      expect(checkBaseUrl("https://llm.example/v1?key=abc").ok).toBe(false);
+    });
+  });
+});
+

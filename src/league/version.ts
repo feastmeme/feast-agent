@@ -13,10 +13,10 @@ import { agentPaths, readJson, writeJsonAtomic } from "./store.ts";
 
 export const UPGRADE_COMMAND = "npx skills add feastmeme/feast-agent";
 
-/** `league-vN` → N; null for anything else. */
+/** `league-vN` or `league-vN.M` (addendum 11: league-v5.1) → N + M/10000, so they order; null for anything else. */
 export const releaseNumber = (tag: string | null | undefined): number | null => {
-  const m = /^league-v(\d{1,4})$/.exec(tag ?? "");
-  return m ? Number(m[1]) : null;
+  const m = /^league-v(\d{1,4})(?:\.(\d{1,4}))?$/.exec(tag ?? "");
+  return m ? Number(m[1]) + Number(m[2] ?? 0) / 10_000 : null;
 };
 
 export type VersionView = { current: string; latest: string; minSupported: string | null; publishedAt: string | null; behind: boolean; unsupported: boolean; at: string };

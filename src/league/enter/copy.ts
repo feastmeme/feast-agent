@@ -368,6 +368,18 @@ export function startedLine(name: string, pid: number, lang: Lang): string {
   return lang === "zh" ? `已在后台启动「${name}」（pid ${pid}）；FL status ${name} 查看。` : `started "${name}" in the background (pid ${pid}); FL status ${name}`;
 }
 
+/** Addendum 11: started by the machine's supervisor, which starts it again after a reboot or a crash. */
+export function daemonLine(name: string, lang: Lang): string {
+  return lang === "zh"
+    ? `「${name}」已交给本机的守护进程启动：重启或崩溃后它会自己再起来；\`FL daemon ${name} --uninstall\` 可取消。`
+    : `"${name}" is started by this machine's daemon: it comes back by itself after a reboot or a crash; \`FL daemon ${name} --uninstall\` removes it.`;
+}
+
+/** Addendum 11: the player said no to the daemon. */
+export function noDaemonLine(name: string, lang: Lang): string {
+  return lang === "zh" ? `没有装守护进程：这台电脑重启后，运行 \`FL start ${name}\`。` : `No daemon: after this machine restarts, run \`FL start ${name}\`.`;
+}
+
 export function alreadyRunning(name: string, lang: Lang): string {
   return lang === "zh" ? `「${name}」已经在运行，没有再启动一个。` : `"${name}" is already running; it was not started again.`;
 }

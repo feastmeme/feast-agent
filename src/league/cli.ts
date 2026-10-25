@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -13,7 +13,8 @@ import { applyChange, confirmAgent, loadAgent, planAgent, saveAgent, type AgentC
 import { AUDIT_RULES } from "./audit/static.ts";
 import { auditFile, auditRefusal, recordModelVerdict } from "./audit/verdict.ts";
 import { BawError, BawSigner, execRunner } from "./baw.ts";
-import { daemon, daemonPath, type Runner } from "./daemon.ts";
+import { aliveLine, readAlive } from "./alive.ts";
+import { daemon, daemonPath, windowsLines, type Runner } from "./daemon.ts";
 import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
@@ -25,14 +26,14 @@ import { INDEXER_URL } from "./events.ts";
 import { refuseEarly } from "./early.ts";
 import { Executor } from "./executor.ts";
 import { impacts, quoteBuy, quoteSell } from "./quote.ts";
-import { ASK_EVERY_MAX, ASK_EVERY_MIN, hostShown } from "./ask/host.ts";
+import { ASK_EVERY_MAX, ASK_EVERY_MIN, askKeyPath, hostShown } from "./ask/host.ts";
 import { gatherPack } from "./ask/gather.ts";
 import { journalPath, readAskState, readJournal } from "./ask/journal.ts";
 import { readSnapshotCache, SnapshotClient, CACHE_FRESH_MS } from "./feed/snapshot.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
 import { noteCommand } from "./notes/queue.ts";
 import { notesLogin, recordedAgentId } from "./notes/session.ts";
-import { checkModel, declareHost, modelHint, readDeclaredHost } from "./headers.ts";
+import { checkHost, checkModel, declareHost, hostDetailHint, modelHint, readDeclaredHost } from "./headers.ts";
 import { PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { dayLine } from "./prompt/floor.ts";
 import { readStanding } from "./data/standing.ts";
@@ -117,12 +118,17 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   the script audit: static rules, then the model read's verdict
   script check <file.mjs> [--json] the script against a stub world, through the real guard; a pass on record with a
                                   passed audit counts as the warm-up done for that exact file
-  plan|start|enter … [--every N] [--ask-with claude|codex|none] [--ask-model <name>]
+  plan|start|enter … [--every N] [--ask-with claude|codex|gemini|cursor|openai|none] [--ask-model <name>]
+        [--ask-base-url <url> [--ask-key-env <NAME>]]
                                   the ask loop: every N minutes (default 5, 2–120) without a buy or sell from your agent,
                                   the runtime asks your AI's headless CLI (claude -p, codex exec; default the host's own)
                                   what to do, and makes its one buy, sell or hold within the hard limits; the floor keeper
                                   (steady) trades when it fails twice in a row, and 20 minutes before dinner with the floor
-                                  unmet. --ask-with none: no asks, the floor keeper after 30 min (v5)
+                                  unmet. --ask-with none: no asks, the floor keeper after 30 min (v5). --ask-with openai
+                                  asks an OpenAI-compatible endpoint (--ask-base-url, --ask-model; its key in the
+                                  variable --ask-key-env names, or stored once with FL ask-key <name>)
+  model <name> <model|default>    change the model the agent's AI is asked with (default: the host's own default)
+  ask-key <name>                  read the endpoint's key on stdin and keep it for the agent (mode 0600; never shown)
   every <name> <minutes>          change how often the agent is asked
   ask <name> [--print] [--json]   one ask now, into the running agent; --print: the exact pack it would send, nothing sent
   quote --coin <0x…|FEAST> --bnb <n> [--sell] [--fraction f] [--json]
@@ -143,7 +149,7 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   sell <name> <coin|FEAST> <fraction|all> [--no-wait]
   enter --name <id>.ai [--prompt <strategy.md>] [--meme "<concept>"] [--image <path>] [--no-start] [--yes] [--lang en|zh] [--json]
         [--coin-name "<…feed>" --symbol T --description "…"] [--autopilot <preset> | --no-autopilot] [--idle-minutes N]
-        [--agent <name>] [--host <claude|codex|grok|other>] [--no-jitter]
+        [--agent <name>] [--host <claude|codex|grok|other|gemini|cursor|opencode|openai>] [--no-jitter] [--no-daemon]
                                   one command enters the league and runs your AI: one card and one yes sign the league's
                                   Register (no coin needed, no gas) and the notes session, then start the agent detached,
                                   waiting for the season: it trades nothing before. Without --prompt, the season-1 default
@@ -245,6 +251,7 @@ async function main(argv: string[]): Promise<number> {
       uninstall: { type: "boolean", default: false },
       status: { type: "boolean", default: false },
       supervised: { type: "boolean", default: false },
+      "no-daemon": { type: "boolean", default: false },
       coin: { type: "string" },
       bnb: { type: "string" },
       home: { type: "string" },
@@ -267,6 +274,8 @@ async function main(argv: string[]): Promise<number> {
       every: { type: "string" },
       "ask-with": { type: "string" },
       "ask-model": { type: "string" },
+      "ask-base-url": { type: "string" },
+      "ask-key-env": { type: "string" },
       print: { type: "boolean", default: false },
       sell: { type: "boolean", default: false },
       fraction: { type: "string" },
@@ -302,13 +311,13 @@ async function main(argv: string[]): Promise<number> {
   // Task 975 (the coordinator's ruling C8): the AI this home's agent runs on, declared once by FL enter --host; every
   // request to feast.meme names it (x-feast-host), and FL note's --model defaults to it.
   if (values.host !== undefined) {
-    const host = checkModel(values.host);
+    const host = checkHost(values.host);
     if (command !== "enter" || !host.ok) {
-      const line = command !== "enter" ? "--host goes with enter" : host.ok ? "" : host.reason.replace("--model", "--host");
+      const line = command !== "enter" ? "--host goes with enter" : host.ok ? "" : host.reason;
       print(json, { ok: false, error: line }, () => line);
       return 2;
     }
-    declareHost(home, host.model);
+    declareHost(home, host.detail ?? host.model);
   }
   const declared = readDeclaredHost(home);
   if (declared) process.env.FEAST_LEAGUE_HOST = declared;
@@ -330,8 +339,8 @@ async function main(argv: string[]): Promise<number> {
     // Task 975: a prompt agent's autopilot backup is steady unless --autopilot names another or --no-autopilot.
     const choice = autopilotChoice({ autopilot: values.autopilot, noAutopilot: values["no-autopilot"] });
     // Addendum 4: the ask loop rides with the autopilot (the floor keeper underneath), never on a preset or a script.
-    if ((values.every !== undefined || values["ask-with"] !== undefined || values["ask-model"] !== undefined) && values.prompt === undefined) throw new Error("--every and --ask-with are a prompt agent's: give the prompt with --prompt <strategy.md>");
-    const asked = askChoice({ noAutopilot: values["no-autopilot"], every: wholeOrNaN(values.every), askWith: values["ask-with"], askModel: values["ask-model"], host: modelHint() });
+    if ((values.every !== undefined || values["ask-with"] !== undefined || values["ask-model"] !== undefined || values["ask-base-url"] !== undefined || values["ask-key-env"] !== undefined) && values.prompt === undefined) throw new Error("--every and --ask-with are a prompt agent's: give the prompt with --prompt <strategy.md>");
+    const asked = askChoice({ noAutopilot: values["no-autopilot"], every: wholeOrNaN(values.every), askWith: values["ask-with"], askModel: values["ask-model"], askBaseUrl: values["ask-base-url"], askKeyEnv: values["ask-key-env"], host: modelHint(), detail: hostDetailHint() });
     return {
       name,
       preset: values.prompt !== undefined ? (choice.ok ? choice.preset : undefined) : values.preset,
@@ -348,7 +357,7 @@ async function main(argv: string[]): Promise<number> {
 
   /** Both --autopilot and --no-autopilot: one line, exit 2, nothing saved (task 975). */
   const both = autopilotChoice({ autopilot: values.autopilot, noAutopilot: values["no-autopilot"] });
-  const askFlags = askChoice({ noAutopilot: values["no-autopilot"], every: wholeOrNaN(values.every), askWith: values["ask-with"], askModel: values["ask-model"], host: modelHint() });
+  const askFlags = askChoice({ noAutopilot: values["no-autopilot"], every: wholeOrNaN(values.every), askWith: values["ask-with"], askModel: values["ask-model"], askBaseUrl: values["ask-base-url"], askKeyEnv: values["ask-key-env"], host: modelHint(), detail: hostDetailHint() });
   const conflict = !both.ok ? both : !askFlags.ok ? askFlags : null;
   if (conflict && !conflict.ok && (command === "plan" || command === "start" || command === "enter")) {
     print(json, { ok: false, error: conflict.error }, () => conflict.error);
@@ -374,6 +383,11 @@ async function main(argv: string[]): Promise<number> {
       const agent = loadAgent(home, need(args[0], "an agent name"));
       if (!agent) throw new Error("no such agent");
       console.log(renderCard(agent, null, { warmupPassed: agent.track === "script" && scriptCheckPassed(home, agent.script!.sha256) }));
+      // Addendum 11: the card carries the agent's last tick and the sign-in's end.
+      if (agent.track !== "entry") {
+        const end = signInEndOf(home, agent.name);
+        console.log(["", aliveLine(readAlive(home, agent.name), statusOf(home, agent.name).running, Date.now()), ...(signInLine(end, utc8) ? [signInLine(end, utc8)!] : [])].join("\n"));
+      }
       return 0;
     }
     case "start":
@@ -535,6 +549,8 @@ async function main(argv: string[]): Promise<number> {
         season: s.agent.league?.waitForSeason ? (readGate(home, name) ?? { state: "waiting", opensAt: null, at: null }) : s.agent.track === "prompt" ? readGate(home, name) : null,
         // Task 975, addendum 8: the release against the page's newest (this read's, else the runtime's last), and the sign-in's end.
         runtime: release,
+        // Addendum 11: alive since, and the last tick.
+        alive: readAlive(home, name),
         signInEndsAt: signInEnd === null ? null : new Date(signInEnd).toISOString(),
       };
       const gate = data.season;
@@ -553,7 +569,7 @@ async function main(argv: string[]): Promise<number> {
                     ? []
                     : s.agent!.ask && s.agent!.ask.with !== "none"
                     ? [
-                        `asking ${hostShown(s.agent!.ask.with)} every ${s.agent!.ask.every} min · last ask ${askState.last ? `${utc8(askState.last.at)} UTC+8 → ${askState.last.action}${askState.last.reason ? ` (${clean(askState.last.reason, 80)})` : ""}: ${clean(askState.last.result, 80)}` : "none yet"} · failures in a row ${askState.streak}${askState.floorKeeperSince !== null ? ` · on floor keeper since ${utc8(askState.floorKeeperSince)} UTC+8` : ""}`,
+                        `asking ${hostShown(s.agent!.ask.with)} every ${s.agent!.ask.every} min with ${s.agent!.ask.model ?? "its default model"} · last ask ${askState.last ? `${utc8(askState.last.at)} UTC+8 → ${askState.last.action}${askState.last.reason ? ` (${clean(askState.last.reason, 80)})` : ""}: ${clean(askState.last.result, 80)}` : "none yet"} · failures in a row ${askState.streak}${askState.floorKeeperSince !== null ? ` · on floor keeper since ${utc8(askState.floorKeeperSince)} UTC+8` : ""}`,
                         mine.autopilot ? `floor keeper: ${mine.autopilot.preset}, when ${hostShown(s.agent!.ask.with)} fails twice in a row, and 20 min before dinner with the floor unmet` : "floor keeper: none",
                       ]
                     : [mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no trade from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss"]),
@@ -583,6 +599,8 @@ async function main(argv: string[]): Promise<number> {
           `positions: ${data.positions.length ? data.positions.map((p) => `${p.symbol} ${p.costBnb} BNB${p.armed ? "" : " (exit not armed)"}`).join(", ") : "none"}`,
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...waiting,
+          // Addendum 11: alive since its start, and its last safety pass that worked.
+          ...(s.agent!.track !== "entry" ? [aliveLine(readAlive(home, name), s.running, Date.now())] : []),
           // Task 975, addendum 8: the season's end, the warm-up dinner, the release, the sign-in.
           ...(gate?.state === "over" ? [SEASON_OVER_LINE] : []),
           ...(s.agent!.track === "prompt" && !mine?.day && noFloorTonight(gate?.at ? (gate as GateState) : null, Date.now()) ? ["warm-up tonight: no floor (the warm-up dinner eats nobody); the floor counts from tomorrow"] : []),
@@ -784,6 +802,52 @@ async function main(argv: string[]): Promise<number> {
       print(json, { ok: true, every: minutes }, () => `"${name}" asks ${hostShown(agent.ask!.with)} every ${minutes} min from now on`);
       return 0;
     }
+    case "model": {
+      // Addendum 11: the model the agent's AI is asked with, changed without planning it again; "default" is the host's own.
+      const name = notEntry(need(args[0], "an agent name"));
+      const agent = loadAgent(home, name);
+      if (!agent?.ask || agent.ask.with === "none") throw new Error(`"${name}" asks no AI: plan it with --prompt (and --ask-with)`);
+      const given = need(args[1], "a model's name, or default");
+      const model = given === "default" ? null : given;
+      const line =
+        model !== null && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/.test(model)
+          ? "a model's name is letters, digits, dots, dashes, colons, slashes"
+          : model === null && agent.ask.with === "openai"
+            ? "an endpoint has no default model: name one"
+            : null;
+      if (line) {
+        print(json, { ok: false, error: line }, () => line);
+        return 2;
+      }
+      saveAgent(home, { ...agent, ask: { ...agent.ask, model } });
+      const paths = agentPaths(home, name);
+      mkdirSync(paths.inbox, { recursive: true });
+      writeJsonAtomic(join(paths.inbox, `${Date.now()}-reload.json`), { type: "reload" });
+      appendJsonl(paths.log, { at: new Date().toISOString(), event: "agent.changed", by: "user", ask: { model } });
+      print(json, { ok: true, model }, () => `"${name}" asks ${hostShown(agent.ask!.with)} with ${model ?? "its default model"} from its next ask on`);
+      return 0;
+    }
+    case "ask-key": {
+      // Addendum 11: the endpoint's key, read on stdin (never argv, never shown), kept for the agent under FL daemon too.
+      const name = notEntry(need(args[0], "an agent name"));
+      const agent = loadAgent(home, name);
+      if (agent?.ask?.with !== "openai") throw new Error(`"${name}" asks no endpoint (--ask-with openai): it needs no key here`);
+      if (process.stdin.isTTY) throw new Error(`pipe the key on stdin, e.g. \`pbpaste | FL ask-key ${name}\`: it is never typed on the command line`);
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+      const key = Buffer.concat(chunks).toString("utf8").trim();
+      if (!key || key.length > 4_096 || /\s/.test(key)) {
+        print(json, { ok: false, error: "no key on stdin (one token, no spaces)" }, () => "no key on stdin (one token, no spaces)");
+        return 2;
+      }
+      const path = askKeyPath(home, name);
+      mkdirSync(agentPaths(home, name).dir, { recursive: true });
+      writeFileSync(path, `${key}\n`, { mode: 0o600 });
+      chmodSync(path, 0o600);
+      appendJsonl(agentPaths(home, name).log, { at: new Date().toISOString(), event: "ask.key.kept" });
+      print(json, { ok: true, kept: true }, () => `the key for "${name}"'s endpoint is kept on this machine (mode 0600, read at each ask, never shown); a variable named by --ask-key-env, when set, comes first`);
+      return 0;
+    }
     case "ask": {
       // Task 975, addendum 4: --print shows the exact pack (nothing is sent to any AI); without it, one ask now.
       const name = notEntry(need(args[0], "an agent name"));
@@ -894,18 +958,13 @@ async function main(argv: string[]): Promise<number> {
       if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
       const action = values.install ? "install" : values.uninstall ? "uninstall" : values.status ? "status" : null;
       if (!action || [values.install, values.uninstall, values.status].filter(Boolean).length > 1) throw new Error("FL daemon <name> takes one of --install, --uninstall, --status");
-      if (process.platform !== "darwin" && process.platform !== "linux") throw new Error(`FL daemon is for macOS and Linux; on ${process.platform}, see docs/league/daemon.md`);
-      const run: Runner = (command, list) =>
-        new Promise((done) => {
-          const child = spawn(command, list, { stdio: ["ignore", "pipe", "pipe"] });
-          let stdout = "";
-          let stderr = "";
-          child.stdout?.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
-          child.stderr?.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
-          child.on("error", (error) => done({ code: 127, stdout, stderr: error.message }));
-          child.on("close", (code) => done({ code: code ?? 1, stdout, stderr }));
-        });
-      const result = await daemon({ action, platform: process.platform, name, home, userHome: homedir(), node: process.execPath, bin: BIN, path: daemonPath(process.env, process.execPath), uid: process.getuid?.() ?? 0, run, running: statusOf(home, name).running });
+      // Addendum 11: Windows gets the Task Scheduler line to run once; nothing is installed for it.
+      if (process.platform !== "darwin" && process.platform !== "linux") {
+        const lines = windowsLines({ name, node: process.execPath, bin: BIN });
+        print(json, { ok: false, platform: process.platform, lines }, () => lines.join("\n"));
+        return action === "install" ? 0 : 1;
+      }
+      const result = await supervise(home, name, action);
       print(json, result, () => result.lines.join("\n"));
       return result.ok ? 0 : 1;
     }
@@ -915,6 +974,30 @@ async function main(argv: string[]): Promise<number> {
       console.error(`unknown command "${command}"\n\n${HELP}`);
       return 1;
   }
+}
+
+/** The machine's supervisor for FL daemon and FL enter's last step (addendum 11): launchctl or systemctl, as a child. */
+const supervisorRunner: Runner = (command, list) =>
+  new Promise((done) => {
+    const child = spawn(command, list, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (d: Buffer) => (stdout += d.toString("utf8")));
+    child.stderr?.on("data", (d: Buffer) => (stderr += d.toString("utf8")));
+    child.on("error", (error) => done({ code: 127, stdout, stderr: error.message }));
+    child.on("close", (code) => done({ code: code ?? 1, stdout, stderr }));
+  });
+
+async function supervise(home: string, name: string, action: "install" | "uninstall" | "status") {
+  return daemon({ action, platform: process.platform as "darwin" | "linux", name, home, userHome: homedir(), node: process.execPath, bin: BIN, path: daemonPath(process.env, process.execPath), uid: process.getuid?.() ?? 0, run: supervisorRunner, running: statusOf(home, name).running });
+}
+
+/** FL enter's last step (addendum 11): the daemon on macOS and Linux; on Windows, the Task Scheduler line and no daemon. */
+async function enterDaemon(home: string, name: string): Promise<{ ok: boolean; lines: string[] }> {
+  if (process.env.FEAST_LEAGUE_DAEMON?.trim().toLowerCase() === "off") return { ok: false, lines: [] };
+  if (process.platform !== "darwin" && process.platform !== "linux") return { ok: false, lines: windowsLines({ name, node: process.execPath, bin: BIN }) };
+  const out = await supervise(home, name, "install");
+  return { ok: out.ok, lines: out.ok ? [] : out.lines };
 }
 
 /** 280 characters, zh and en mixed, for the preview of the Register message. */
@@ -984,6 +1067,7 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       signOptions: { onPending: () => process.stderr.write("Confirm the signature in the Binance App; waiting up to 10 minutes.\n") },
       // The trading agent, detached as FL start --detach starts it; it waits for the season itself.
       start: async (name, options) => detach(home, name, options.noJitter ? ["--no-jitter"] : []),
+      daemon: (name) => enterDaemon(home, name),
       waitForExit: (name) => waitForExit(home, name, 150),
       cwd: process.cwd(),
     },
@@ -999,6 +1083,9 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       every: wholeOrNaN(str(values.every)),
       askWith: str(values["ask-with"]),
       askModel: str(values["ask-model"]),
+      askBaseUrl: str(values["ask-base-url"]),
+      askKeyEnv: str(values["ask-key-env"]),
+      noDaemon: values["no-daemon"] === true,
       idleMinutes: idle !== undefined ? Number(idle) : undefined,
       noJitter: values["no-jitter"] === true,
       meme: concept !== undefined ? { concept, name: str(values["coin-name"]), symbol: str(values.symbol), description: str(values.description), image: str(values.image) } : undefined,

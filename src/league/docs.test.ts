@@ -76,7 +76,7 @@ describe("the skill, the setup, the release notes", () => {
     const setup = read("skills/feast-league/references/setup.md");
     expect(setup).toContain("--branch league-v5");
     expect(setup).not.toContain("--branch league-v4");
-    expect(setup).toContain("A runtime installed at `league-v1` … `league-v4` moves to `league-v5` the same way");
+    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5` moves to `league-v5.1` the same way");
     expect(setup).toContain("If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it.");
   });
 
@@ -334,7 +334,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
 
   it("a Grok host is told to pass --host grok; What it sends names the two headers", () => {
     expect(section9).toContain("passes `--host grok`");
-    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5`)");
+    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1`)");
     expect(skill).toMatch(/Every request `FL` makes to feast\.meme carries two headers: `x-feast-host`/);
   });
 
@@ -343,7 +343,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
     expect(log.indexOf("## league-v5")).toBeLessThan(log.indexOf("## league-v4"));
     const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
     for (const word of ["steady", "--no-autopilot", "30 minutes", "x-feast-host", "x-feast-runtime"]) expect(v5, word).toContain(word);
-    expect(/^## (league-v\d+)$/m.exec(log)![1]).toBe(RUNTIME_RELEASE);
+    expect(/^## (league-v\d+(?:\.\d+)?)$/m.exec(log)![1]).toBe(RUNTIME_RELEASE);
   });
 
   it("the description stays within 1024 characters and names the steady backup and six presets", () => {
@@ -508,7 +508,7 @@ describe("task 975, addendum 8: ready for the season", () => {
     for (const piece of [
       '"runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent"',
       "It never upgrades by itself.",
-      '"wallet sign-in valid until <date> UTC+8; re-scan before then or the agent stops trading"',
+      '"wallet sign-in ends at <date> UTC+8: re-scan before then or the agent stops trading"',
       '"WALLET SIGN-IN EXPIRES IN N H: the agent will stop; tell the player to run FL login."',
       "at 24 h, at 6 h, at 1 h and when it ends",
       '"season over: nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left"',

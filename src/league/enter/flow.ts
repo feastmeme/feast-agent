@@ -21,7 +21,7 @@ import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { tradingOpens } from "../season-gate.ts";
 import { sessionView } from "../session.ts";
 import { askChoice, autopilotChoice, prepareStart, shapeOf } from "../start.ts";
-import { modelHint } from "../headers.ts";
+import { hostDetailHint, modelHint } from "../headers.ts";
 import { agentPaths, appendJsonl, readJson, removeStop, walletLockHolder, writeJsonAtomic, writeStop } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
 import { upgradeSentence, versionView } from "../version.ts";
@@ -86,6 +86,12 @@ export type EnterDeps = {
   retry?: Retry;
   /** Task 968: start the trading agent in the background (the CLI's detached `run`); its pid. Tests pass a fake. */
   start?: (name: string, options: { noJitter: boolean }) => Promise<number>;
+  /**
+   * Addendum 11: keep the agent running across reboots and crashes, as FL enter's last step (unless --no-daemon): the
+   * machine's own supervisor starts it. `ok: false` (Windows, a home in the temp folder, a supervisor that said no):
+   * its lines are said and the agent is started in the background as before.
+   */
+  daemon?: (name: string) => Promise<{ ok: boolean; lines: string[] }>;
   /** Where `./strategy.md` is looked for and the default copied (the CLI: the working directory). */
   cwd?: string;
   /** Wait for an agent's runtime to exit after its stop file is written; false when it did not in time (the CLI: 150 s). */
@@ -111,6 +117,11 @@ export type EnterInput = {
   every?: number;
   askWith?: string;
   askModel?: string;
+  /** Addendum 11: `--ask-base-url` and `--ask-key-env` (the openai adapter). */
+  askBaseUrl?: string;
+  askKeyEnv?: string;
+  /** Addendum 11: the player said no to the daemon. */
+  noDaemon?: boolean;
   idleMinutes?: number;
   noJitter?: boolean;
   meme?: MemeInput;
@@ -207,7 +218,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   const startWanted = !input.noStart && !input.memeOnly;
   const choice = autopilotChoice({ autopilot: input.autopilot, noAutopilot: input.noAutopilot });
   if (!choice.ok) return end(2, false, "plan", choice.error);
-  const asked = askChoice({ noAutopilot: input.noAutopilot, every: input.every, askWith: input.askWith, askModel: input.askModel, host: modelHint() });
+  const asked = askChoice({ noAutopilot: input.noAutopilot, every: input.every, askWith: input.askWith, askModel: input.askModel, askBaseUrl: input.askBaseUrl, askKeyEnv: input.askKeyEnv, host: modelHint(), detail: hostDetailHint() });
   if (!asked.ok) return end(2, false, "plan", asked.error);
   let agentName: string | null = null;
   if (startWanted) {
@@ -301,10 +312,16 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (statusOf(deps.home, planned.name).running) return [copy.alreadyRunning(planned.name, lang)];
     const lock = walletLockHolder(deps.home);
     if (lock) return [copy.walletBusy(lock.agent, lang)];
+    // Addendum 11: the daemon first (it starts the agent itself, and again after a reboot or a crash).
+    const kept = deps.daemon && !input.noDaemon ? await deps.daemon(planned.name).catch((error: unknown) => ({ ok: false, lines: [String((error as Error).message)] })) : null;
+    if (kept?.ok) {
+      log("enter.started", { agent: planned.name, waitForSeason: true, daemon: true });
+      return [copy.daemonLine(planned.name, lang)];
+    }
     if (!deps.start) return [copy.startRefused("this run cannot start an agent", lang)];
     const pid = await deps.start(planned.name, { noJitter: input.noJitter === true });
-    log("enter.started", { agent: planned.name, waitForSeason: true });
-    return [copy.startedLine(planned.name, pid, lang)];
+    log("enter.started", { agent: planned.name, waitForSeason: true, daemon: false });
+    return [copy.startedLine(planned.name, pid, lang), ...(kept ? kept.lines : []), ...(input.noDaemon ? [copy.noDaemonLine(planned.name, lang)] : [])];
   };
 
   // --- entered, and nothing to launch: the start alone, with no signature -------------------------------------
