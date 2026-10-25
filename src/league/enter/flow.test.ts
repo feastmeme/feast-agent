@@ -19,7 +19,7 @@ import { agentPaths, leagueRecordPath, walletLockPath, writeFileAtomic } from ".
 import { ENTRY_AGENT } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { AVATAR_PNG, FakeEnterSite, fakeEnterChain, fakeOneShot, INDEXER, keptRow, SITE, type FakeChainOptions, type FakeShotOptions, type FakeSiteOptions } from "./fakes.ts";
-import { enter, entryAgent, readEntry, referrerStatus, type EnterDeps, type EnterInput } from "./flow.ts";
+import { enter, entryAgent, keepReferrerRead, keptReferrer, readEntry, referrerStatus, type EnterDeps, type EnterInput } from "./flow.ts";
 import { defaultStrategy } from "./strategy.ts";
 
 /**
@@ -900,6 +900,18 @@ describe("addendum 11: FL enter ends by keeping the agent up", () => {
     expect(out.text).toContain(`"${ID}" is started by this machine's daemon: it comes back by itself after a reboot or a crash; \`FL daemon ${ID} --uninstall\` removes it.`);
   });
 
+  it("run 19: the daemon installed but not started by the supervisor: the background start, and the truth, never 'started by this machine's daemon'", async () => {
+    const w = world();
+    w.deps.daemon = async () => ({ ok: true, running: false, startCommand: "launchctl kickstart gui/501/meme.feast.league.x", lines: [] });
+    await w.run();
+    const out = await w.run({ yes: true });
+    expect(out).toMatchObject({ code: 0, ok: true, stage: "done" });
+    expect(w.starts).toEqual([{ name: ID, noJitter: false }]);
+    expect(out.text).toContain(`started "${ID}" in the background (pid 4242)`);
+    expect(out.text).toContain(`The daemon is installed, but this machine's supervisor did not start "${ID}": it runs in the background now, and the daemon takes over at the next log-in or reboot.`);
+    expect(out.text).not.toContain("is started by this machine's daemon");
+  });
+
   it("a daemon that cannot be installed (Windows, a home in the temp folder): its lines, and the background start as before", async () => {
     const w = world();
     w.deps.daemon = async () => ({ ok: false, lines: ["Windows: no daemon is installed by FL. …"] });
@@ -1005,9 +1017,12 @@ describe("run 17: the referral binding (v5.1.1), signed by itself since run 18",
     expect(await bindSignatureRecovers({ wallet: w.wallet, referrer: getAddress(REFERRER), deadline: BigInt(body.deadline) }, body.signature)).toBe(true);
     expect(Number(body.deadline) * 1_000 - DAY_ONE).toBeGreaterThan(6.9 * 86_400_000);
     expect(w.entry().refBinding).toMatchObject({ state: "pending", referrer: REFERRER });
-    // Never again: the next entry says nothing of it, and signs nothing more.
+    // Never again: the next entry signs nothing more, and (run 19) says the referral is kept.
     const third = await w.run({ yes: true });
-    expect(third.text).not.toContain("Referrer:");
+    expect(third.text).toContain("Referrer: referral kept (code H7KMQ2), nothing signed again; FL status says whether it is on chain yet");
+    expect(submitted).toHaveLength(1);
+    const zh = await w.run({ yes: true, lang: "zh" });
+    expect(zh.text).toContain("引荐人:推荐码 H7KMQ2 的引荐绑定已保存，不再签名（FL status 显示是否已上链）");
     expect(submitted).toHaveLength(1);
   });
 
@@ -1053,7 +1068,10 @@ describe("run 17: the referral binding (v5.1.1), signed by itself since run 18",
     expect(out.text).toContain("Referrer: bound, to someone else before H7KMQ2 (a referrer never changes)");
     expect(other.submitted).toEqual([]);
     expect(other.w.entry().refBinding).toMatchObject({ state: "bound" });
-    expect((await other.w.run({ yes: true })).text).not.toContain("Referrer:");
+    // The rerun: the same line from the record, the chain not asked again.
+    const reads = other.reads();
+    expect((await other.w.run({ yes: true })).text).toContain("Referrer: bound, to someone else before H7KMQ2 (a referrer never changes)");
+    expect(other.reads()).toBe(reads);
     const same = referred({ onChain: REFERRER });
     await same.w.run({ ref: "H7KMQ2" });
     expect((await same.w.run({ ref: "H7KMQ2", yes: true })).text).toContain("Referrer: bound to H7KMQ2");
@@ -1108,5 +1126,24 @@ describe("run 18: FL status's referrer line", () => {
     expect(line({ ref: "H7KMQ2", refBinding: { state: "self", referrer: null, deadline: null, at: "x" } }, null)).toBe("Referrer: not applicable (the code H7KMQ2 is this wallet's own)");
     expect(line({ ref: null, refBinding: null }, null)).toBeNull();
     expect(line(null, "unreadable")).toBeNull();
+  });
+});
+
+describe("run 19: FL status reads the registry once the wallet is bound, then keeps it", () => {
+  it("the bound referrer kept in the entry's record; nothing kept while unbound; nothing without a code", () => {
+    const w = world();
+    const dir = agentPaths(w.home, ENTRY_AGENT).dir;
+    mkdirSync(dir, { recursive: true });
+    const entryFile = join(dir, "entry.json");
+    writeFileSync(entryFile, JSON.stringify({ agentId: "maplegrin", bodyCoin: null, launchTx: null, ref: "H7KMQ2", refBinding: { state: "pending", referrer: "0x000000000000000000000000000000000000b0b0", deadline: 1, at: "x" } }));
+    expect(keptReferrer(readEntry(w.home))).toBeNull();
+    keepReferrerRead(w.home, getAddress("0x000000000000000000000000000000000000b0b0"), Date.parse("2026-10-26T12:00:00Z"));
+    const kept = readEntry(w.home)!;
+    expect(kept.refBinding).toMatchObject({ state: "bound", referrer: "0x000000000000000000000000000000000000b0b0", onChain: "0x000000000000000000000000000000000000b0b0" });
+    expect(keptReferrer(kept)).toBe(getAddress("0x000000000000000000000000000000000000b0b0"));
+    expect(copy.referrerLine(referrerStatus(kept, keptReferrer(kept), Date.now())!, "en")).toBe("Referrer: bound to H7KMQ2");
+    writeFileSync(entryFile, JSON.stringify({ agentId: "maplegrin", bodyCoin: null, launchTx: null }));
+    keepReferrerRead(w.home, getAddress("0x000000000000000000000000000000000000b0b0"), Date.now());
+    expect(readEntry(w.home)!.refBinding).toBeUndefined();
   });
 });

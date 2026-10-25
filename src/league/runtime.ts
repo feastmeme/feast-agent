@@ -161,7 +161,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
   const checked = resolveLimits(agent.limits);
   if (!checked.ok) return { exit: "refused", reason: `the agent's limits do not validate: ${checked.errors.join("; ")}` };
   const atStart = stopReason(deps.home, deps.name);
-  if (atStart) return { exit: "refused", reason: `a stop file is present (${atStart}); \`feast-league resume\` removes it` };
+  if (atStart) return { exit: "refused", reason: `a stop file is present (${atStart}); \`FL resume\` removes it` };
   // A script is read ONCE: the bytes checked here are the bytes the sandbox runs.
   let scriptSource: string | null = null;
   if (agent.track === "script") {
@@ -172,7 +172,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
   }
   // A prompt is the user's text for their own agent: the runtime only checks it is the one they said yes to.
   if (agent.track === "prompt" && promptChanged(agent)) {
-    return { exit: "refused", reason: `the prompt changed since you confirmed it (or is gone): \`feast-league start ${deps.name} --prompt ${agent.prompt?.path ?? "<file>"}\` shows the new card` };
+    return { exit: "refused", reason: `the prompt changed since you confirmed it (or is gone): \`FL start ${deps.name} --prompt ${agent.prompt?.path ?? "<file>"}\` shows the new card` };
   }
 
   let lock: { release: () => void };

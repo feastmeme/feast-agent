@@ -95,7 +95,7 @@ export type EnterDeps = {
    * machine's own supervisor starts it. `ok: false` (Windows, a home in the temp folder, a supervisor that said no):
    * its lines are said and the agent is started in the background as before.
    */
-  daemon?: (name: string) => Promise<{ ok: boolean; lines: string[] }>;
+  daemon?: (name: string) => Promise<{ ok: boolean; lines: string[]; /** Run 19: whether the supervisor really started it (null: not known). */ running?: boolean | null; startCommand?: string | null }>;
   /** Where `./strategy.md` is looked for and the default copied (the CLI: the working directory). */
   cwd?: string;
   /** Wait for an agent's runtime to exit after its stop file is written; false when it did not in time (the CLI: 150 s). */
@@ -154,7 +154,7 @@ export type EntryRecord = {
    * Run 17: where the wallet's referral binding stands; signed by itself since run 18 (the code is the consent), and
    * never again once kept, bound or the wallet's own. `referrer` is the code's referrer, when the site named it.
    */
-  refBinding?: { state: "pending" | "sent" | "bound" | "refused" | "unknown" | "self"; referrer: string | null; deadline: number | null; at: string; refusal?: string | null } | null;
+  refBinding?: { state: "pending" | "sent" | "bound" | "refused" | "unknown" | "self"; referrer: string | null; deadline: number | null; at: string; refusal?: string | null; /** Run 19: the registry's referrer once read as bound (it never changes, so it is not read again). */ onChain?: string | null } | null;
   /** Task 968: the meme launched with `--meme` or `FL meme`. */
   meme?: { coin: Address; symbol: string; name: string; txHash: Hex | null; concept: string } | null;
   /** Task 968: the trading agent the entry started. */
@@ -335,7 +335,12 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (!deps.referrals || !deps.signer.signReferralBind) return [];
     const said = (r: copy.ReferrerSaid) => [copy.referrerLine(r, lang)];
     const b = kept?.refBinding ?? null;
-    if (b && (b.state === "bound" || b.state === "sent" || b.state === "self" || (b.state === "pending" && b.deadline !== null && b.deadline * 1_000 > now()))) return [];
+    // Run 19: kept or bound already: nothing signed, and one line so the rerun does not leave the player wondering.
+    if (b && (b.state === "bound" || b.state === "sent" || (b.state === "pending" && b.deadline !== null && b.deadline * 1_000 > now()))) {
+      if (b.state === "bound" && b.onChain && b.referrer) return said({ kind: b.onChain.toLowerCase() === b.referrer.toLowerCase() ? "bound" : "other", code });
+      return said({ kind: "kept-before", code });
+    }
+    if (b?.state === "self") return [];
     const at = () => new Date(now()).toISOString();
     const keep = (refBinding: NonNullable<EntryRecord["refBinding"]>) => {
       const latest = readEntry(deps.home);
@@ -352,7 +357,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const boundAlready = async (onChain: Address | null) => {
       const r = await referrals.resolve(code);
       const referrer = r.kind === "address" ? r.referrer.toLowerCase() : null;
-      keep({ state: "bound", referrer, deadline: null, at: at() });
+      keep({ state: "bound", referrer, deadline: null, at: at(), onChain: onChain?.toLowerCase() ?? null });
       log("enter.bind", { result: "already-bound" });
       if (referrer === null || onChain === null) return said({ kind: "bound-unread", code });
       return said({ kind: referrer === onChain.toLowerCase() ? "bound" : "other", code });
@@ -392,7 +397,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     }
     if (answer.kind === "already-bound") {
       const now2 = await referrals.referrerOf(wallet);
-      keep({ state: "bound", referrer: referrer.toLowerCase(), deadline: null, at: at() });
+      keep({ state: "bound", referrer: referrer.toLowerCase(), deadline: null, at: at(), onChain: now2 === "unreadable" || now2 === null ? null : now2.toLowerCase() });
       if (now2 === "unreadable" || now2 === null) return said({ kind: "bound-unread", code });
       return said({ kind: now2.toLowerCase() === referrer.toLowerCase() ? "bound" : "other", code });
     }
@@ -427,13 +432,19 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const lock = walletLockHolder(deps.home);
     if (lock) return [copy.walletBusy(lock.agent, lang)];
     // Addendum 11: the daemon first (it starts the agent itself, and again after a reboot or a crash).
-    const kept = deps.daemon && !input.noDaemon ? await deps.daemon(planned.name).catch((error: unknown) => ({ ok: false, lines: [String((error as Error).message)] })) : null;
-    if (kept?.ok) {
+    const kept = deps.daemon && !input.noDaemon ? await deps.daemon(planned.name).catch((error: unknown) => ({ ok: false, running: null, lines: [String((error as Error).message)] })) : null;
+    if (kept?.ok && kept.running !== false) {
       log("enter.started", { agent: planned.name, waitForSeason: true, daemon: true });
       return [copy.daemonLine(planned.name, lang)];
     }
     if (!deps.start) return [copy.startRefused("this run cannot start an agent", lang)];
     const pid = await deps.start(planned.name, { noJitter: input.noJitter === true });
+    // Run 19: the daemon is installed, but its supervisor has not started the agent (launchd's deferred spawn): it runs
+    // in the background now, and the line says so, never that the daemon started it.
+    if (kept?.ok) {
+      log("enter.started", { agent: planned.name, waitForSeason: true, daemon: "installed, not started" });
+      return [copy.startedLine(planned.name, pid, lang), copy.daemonNotStartedLine(planned.name, lang)];
+    }
     log("enter.started", { agent: planned.name, waitForSeason: true, daemon: false });
     return [copy.startedLine(planned.name, pid, lang), ...(kept ? kept.lines : []), ...(input.noDaemon ? [copy.noDaemonLine(planned.name, lang)] : [])];
   };
@@ -761,4 +772,19 @@ export function referrerStatus(entry: Pick<EntryRecord, "ref" | "refBinding"> | 
   if (b?.state === "unknown") return { kind: "unknown", code };
   if (b?.state === "self") return { kind: "self", code };
   return { kind: "next", code };
+}
+
+/**
+ * Run 19: `FL status`'s registry read, once: a referrer read as bound is kept in the entry's record (a wallet's
+ * referrer never changes), so later reads skip the chain. `keptReferrer` is that kept read, null when there is none.
+ */
+export function keptReferrer(entry: Pick<EntryRecord, "refBinding"> | null): Address | null {
+  const on = entry?.refBinding?.onChain;
+  return on ? getAddress(on) : null;
+}
+export function keepReferrerRead(home: string, onChain: Address, nowMs: number): void {
+  const latest = readEntry(home);
+  if (!latest?.ref) return;
+  const b = latest.refBinding ?? null;
+  writeJsonAtomic(entryPaths(home).entry, { ...latest, refBinding: { ...(b ?? { referrer: null, deadline: null }), state: "bound", at: b?.at ?? new Date(nowMs).toISOString(), onChain: onChain.toLowerCase() } });
 }

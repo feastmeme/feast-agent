@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -72,13 +72,44 @@ describe("--poll, --live and --no-jitter, through the binary", () => {
 
   it("start in the foreground says when it starts reading the market; --no-jitter says nothing of the kind", async () => {
     const { env } = setup();
-    const jittered = await run(["start", "maple", "--yes", "--max-runtime", "2"], env);
+    const jittered = await run(["start", "maple", "--yes", "--max-runtime", "2", "--foreground"], env);
     expect(jittered.stdout).toMatch(/^starts reading the market within \d{1,3} s$/m);
     const n = Number(/within (\d+) s/.exec(jittered.stdout)![1]);
     expect(n).toBeGreaterThanOrEqual(0);
     expect(n).toBeLessThanOrEqual(120);
-    const plain = await run(["start", "maple", "--yes", "--max-runtime", "2", "--no-jitter", "--poll", "3"], env);
+    const plain = await run(["start", "maple", "--yes", "--max-runtime", "2", "--no-jitter", "--poll", "3", "--foreground"], env);
     expect(plain.stdout).not.toMatch(/starts reading the market/);
     expect(plain.stdout).toMatch(/maple: finished/);
+  }, 60_000);
+});
+
+describe("run 19: FL start runs the agent in the background by default", () => {
+  it("started in the background, and it keeps running when the command that started it is gone", async () => {
+    const { env, home } = setup();
+    const out = await run(["start", "maple", "--yes", "--max-runtime", "6", "--no-jitter"], { ...env, FEAST_LEAGUE_DAEMON: "off" });
+    expect(out.code).toBe(0);
+    expect(out.stdout).toMatch(/^started "maple" in the background \(pid \d+\): it keeps running when this shell closes; FL status maple$/m);
+    // The command has exited; the agent has not (yet): its own line comes when its max runtime is up.
+    const outFile = join(home, "agents", "maple", "runtime.out");
+    expect(existsSync(outFile) ? readFileSync(outFile, "utf8") : "").not.toMatch(/maple: finished/);
+    for (let i = 0; i < 60 && !(existsSync(outFile) && /maple: finished/.test(readFileSync(outFile, "utf8"))); i++) await new Promise((r) => setTimeout(r, 250));
+    expect(readFileSync(outFile, "utf8")).toMatch(/maple: finished/);
+  }, 60_000);
+
+  it("a start that exits at once is said with its own line, never 'started'; a stopped agent is sent to FL resume", async () => {
+    const { env } = setup();
+    const dir = mkdtempSync(join(tmpdir(), "feast-league-975-signedout-"));
+    dirs.push(dir);
+    const out = join(dir, "baw");
+    writeFileSync(out, `#!${process.execPath}\nconst c = process.argv.slice(2, 4).join(" ");\nif (c === "wallet status") console.log(JSON.stringify({ success: true, data: { status: "UNCONNECTED" } }));\nelse console.log(JSON.stringify({ success: false, error: { name: "NOT_IN_THIS_TEST" } }));\n`);
+    chmodSync(out, 0o755);
+    const ended = await run(["start", "maple", "--yes", "--no-jitter"], { ...env, FEAST_LEAGUE_BAW: out, FEAST_LEAGUE_DAEMON: "off" });
+    expect(ended.code).toBe(2);
+    expect(ended.stdout).toMatch(/^"maple" did not keep running: maple: (refused|error) — /m);
+    expect(ended.stdout).not.toMatch(/started "maple"/);
+    expect((await run(["stop", "maple"], env)).code).toBe(0);
+    const stopped = await run(["start", "maple", "--yes"], { ...env, FEAST_LEAGUE_DAEMON: "off" });
+    expect(stopped.code).toBe(2);
+    expect(stopped.stdout.trim()).toBe('"maple" is stopped (stop requested by the user): FL resume maple removes the stop and starts it');
   }, 60_000);
 });

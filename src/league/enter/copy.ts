@@ -395,6 +395,13 @@ export function daemonLine(name: string, lang: Lang): string {
     : `"${name}" is started by this machine's daemon: it comes back by itself after a reboot or a crash; \`FL daemon ${name} --uninstall\` removes it.`;
 }
 
+/** Run 19: the daemon is installed, but the machine's supervisor did not start the agent; it runs in the background. */
+export function daemonNotStartedLine(name: string, lang: Lang): string {
+  return lang === "zh"
+    ? `守护进程已安装，但本机的守护进程管理器还没有启动「${name}」：它现在已在后台运行；下次登录或重启后由守护进程接管。`
+    : `The daemon is installed, but this machine's supervisor did not start "${name}": it runs in the background now, and the daemon takes over at the next log-in or reboot.`;
+}
+
 /** Addendum 11: the player said no to the daemon. */
 export function noDaemonLine(name: string, lang: Lang): string {
   return lang === "zh" ? `没有装守护进程：这台电脑重启后，运行 \`FL start ${name}\`。` : `No daemon: after this machine restarts, run \`FL start ${name}\`.`;
@@ -416,6 +423,7 @@ export type ReferrerSaid =
   | { kind: "self"; code: string }
   | { kind: "later"; code: string; who: "wallet" | "chain" | "site" }
   | { kind: "failed"; code: string }
+  | { kind: "kept-before"; code: string }
   | { kind: "not-signed"; code: string; why: string }
   | { kind: "refused"; code: string; name: string }
   | { kind: "next"; code: string }
@@ -441,6 +449,8 @@ export function referrerLine(r: ReferrerSaid, lang: Lang): string {
       const who = zh ? { wallet: "钱包", chain: "链", site: "feast.meme" }[r.who] : { wallet: "the wallet", chain: "the chain", site: "feast.meme" }[r.who];
       return zh ? `引荐人:未绑定（${who}暂时没有回应，什么都没签；下次 FL enter 会自动再试）` : `Referrer: not bound yet (${who} did not answer; nothing was signed; the next FL enter tries again)`;
     }
+    case "kept-before":
+      return zh ? `引荐人:推荐码 ${c} 的引荐绑定已保存，不再签名（FL status 显示是否已上链）` : `Referrer: referral kept (code ${c}), nothing signed again; FL status says whether it is on chain yet`;
     case "failed":
       return zh ? "引荐人:未绑定（这次没能完成绑定；下次 FL enter 会自动再试）" : "Referrer: not bound yet (the binding could not be done just now; the next FL enter tries again)";
     case "not-signed":

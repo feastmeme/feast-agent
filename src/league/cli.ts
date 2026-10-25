@@ -14,7 +14,7 @@ import { AUDIT_RULES } from "./audit/static.ts";
 import { auditFile, auditRefusal, recordModelVerdict } from "./audit/verdict.ts";
 import { BawError, BawSigner, execRunner } from "./baw.ts";
 import { aliveLine, readAlive } from "./alive.ts";
-import { daemon, daemonPath, windowsLines, type Runner } from "./daemon.ts";
+import { daemon, daemonPath, kickDaemon, windowsLines, type Runner } from "./daemon.ts";
 import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
@@ -78,18 +78,18 @@ import {
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
 import { autopilotLine, awakeLine, clean, referrerLine, tradeNowLine } from "./enter/copy.ts";
-import { enter, entryOneShot, readEntry, referrerStatus } from "./enter/flow.ts";
+import { enter, entryOneShot, keepReferrerRead, keptReferrer, readEntry, referrerStatus } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { referralDeps } from "./register/referral.ts";
 import { LeagueSite, seatingOfKept, siteFromEnv, type LeagueRead } from "./register/site.ts";
 import { runAgent, statusOf } from "./runtime.ts";
 import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./script/check.ts";
 import { standingLines, type StandingInput } from "./season-card.ts";
-import { noFloorTonight, readGate, SEASON_OVER_LINE, startSaysWaiting, waitingStatusLine, type GateState } from "./season-gate.ts";
+import { noFloorTonight, readGate, SEASON_OVER_LINE, startSaysWaiting, tradingOpens, utc8Day, waitingStatusLine, type GateState, type Opening } from "./season-gate.ts";
 import { sessionView, signInEndOf, signInLine } from "./session.ts";
 import { readVersion, versionLine, versionView } from "./version.ts";
 import { askChoice, autopilotChoice, prepareStart } from "./start.ts";
-import { agentPaths, appendJsonl, checkAgentName, leagueHome, readJson, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
+import { agentNameOf, agentPaths, appendJsonl, checkAgentName, leagueHome, readJson, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
 import type { IntentRequest } from "./strategy.ts";
 
 const HELP = `feast-league — run a Feast agent with your Binance Agentic Wallet
@@ -212,16 +212,39 @@ const indexer = () => (process.env.FEAST_LEAGUE_INDEXER?.trim() || INDEXER_URL).
 const print = (json: boolean, data: unknown, human: () => string) => console.log(json ? JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2) : human());
 
 function detach(home: string, name: string, extra: string[] = []): number {
+  return spawnDetached(home, name, extra).pid ?? 0;
+}
+function spawnDetached(home: string, name: string, extra: string[]) {
   const paths = agentPaths(home, name);
   mkdirSync(paths.dir, { recursive: true });
   const outFd = openSync(join(paths.dir, "runtime.out"), "a", 0o600);
   const child = spawn(process.execPath, [BIN, "run", name, ...extra], { detached: true, stdio: ["ignore", outFd, outFd], env: { ...process.env, FEAST_LEAGUE_HOME: home } });
   child.unref();
-  return child.pid ?? 0;
+  return child;
+}
+/** How long `FL start` watches the background start for an exit at once (a refusal, a signed-out wallet). */
+const START_WATCH_MS = 3_000;
+/**
+ * Run 19: `FL start` in the background, and watched for a moment: a start that exits at once (a refusal) is said with
+ * its own last line, never "started". Null: it is running.
+ */
+async function detachWatched(home: string, name: string, extra: string[]): Promise<{ pid: number; ended: string | null }> {
+  const child = spawnDetached(home, name, extra);
+  const ended = await new Promise<number | null>((done) => {
+    const timer = setTimeout(() => done(null), START_WATCH_MS);
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      done(code ?? 1);
+    });
+  });
+  if (ended === null) return { pid: child.pid ?? 0, ended: null };
+  const out = existsSync(join(agentPaths(home, name).dir, "runtime.out")) ? readFileSync(join(agentPaths(home, name).dir, "runtime.out"), "utf8").trim().split("\n") : [];
+  return { pid: child.pid ?? 0, ended: clean(out.at(-1) ?? `exit ${ended}`, 300) };
 }
 
 /** What `FL start` says of an agent that waits for the season (task 968). */
-const waitingLine = (name: string) => `"${name}" waits for the season: it trades nothing before it opens; feast-league status ${name} shows when`;
+const waitingLine = (name: string, opensAt: string | null = null) =>
+  opensAt && Number.isFinite(Date.parse(opensAt)) ? `"${name}" waits for the season: season starts and trading opens ${utc8Day(Date.parse(opensAt))} UTC+8; it trades nothing before` : `"${name}" waits for the season: it trades nothing before it opens; FL status ${name} shows when`;
 
 async function waitForExit(home: string, name: string, seconds: number): Promise<boolean> {
   const until = Date.now() + seconds * 1_000;
@@ -246,6 +269,7 @@ async function main(argv: string[]): Promise<number> {
       yes: { type: "boolean", default: false },
       review: { type: "boolean", default: false },
       detach: { type: "boolean", default: false },
+      foreground: { type: "boolean", default: false },
       all: { type: "boolean", default: false },
       wait: { type: "string" },
       json: { type: "boolean", default: false },
@@ -330,9 +354,11 @@ async function main(argv: string[]): Promise<number> {
   const declared = readDeclaredHost(home);
   if (declared) process.env.FEAST_LEAGUE_HOST = declared;
   const need = (value: string | undefined, what: string) => {
-    if (!value) throw new Error(`missing ${what}; see feast-league --help`);
+    if (!value) throw new Error(`missing ${what}; see FL --help`);
     return value;
   };
+  /** An agent's name; `<id>.ai` (the Agent ID as the player sees it) is the same agent (run 19). */
+  const agentArg = (value: string | undefined) => agentNameOf(need(value, "an agent name"));
   /** league-entry is FL enter's own agent: the season's commands never plan, start or change it. */
   const notEntry = (name: string) => {
     if (name === ENTRY_AGENT) throw new Error(`${ENTRY_AGENT} is FL enter's; plan your season agent under another name`);
@@ -374,21 +400,21 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case "plan": {
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       const planned = planAgent(planInput(name));
       if (!planned.ok) {
         print(json, { ok: false, errors: planned.errors }, () => `not planned:\n- ${planned.errors.join("\n- ")}`);
         return 2;
       }
       const existing = loadAgent(home, name);
-      if (existing && statusOf(home, name).running) throw new Error(`agent "${name}" is running; stop it, or change it with feast-league set`);
+      if (existing && statusOf(home, name).running) throw new Error(`agent "${name}" is running; stop it, or change it with FL set`);
       saveAgent(home, planned.agent);
       if (planned.audit) auditFile(home, planned.agent.script!.path, { maxTradeBnb: planned.agent.limits.maxTradeBnb });
       print(json, { ok: true, agent: planned.agent, audit: planned.audit, card: renderCard(planned.agent, planned.audit) }, () => renderCard(planned.agent, planned.audit));
       return 0;
     }
     case "card": {
-      const agent = loadAgent(home, need(args[0], "an agent name"));
+      const agent = loadAgent(home, agentArg(args[0]));
       if (!agent) throw new Error("no such agent");
       console.log(renderCard(agent, null, { warmupPassed: agent.track === "script" && scriptCheckPassed(home, agent.script!.sha256) }));
       // Addendum 11: the card carries the agent's last tick and the sign-in's end.
@@ -409,13 +435,13 @@ async function main(argv: string[]): Promise<number> {
       }
       const given = values["start-jitter"];
       if (given !== undefined && !(/^\d{1,3}$/.test(given) && Number(given) * 1_000 <= START_JITTER_MS)) throw new Error("--start-jitter is FL start's own: 0–120 whole seconds");
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       if (values.prompt !== undefined && command !== "start") throw new Error("--prompt goes with plan or start");
       if (command === "resume") {
         if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
         removeStop(agentPaths(home, name).stop);
         if (existsSync(join(home, "STOP"))) {
-          if (!values.all) throw new Error("the global stop file is present too (feast-league stop --all wrote it); resume with --all to remove it");
+          if (!values.all) throw new Error("the global stop file is present too (FL stop --all wrote it); resume with --all to remove it");
           removeStop(join(home, "STOP"));
         }
       }
@@ -425,7 +451,7 @@ async function main(argv: string[]): Promise<number> {
         print(json, { ok: false, errors: checked.errors }, () => `not planned:\n- ${checked.errors.join("\n- ")}`);
         return 2;
       }
-      if (checked.kind === "running") throw new Error(`agent "${name}" is running; stop it first (feast-league stop ${name}), then start it with the new prompt`);
+      if (checked.kind === "running") throw new Error(`agent "${name}" is running; stop it first (FL stop ${name}), then start it with the new prompt`);
       if (checked.kind === "no-agent") throw new Error(`no agent "${name}": plan it first`);
       if (checked.kind === "needs-yes") {
         console.log(`${checked.card}\n\nNot started: this needs the user's explicit yes (--yes).`);
@@ -450,14 +476,40 @@ async function main(argv: string[]): Promise<number> {
         console.log(`"${name}" is running; its pause is cleared`);
         return 0;
       }
-      if (values.detach && command !== "run") {
+      // Run 19: FL start and FL resume run the agent in the background by default (in the foreground it died with the
+      // player's shell); --foreground keeps it in this shell, for debugging. `FL run` (the daemon's) stays in the foreground.
+      if (!values.foreground && command !== "run") {
+        if (statusOf(home, name).running) {
+          console.log(`"${name}" is running already; FL status ${name}`);
+          return 0;
+        }
+        const stopped = stopReason(home, name);
+        if (stopped) {
+          print(json, { ok: false, stopped }, () => `"${name}" is stopped (${stopped}): FL resume ${name} removes the stop and starts it`);
+          return 2;
+        }
         const holder = walletLockHolder(home);
         if (holder) throw new Error(`the wallet is in use by agent "${holder.agent}"; stop it first`);
-        const pid = detach(home, name, [...extra, ...(command === "resume" ? ["--clear-pause"] : []), ...(jitterMs > 0 ? ["--start-jitter", String(Math.ceil(jitterMs / 1_000))] : [])]);
-        console.log(`started "${name}" in the background (pid ${pid}); feast-league status ${name}`);
+        const waits = startSaysWaiting(agent.league?.waitForSeason === true, readGate(home, name));
+        // A daemon of its own starts it, when nothing more is asked of this start (a supervisor runs `FL run` as written).
+        if (command === "start" && extra.filter((a) => a !== "--no-jitter").length === 0 && (process.platform === "darwin" || process.platform === "linux") && process.env.FEAST_LEAGUE_DAEMON?.trim().toLowerCase() !== "off") {
+          const kicked = await kickDaemon({ platform: process.platform, name, uid: process.getuid?.() ?? 0, run: supervisorRunner, userHome: homedir(), isRunning: () => statusOf(home, name).running });
+          if (kicked.installed && kicked.running) {
+            console.log(`"${name}" is started by this machine's daemon: it keeps running when this shell closes, and comes back by itself after a reboot or a crash; FL status ${name}`);
+            if (waits) console.log(waitingLine(name, readGate(home, name)?.opensAt ?? null));
+            return 0;
+          }
+          if (kicked.installed) console.log(`its daemon did not start it (${kicked.state ? `state "${kicked.state}"` : "its state could not be read"}): starting it in the background instead`);
+        }
+        const { pid, ended } = await detachWatched(home, name, [...extra, ...(command === "resume" ? ["--clear-pause"] : []), ...(jitterMs > 0 ? ["--start-jitter", String(Math.ceil(jitterMs / 1_000))] : [])]);
+        if (ended !== null) {
+          print(json, { ok: false, ended }, () => `"${name}" did not keep running: ${ended}`);
+          return 2;
+        }
+        console.log(`started "${name}" in the background (pid ${pid}): it keeps running when this shell closes; FL status ${name}`);
         if (jitterLine) console.log(jitterLine);
         // Addendum 10: only while the gate is not open (a restart in the season, or after it, waits for nothing).
-        if (startSaysWaiting(agent.league?.waitForSeason === true, readGate(home, name))) console.log(waitingLine(name));
+        if (waits) console.log(waitingLine(name, readGate(home, name)?.opensAt ?? null));
         return 0;
       }
       if (jitterLine && command !== "run") console.log(jitterLine);
@@ -493,7 +545,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "status": {
-      const name = need(args[0], "an agent name");
+      const name = agentArg(args[0]);
       const s = statusOf(home, name);
       if (!s.agent) throw new Error("no such agent");
       const view = s.book ? bookView(s.book, undefined, Date.now()) : null;
@@ -514,7 +566,10 @@ async function main(argv: string[]): Promise<number> {
       const release = (league?.latestRuntime ? versionView(league.latestRuntime, Date.now()) : null) ?? readVersion(home, name) ?? null;
       // Run 17: the referral binding, read from the registry itself when this entry carries a code.
       const entryRecord = readEntry(home);
-      const referrerOn = !entryRecord?.ref ? null : statusWallet ? await within(referralDeps({ site: siteFromEnv(), fetch, client: chain.client as never }).referrerOf(statusWallet), 6_000).catch(() => "unreadable" as const) : ("unreadable" as const);
+      // Run 19: once read as bound it is kept (a referrer never changes), and the chain is not asked again.
+      const referrerKept = keptReferrer(entryRecord);
+      const referrerOn = !entryRecord?.ref ? null : referrerKept ? referrerKept : statusWallet ? await within(referralDeps({ site: siteFromEnv(), fetch, client: chain.client as never }).referrerOf(statusWallet), 6_000).catch(() => "unreadable" as const) : ("unreadable" as const);
+      if (entryRecord?.ref && !referrerKept && referrerOn && referrerOn !== "unreadable") keepReferrerRead(home, referrerOn, Date.now());
       const signInEnd = signInEndOf(home, name);
       const askState = readAskState(home, name);
       const askNow = { lastAskAt: askState.lastAskAt === null ? null : new Date(askState.lastAskAt).toISOString(), last: askState.last ? { ...askState.last, at: new Date(askState.last.at).toISOString() } : null, failuresInARow: askState.streak, floorKeeperSince: askState.floorKeeperSince === null ? null : new Date(askState.floorKeeperSince).toISOString() };
@@ -571,7 +626,9 @@ async function main(argv: string[]): Promise<number> {
       const gate = data.season;
       const seasonOverNow = gate?.state === "over";
       // Addendum 12: the season starts and trading opens at one instant.
-      const waiting = gate && gate.state === "waiting" ? [waitingStatusLine(gate.opensAt ? Date.parse(gate.opensAt) : null)] : [];
+      // Run 19: the date the card named, from the page itself when this agent's gate has not read it (not running yet).
+      const pageOpens = league?.opens.kind === "at" ? league.opens.at : null;
+      const waiting = gate && gate.state === "waiting" ? [waitingStatusLine(gate.opensAt ? Date.parse(gate.opensAt) : pageOpens)] : [];
       const ago = (at: string | null) => (at ? `${duration(Date.now() - Date.parse(at), "en")} ago` : "never");
       const signed = (n: number) => `${n >= 0 ? "+" : ""}${Number(n.toPrecision(6))} BNB`;
       const selfLines = mine
@@ -579,7 +636,7 @@ async function main(argv: string[]): Promise<number> {
             `PnL: realized ${signed(mine.pnl.realizedBnb)}, unrealized ${holds ? signed(mine.pnl.unrealizedBnb) : "none"}${usdRef ? ` (≈ ${((mine.pnl.realizedBnb + mine.pnl.unrealizedBnb) * usdRef.bnbUsd).toFixed(2)} USDT)` : ""}; capital: ${mine.capital.spentBnb} of ${mine.capital.capBnb} BNB, wallet-wide`,
             ...(mine.prompt
               ? [
-                  `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: feast-league start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
+                  `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: FL start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
                   // Addendum 10: after the season, nothing about asking or the floor keeper: the season-over line says it all.
                   ...(seasonOverNow
                     ? []
@@ -639,7 +696,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "set": {
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       const agent = loadAgent(home, name);
       if (!agent) throw new Error("no such agent");
       if (!values.yes && !values.review) throw new Error("a change needs --yes (the user's word) or --review (the hourly review, which may only tighten)");
@@ -657,7 +714,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "review": {
-      const name = need(args[0], "an agent name");
+      const name = agentArg(args[0]);
       const s = statusOf(home, name);
       if (!s.agent) throw new Error("no such agent");
       const paths = agentPaths(home, name);
@@ -678,7 +735,7 @@ async function main(argv: string[]): Promise<number> {
               failures: hour.filter((l) => l.event === "intent.failed"),
             },
             book: s.book ? { positions: Object.keys(s.book.positions).length, realizedBnb: weiToBnb(s.book.realizedTotalWei), paused: s.book.paused } : null,
-            rule: "the review may tighten anything and retune thresholds with `feast-league set <name> --review`; it may not raise a size, a stop-loss, a slippage or a limit past the envelope",
+            rule: "the review may tighten anything and retune thresholds with `FL set <name> --review`; it may not raise a size, a stop-loss, a slippage or a limit past the envelope",
           },
           (_k, v) => (typeof v === "bigint" ? v.toString() : v),
           2,
@@ -707,7 +764,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case "buy":
     case "sell": {
-      const name = need(args[0], "an agent name");
+      const name = agentArg(args[0]);
       const agent = loadAgent(home, name);
       if (!agent?.confirmed) throw new Error(`no confirmed agent "${name}"`);
       const coin = need(args[1], "a coin (an address or FEAST)");
@@ -721,7 +778,7 @@ async function main(argv: string[]): Promise<number> {
     case "answer": {
       // Addendum 11 (the Grok Bot routine): the host's own answer to the last `FL ask <name> --print`, checked as the
       // runtime checks an asked AI's (the pack's ids, the cap), then made through FL buy's and FL sell's road.
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       const agent = loadAgent(home, name);
       if (!agent?.confirmed || agent.track !== "prompt") throw new Error(`"${name}" is not a confirmed prompt agent`);
       const printed = readPrinted(home, name);
@@ -767,9 +824,9 @@ async function main(argv: string[]): Promise<number> {
         print(json, out.data, () => out.text);
         return out.code;
       }
-      const name = notEntry(checkAgentName(need(args[0], "an agent name")));
+      const name = notEntry(checkAgentName(agentArg(args[0])));
       if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
-      if (args[1] === undefined) throw new Error('missing the note\'s text: feast-league note <name> "<text>"');
+      if (args[1] === undefined) throw new Error('missing the note\'s text: FL note <name> "<text>"');
       // A 401 opens the session again, once, here only: a background flush never signs.
       const relogin = async () => (await login()).code === 0;
       const out = await noteCommand({ home, name, site: siteFromEnv(), fetch, wallet: () => signer.address(), relogin }, { text: args[1], tx: values.tx, model: values.model });
@@ -777,7 +834,7 @@ async function main(argv: string[]): Promise<number> {
       return out.code;
     }
     case "script": {
-      if (args[0] !== "check") throw new Error("feast-league script check <file.mjs>");
+      if (args[0] !== "check") throw new Error("FL script check <file.mjs>");
       const file = resolve(need(args[1], "a script file"));
       if (!existsSync(file)) throw new Error(`no script at ${file}`);
       const source = readFileSync(file, "utf8");
@@ -789,11 +846,11 @@ async function main(argv: string[]): Promise<number> {
     case "enter":
       return enterCommand(home, values, json);
     case "meme":
-      return enterCommand(home, { ...values, meme: need(args[0], 'the meme\'s one-line concept: feast-league meme "<concept>"') }, json, true);
+      return enterCommand(home, { ...values, meme: need(args[0], 'the meme\'s one-line concept: FL meme "<concept>"') }, json, true);
     case "register":
-      return registerCommand(home, checkAgentName(need(args[0], "an agent name")), values, json);
+      return registerCommand(home, checkAgentName(agentArg(args[0])), values, json);
     case "launch":
-      return launchCommand(home, checkAgentName(need(args[0], "an agent name")), values, json);
+      return launchCommand(home, checkAgentName(agentArg(args[0])), values, json);
     case "preview":
       return previewCheck(home, need(args[0], "a check"), values.coin, values.bnb, json);
     case "agents": {
@@ -807,7 +864,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case "every": {
       // Task 975, addendum 4: how often the running agent asks its AI, without planning it again.
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       const agent = loadAgent(home, name);
       if (!agent?.ask) throw new Error(`"${name}" has no ask loop: plan it with --prompt (and --every)`);
       const minutes = wholeOrNaN(need(args[1], "the minutes between asks"));
@@ -826,7 +883,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case "model": {
       // Addendum 11: the model the agent's AI is asked with, changed without planning it again; "default" is the host's own.
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       const agent = loadAgent(home, name);
       if (!agent?.ask || agent.ask.with === "none") throw new Error(`"${name}" asks no AI: plan it with --prompt (and --ask-with)`);
       const given = need(args[1], "a model's name, or default");
@@ -851,9 +908,11 @@ async function main(argv: string[]): Promise<number> {
     }
     case "ask-key": {
       // Addendum 11: the endpoint's key, read on stdin (never argv, never shown), kept for the agent under FL daemon too.
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       const agent = loadAgent(home, name);
-      if (agent?.ask?.with !== "openai") throw new Error(`"${name}" asks no endpoint (--ask-with openai): it needs no key here`);
+      // Run 19: the Gemini CLI's API key too (Google's own login is closed to individuals; FL daemon passes no env of the shell).
+      const keyFor = agent?.ask?.with === "openai" ? "endpoint" : agent?.ask?.with === "gemini" ? "gemini" : null;
+      if (!keyFor) throw new Error(`"${name}" asks no endpoint (--ask-with openai) and no Gemini CLI (--ask-with gemini): it needs no key here`);
       if (process.stdin.isTTY) throw new Error(`pipe the key on stdin, e.g. \`pbpaste | FL ask-key ${name}\`: it is never typed on the command line`);
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
@@ -867,12 +926,16 @@ async function main(argv: string[]): Promise<number> {
       writeFileSync(path, `${key}\n`, { mode: 0o600 });
       chmodSync(path, 0o600);
       appendJsonl(agentPaths(home, name).log, { at: new Date().toISOString(), event: "ask.key.kept" });
-      print(json, { ok: true, kept: true }, () => `the key for "${name}"'s endpoint is kept on this machine (mode 0600, read at each ask, never shown); a variable named by --ask-key-env, when set, comes first`);
+      print(json, { ok: true, kept: true }, () =>
+        keyFor === "gemini"
+          ? `the Gemini API key for "${name}" is kept on this machine (mode 0600, read at each ask, handed to the Gemini CLI only, never shown); GEMINI_API_KEY, when set, comes first`
+          : `the key for "${name}"'s endpoint is kept on this machine (mode 0600, read at each ask, never shown); a variable named by --ask-key-env, when set, comes first`,
+      );
       return 0;
     }
     case "ask": {
       // Task 975, addendum 4: --print shows the exact pack (nothing is sent to any AI); without it, one ask now.
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       const agent = loadAgent(home, name);
       if (!agent || agent.track !== "prompt") throw new Error(`"${name}" is not a prompt agent`);
       if (values.print) {
@@ -978,7 +1041,7 @@ async function main(argv: string[]): Promise<number> {
       return status?.connected ? 0 : 1;
     }
     case "daemon": {
-      const name = notEntry(need(args[0], "an agent name"));
+      const name = notEntry(agentArg(args[0]));
       if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
       const action = values.install ? "install" : values.uninstall ? "uninstall" : values.status ? "status" : null;
       if (!action || [values.install, values.uninstall, values.status].filter(Boolean).length > 1) throw new Error("FL daemon <name> takes one of --install, --uninstall, --status");
@@ -990,7 +1053,8 @@ async function main(argv: string[]): Promise<number> {
       }
       const result = await supervise(home, name, action);
       print(json, result, () => result.lines.join("\n"));
-      return result.ok ? 0 : 1;
+      // Run 19: installed but not started is not done: exit 2, with the command that starts it.
+      return result.ok ? (result.running === false ? 2 : 0) : 1;
     }
     case "doctor":
       return doctor(home, json);
@@ -1023,7 +1087,7 @@ async function manualTrade(home: string, name: string, agent: AgentConfig, reque
   if (statusOf(home, name).running) {
     const sent = sendRequest(home, name, request);
     if (noWait) {
-      print(json, { ok: true, queued: true, requestId: sent.requestId }, () => `queued for the running agent "${name}"; feast-league status ${name}`);
+      print(json, { ok: true, queued: true, requestId: sent.requestId }, () => `queued for the running agent "${name}"; FL status ${name}`);
       return 0;
     }
     const outcome = await waitForOutcome(home, name, sent);
@@ -1049,15 +1113,15 @@ const supervisorRunner: Runner = (command, list) =>
   });
 
 async function supervise(home: string, name: string, action: "install" | "uninstall" | "status") {
-  return daemon({ action, platform: process.platform as "darwin" | "linux", name, home, userHome: homedir(), node: process.execPath, bin: BIN, path: daemonPath(process.env, process.execPath), uid: process.getuid?.() ?? 0, run: supervisorRunner, running: statusOf(home, name).running });
+  return daemon({ action, platform: process.platform as "darwin" | "linux", name, home, userHome: homedir(), node: process.execPath, bin: BIN, path: daemonPath(process.env, process.execPath), uid: process.getuid?.() ?? 0, run: supervisorRunner, running: statusOf(home, name).running, isRunning: () => statusOf(home, name).running });
 }
 
 /** FL enter's last step (addendum 11): the daemon on macOS and Linux; on Windows, the Task Scheduler line and no daemon. */
-async function enterDaemon(home: string, name: string): Promise<{ ok: boolean; lines: string[] }> {
+async function enterDaemon(home: string, name: string): Promise<{ ok: boolean; running?: boolean | null; startCommand?: string | null; lines: string[] }> {
   if (process.env.FEAST_LEAGUE_DAEMON?.trim().toLowerCase() === "off") return { ok: false, lines: [] };
   if (process.platform !== "darwin" && process.platform !== "linux") return { ok: false, lines: windowsLines({ name, node: process.execPath, bin: BIN }) };
   const out = await supervise(home, name, "install");
-  return { ok: out.ok, lines: out.ok ? [] : out.lines };
+  return { ok: out.ok, running: out.running ?? null, startCommand: out.startCommand ?? null, lines: out.ok ? [] : out.lines };
 }
 
 /** 280 characters, zh and en mixed, for the preview of the Register message. */
@@ -1076,7 +1140,7 @@ function unreadShown(unread: unknown[]): (unknown | string)[] {
   const trades = unread.filter(routine);
   const dropped = Math.max(0, trades.length - 20);
   const shown = new Set([...kept, ...trades.slice(-20)]);
-  return [...(dropped > 0 ? [`  (${dropped} older trade lines: feast-league status --json lists them)`] : []), ...unread.filter((n) => shown.has(n))];
+  return [...(dropped > 0 ? [`  (${dropped} older trade lines: FL status --json lists them)`] : []), ...unread.filter((n) => shown.has(n))];
 }
 
 /** One notification as the status card shows it; a session notice in the user's language. */
@@ -1087,7 +1151,7 @@ function noticeLine(n: unknown, lang: Lang): string {
 }
 
 /** The league block of `status` (PLAN-941 §6). Best effort: it never fails `status`. */
-async function leagueStanding(home: string, lang: Lang, agent: StandingInput["agent"] = null): Promise<{ lines: string[]; data: Record<string, unknown>; latestRuntime: LeagueRead["latestRuntime"] | null }> {
+async function leagueStanding(home: string, lang: Lang, agent: StandingInput["agent"] = null): Promise<{ lines: string[]; data: Record<string, unknown>; latestRuntime: LeagueRead["latestRuntime"] | null; opens: Opening }> {
   const site = new LeagueSite(siteFromEnv(), fetch, 8_000);
   const me = await Promise.race([signerFor(home, null).address(), new Promise<null>((r) => setTimeout(() => r(null), 5_000))]).catch(() => null);
   const record = readLeagueRecord(home);
@@ -1107,7 +1171,7 @@ async function leagueStanding(home: string, lang: Lang, agent: StandingInput["ag
   const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered, agent, standing: ranked.standing }, lang);
   // The page's own rows, without the wallet's address: printed output keeps the home's rule.
   const own = today?.me ? { earners: today.me.earners ? { ...today.me.earners, wallet: undefined } : null, backed: today.me.backed ? { ...today.me.backed, wallet: undefined } : null, eaten: today.me.eaten } : (today?.me ?? null);
-  return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own }, latestRuntime: today?.latestRuntime ?? null };
+  return { lines, data: { state: today?.state ?? "unreadable", season: today?.season ?? null, agentId, seating, me: own }, latestRuntime: today?.latestRuntime ?? null, opens: tradingOpens(today) };
 }
 
 /** `feast-league enter` and `feast-league meme` (tasks 961, 968): `src/league/enter/flow.ts` is the whole of it. */
@@ -1351,25 +1415,55 @@ async function previewCheck(home: string, check: string, coinArg: string | undef
   return 0;
 }
 
+/** The wallet CLI the wallet skill needs (its `requiredCliVersion`), and how to get it. */
+const BAW_REQUIRED_VERSION = "1.12.0";
+const BAW_UPGRADE = "npm i -g @binance/agentic-wallet@latest";
+function olderThan(have: string, need: string): boolean {
+  const a = have.split(".").map(Number);
+  const b = need.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0);
+  return false;
+}
+
 async function doctor(home: string, json: boolean): Promise<number> {
   const checks: { what: string; ok: boolean; detail: string }[] = [];
   checks.push({ what: "node", ok: Number(process.versions.node.split(".")[0]) >= 22, detail: process.version });
   checks.push({ what: "home", ok: true, detail: home });
+  // Run 19: the wallet CLI's own version against what the wallet skill needs (a CLI that answers --version is never
+  // upgraded by the setup's own check); a missing CLI is the one line, not one per wallet check.
+  const bawBin = process.env.FEAST_LEAGUE_BAW?.trim() || "baw";
+  const found = bawBin.includes("/") ? existsSync(bawBin) : (process.env.PATH ?? "").split(":").some((d) => d && existsSync(join(d, bawBin)));
+  const version = found ? await execRunner(bawBin, 15_000)(["--version"]).catch(() => null) : null;
+  const missing = !found;
+  const got = version ? /(\d+)\.(\d+)\.(\d+)/.exec(version.stdout) : null;
+  if (missing) checks.push({ what: "baw", ok: false, detail: `not installed here: ${BAW_UPGRADE}` });
+  else if (!got) checks.push({ what: "baw", ok: false, detail: `its --version could not be read (${clean(version?.stdout || version?.stderr || "", 80) || "no answer"}): ${BAW_UPGRADE}` });
+  else {
+    const have = got.slice(1, 4).join(".");
+    const old = olderThan(have, BAW_REQUIRED_VERSION);
+    checks.push({ what: "baw", ok: !old, detail: old ? `${have} is older than the ${BAW_REQUIRED_VERSION} the wallet skill needs: ${BAW_UPGRADE}` : `${have} (the wallet skill needs ${BAW_REQUIRED_VERSION} or newer)` });
+  }
   const signer = signerFor(home, null);
-  try {
-    const status = await signer.status();
-    checks.push({ what: "wallet", ok: status.connected, detail: status.connected ? "connected" : `${status.status}: sign in with baw auth signin` });
-    const settings = await signer.settings();
-    checks.push({ what: "developer mode", ok: settings.devModeEnabled && !settings.balanceExceeded, detail: settings.devModeEnabled ? (settings.balanceExceeded ? "on, but the balance is above its limit" : `on until ${settings.devModeExpiresAt ? new Date(settings.devModeExpiresAt * 1_000).toISOString() : "?"}`) : "off: turn it on in the Binance App" });
-    const session = sessionView(settings);
-    const left = session.end === null ? null : session.end - Date.now();
-    checks.push({
-      what: "session",
-      ok: left === null || left > 0,
-      detail: left === null ? "unknown" : left > 0 ? `ends in ${duration(left, "en")} (${session.source}), at ${utc8(session.end!)} UTC+8` : "ended: scan again (baw auth signin)",
-    });
-  } catch (error) {
-    checks.push({ what: "wallet", ok: false, detail: `the baw CLI did not answer: ${(error as Error).message}` });
+  if (!missing) {
+    try {
+      const status = await signer.status();
+      const settings = await signer.settings().catch(() => null);
+      const session = settings ? sessionView(settings) : null;
+      const left = session?.end === null || session === null ? null : session.end - Date.now();
+      // Run 19: signed out is one cause, so one line (it said UNCONNECTED and SESSION_EXPIRED, two NO lines).
+      if (!status.connected) checks.push({ what: "wallet", ok: false, detail: `${status.status}${left !== null && left <= 0 ? ` (its sign-in ended at ${utc8(session!.end!)} UTC+8)` : ""}: sign in again with baw auth signin (scan the QR code)` });
+      else checks.push({ what: "wallet", ok: true, detail: "connected" });
+      if (settings) checks.push({ what: "developer mode", ok: settings.devModeEnabled && !settings.balanceExceeded, detail: settings.devModeEnabled ? (settings.balanceExceeded ? "on, but the balance is above its limit" : `on until ${settings.devModeExpiresAt ? new Date(settings.devModeExpiresAt * 1_000).toISOString() : "?"}`) : "off: turn it on in the Binance App" });
+      if (status.connected) {
+        checks.push({
+          what: "session",
+          ok: left === null || left > 0,
+          detail: left === null ? "unknown" : left > 0 ? `ends in ${duration(left, "en")} (${session!.source}), at ${utc8(session!.end!)} UTC+8` : "ended: scan again (baw auth signin)",
+        });
+      }
+    } catch (error) {
+      checks.push({ what: "wallet", ok: false, detail: `the baw CLI did not answer: ${(error as Error).message}` });
+    }
   }
   try {
     const r = await fetch(`${indexer()}/api/indexer/status`);

@@ -47,7 +47,7 @@ export function auditRefusal(home: string, path: string, alreadyRead?: string): 
     return `no script at ${path}`;
   }
   const record = readJson<AuditRecord>(auditPath(home, sha256Of(source)));
-  if (!record) return "no audit for this file: run feast-league audit first";
+  if (!record) return "no audit for this file: run FL audit first";
   if (record.static.verdict !== "pass") return `the static rules refused this file (${record.static.hits.filter((h) => h.severity === "refuse").map((h) => `${h.rule} line ${h.line}`).join(", ")})`;
   if (!record.model) return "the static rules passed, but no model read is recorded for this file";
   if (record.model.verdict !== "pass") return "the model read refused this file";

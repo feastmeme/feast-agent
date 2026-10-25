@@ -491,8 +491,8 @@ export function bodyCoinProblem(plan: BodyCoinPlan, lang: Lang): string {
   switch (plan.kind) {
     case "launch":
       return zh
-        ? "还没有身体币。先发币（feast-league launch，卡片 C），或者加 --pending 先登记、暂不占席位；席位按先后给。"
-        : "No body coin yet. Launch it first (feast-league launch, card C), or add --pending to sign up without a seat; seats go in order.";
+        ? "还没有身体币。先发币（FL launch，卡片 C），或者加 --pending 先登记、暂不占席位；席位按先后给。"
+        : "No body coin yet. Launch it first (FL launch, card C), or add --pending to sign up without a seat; seats go in order.";
     case "await-preset-launch":
       return zh ? "你的「发币并经营」agent 还没发出它的币：先启动它，或者加 --pending 先登记、暂不占席位。" : "Your launch-and-run agent hasn't launched its coin yet: start it, or add --pending to sign up without a seat.";
     case "not-yours":
@@ -517,7 +517,7 @@ export function alreadyLaunchedLine(coin: string, lang: Lang): string {
 }
 
 export function queuedLaunchLine(name: string, lang: Lang): string {
-  return lang === "zh" ? `已交给正在运行的 agent「${name}」，下一次运行时发出。用 feast-league status ${name} 查看。` : `Queued for the running agent "${name}"; it launches within a tick. See feast-league status ${name}.`;
+  return lang === "zh" ? `已交给正在运行的 agent「${name}」，下一次运行时发出。用 FL status ${name} 查看。` : `Queued for the running agent "${name}"; it launches within a tick. See FL status ${name}.`;
 }
 
 export function walletUnreadable(reason: string, lang: Lang): string {

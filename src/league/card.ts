@@ -1,4 +1,5 @@
 import type { AgentConfig } from "./agent.ts";
+import { hostHow, hostShown } from "./ask/host.ts";
 import type { StaticAudit } from "./audit/static.ts";
 import { LIMIT_SPECS, WARMUP_SIZE_BNB, WARMUP_TRADES } from "./limits.ts";
 import { PRESETS } from "./presets/specs.ts";
@@ -49,9 +50,9 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
         : "It steps back as soon as your agent trades; positions it opened are then your agent's to manage.";
       if (agent.ask && agent.ask.with !== "none") {
         // Task 975, addendum 4: the runtime asks the player's own AI on a timer; the preset is the floor keeper underneath.
-        const host = agent.ask.with === "claude" ? "Claude Code" : "Codex";
-        const cli = agent.ask.with === "claude" ? "claude -p" : "codex exec";
-        lines.push(`Ask loop: every ${agent.ask.every} min with no FL buy or FL sell from your agent, the runtime asks ${host} (\`${cli}\`, on your own login, ${agent.ask.model ? `model ${agent.ask.model}` : "its default model"}) what to do now, handing it your prompt, the market, the book, the league and its own journal; it makes the one buy, sell or hold the answer names, within the hard limits below. A note or a read does not hold it back. --every N changes how often (FL every ${agent.name} N later); --ask-with none stops the asks.`);
+        // Run 19: the same names as the closing lines and FL status (the card said Codex for every other host).
+        const host = hostShown(agent.ask.with);
+        lines.push(`Ask loop: every ${agent.ask.every} min with no FL buy or FL sell from your agent, the runtime asks ${host} (${hostHow(agent.ask.with)}, ${agent.ask.model ? `model ${agent.ask.model}` : "its default model"}) what to do now, handing it your prompt, the market, the book, the league and its own journal; it makes the one buy, sell or hold the answer names, within the hard limits below. A note or a read does not hold it back. --every N changes how often (FL every ${agent.name} N later); --ask-with none stops the asks.`);
         lines.push(`Floor keeper: the ${agent.preset} preset (${spec.title}) trades only when ${host} cannot be reached twice in a row, and 20 minutes before dinner while the day's floor is unmet: it ${spec.does}. ${back} --no-autopilot turns off both the asks and the floor keeper.`);
       } else lines.push(`Autopilot backup: on. If your agent makes no FL buy or FL sell for ${agent.autopilot.idleMinutes} min, the ${agent.preset} preset (${spec.title}) trades until your agent trades again: it ${spec.does}. A note or a read does not hold it back. ${back} --no-autopilot turns it off.`);
       if (agent.preset === "steady") lines.push(steadySpend(agent.params));
@@ -65,7 +66,7 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
     lines.push("The league entry (FL enter): one launch and one buy, each after its own card and yes. It never trades on its own.");
   } else {
     lines.push(`Your script: ${agent.script!.path}`);
-    lines.push(`Audit: static rules ${audit?.verdict ?? "see feast-league audit"}; the model read must pass too before it starts.`);
+    lines.push(`Audit: static rules ${audit?.verdict ?? "see FL audit"}; the model read must pass too before it starts.`);
     if (options.warmupPassed) lines.push(`Warm-up: passed by FL script check (sha ${short(agent.script!.sha256)}). It trades at its own sizes, within the limits; any edit is a new file, a new audit, a new check.`);
     else lines.push(`Warm-up: its first ${WARMUP_TRADES} trades run at ${Math.min(WARMUP_SIZE_BNB, l.maxTradeBnb)} BNB; two failures in a row, or any limit hit, stop it and tell you.`);
   }
@@ -98,6 +99,6 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
   lines.push(`Worst case: at most ${l.maxTradesPerHour} trades an hour, at most ${l.maxDailySpendBnb} BNB of buys in any 24 h, at most ${l.budgetBnb} BNB in all.`);
   lines.push("");
   lines.push("This trades real BNB from your wallet as soon as you say yes. There is no practice mode.");
-  lines.push(`To stop: say "stop", or run \`feast-league stop ${agent.name}\` (or create the file STOP in the agent's folder).`);
+  lines.push(`To stop: say "stop", or run \`FL stop ${agent.name}\` (or create the file STOP in the agent's folder).`);
   return lines.join("\n");
 }

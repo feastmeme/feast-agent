@@ -92,7 +92,7 @@ export function prepareStart(
     saveAgent(home, agent);
     confirmedNow = true;
   }
-  if (agent.track === "prompt" && promptChanged(agent)) return { kind: "refused", why: `the prompt changed since you confirmed it (or is gone): feast-league start ${name} --prompt ${agent.prompt?.path ?? "<file>"} shows the new card` };
+  if (agent.track === "prompt" && promptChanged(agent)) return { kind: "refused", why: `the prompt changed since you confirmed it (or is gone): FL start ${name} --prompt ${agent.prompt?.path ?? "<file>"} shows the new card` };
   if (agent.track === "script") {
     const why = auditRefusal(home, agent.script!.path);
     if (why) return { kind: "refused", why };

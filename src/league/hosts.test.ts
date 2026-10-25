@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { confirmAgent, loadAgent, planAgent, saveAgent } from "./agent.ts";
 import { aliveLine } from "./alive.ts";
 import { autopilotLine } from "./enter/copy.ts";
-import { askKeyPath } from "./ask/host.ts";
+import { askKeyPath, hostShown, type AskWith } from "./ask/host.ts";
+import { renderCard } from "./card.ts";
 import { inTemp, windowsLines } from "./daemon.ts";
 import { checkHost, HOST_DETAIL_HEADER, hostDetailHint, hostHeaders, modelHint } from "./headers.ts";
 import { askChoice } from "./start.ts";
@@ -205,5 +206,85 @@ describe("addendum 12: the referral code in FL status", () => {
     const bad = await run(["enter", "--name", "maplegrin.ai", "--ref", "nope!"], env);
     expect(bad.code).toBe(2);
     expect(bad.stdout).toContain("--ref is a referral code");
+  }, 60_000);
+});
+
+describe("run 19: the card and the header name the host the player chose", () => {
+  it("the card's Ask loop and Floor keeper lines name each host, never Codex for another", () => {
+    const { prompt } = setup();
+    const how: Record<Exclude<AskWith, "none">, string> = {
+      claude: "Claude Code (`claude -p`, on your own login, its default model)",
+      codex: "Codex (`codex exec`, on your own login, its default model)",
+      gemini: "Gemini CLI (`gemini -p`, with your Gemini API key, its default model)",
+      cursor: "Cursor (Cursor's `agent -p`, on your own login, its default model)",
+      openai: "your AI endpoint (an OpenAI-compatible endpoint, with your own key, model deepseek-chat)",
+    };
+    for (const [w, said] of Object.entries(how) as [Exclude<AskWith, "none">, string][]) {
+      const ask = w === "openai" ? { every: 5, with: w, model: "deepseek-chat", baseUrl: "https://api.deepseek.example/v1", keyEnv: "DEEPSEEK_API_KEY" } : { every: 5, with: w, model: null };
+      const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask });
+      if (!planned.ok) throw new Error(planned.errors.join("; "));
+      const card = renderCard(planned.agent);
+      expect(card, w).toContain(`the runtime asks ${said} what to do now`);
+      expect(card, w).toContain(`trades only when ${hostShown(w)} cannot be reached twice in a row`);
+      if (w !== "codex") expect(card, w).not.toContain("Codex");
+    }
+  });
+
+  it("x-feast-host: the declared host wins over Claude Code's environment; the four as themselves, the rest as other", () => {
+    const expected: Record<string, string> = { claude: "claude", codex: "codex", grok: "grok", other: "other", gemini: "other", cursor: "other", opencode: "other", openai: "other" };
+    for (const [host, header] of Object.entries(expected)) {
+      const env = { CLAUDECODE: "1", FEAST_LEAGUE_HOST: host };
+      expect(modelHint(env), host).toBe(header);
+      expect(hostHeaders(env)["x-feast-host"], host).toBe(header);
+      expect(hostDetailHint(env), host).toBe(["gemini", "cursor", "opencode", "openai"].includes(host) ? host : null);
+    }
+    // Nothing declared: the environment, as before.
+    expect(modelHint({ CLAUDECODE: "1" })).toBe("claude");
+    expect(modelHint({ CODEX_SANDBOX: "seatbelt" })).toBe("codex");
+    expect(modelHint({})).toBe("other");
+  });
+});
+
+describe("run 19: FL doctor", () => {
+  const fakeBaw = (dir: string, version: string) => {
+    const path = join(dir, "baw");
+    writeFileSync(path, `#!${process.execPath}\nconst a = process.argv.slice(2);\nif (a[0] === "--version") { console.log(${JSON.stringify(version)}); process.exit(0); }\nconst c = a.slice(0, 2).join(" ");\nif (c === "wallet status") console.log(JSON.stringify({ success: true, data: { status: "UNCONNECTED" } }));\nelse console.log(JSON.stringify({ success: false, error: { name: "SESSION_EXPIRED" } }));\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const closed = { FEAST_LEAGUE_INDEXER: "http://127.0.0.1:9" };
+
+  it("signed out is one NO line, not two; baw older than the wallet skill's 1.12.0 says how to upgrade", async () => {
+    const { dir, env } = setup();
+    const out = await run(["doctor"], { ...env, ...closed, FEAST_LEAGUE_BAW: fakeBaw(dir, "1.11.0") });
+    expect(out.code).toBe(2);
+    expect(out.stdout).toContain("NO  baw: 1.11.0 is older than the 1.12.0 the wallet skill needs: npm i -g @binance/agentic-wallet@latest");
+    const wallet = out.stdout.split("\n").filter((l) => /^NO  (wallet|session)/.test(l));
+    expect(wallet).toEqual(["NO  wallet: UNCONNECTED: sign in again with baw auth signin (scan the QR code)"]);
+    expect(out.stdout).not.toContain("SESSION_EXPIRED");
+  }, 60_000);
+
+  it("a current baw is ok; no baw at all is one line, and no wallet line after it", async () => {
+    const { dir, env } = setup();
+    const ok = await run(["doctor"], { ...env, ...closed, FEAST_LEAGUE_BAW: fakeBaw(dir, "baw 1.12.0") });
+    expect(ok.stdout).toContain("ok  baw: 1.12.0 (the wallet skill needs 1.12.0 or newer)");
+    const none = await run(["doctor"], { ...env, ...closed, FEAST_LEAGUE_BAW: join(dir, "no-baw-here") });
+    expect(none.stdout).toContain("NO  baw: not installed here: npm i -g @binance/agentic-wallet@latest");
+    expect(none.stdout).not.toMatch(/^NO  wallet/m);
+  }, 60_000);
+});
+
+describe("run 19: an agent's name may be typed as its Agent ID", () => {
+  it("FL status helloagent.ai is FL status helloagent; a bad name says the rule", async () => {
+    const { prompt, home, env } = setup();
+    const planned = planAgent({ name: "helloagent", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, confirmAgent(planned.agent));
+    const plain = await run(["status", "helloagent", "--no-league"], env);
+    const dotted = await run(["status", "helloagent.ai", "--no-league"], env);
+    expect(dotted.code).toBe(0);
+    expect(dotted.stdout).toBe(plain.stdout);
+    const bad = await run(["status", "Hello Agent", "--no-league"], env);
+    expect(bad.stderr).toContain('an agent FL enter started is named by its Agent ID without ".ai"');
   }, 60_000);
 });

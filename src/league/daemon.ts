@@ -17,7 +17,7 @@ import { checkAgentName } from "./store.ts";
  * signed-out wallet or any other refusal exits 0 and is not (no loop of restarts against a wallet that says no; the
  * next log-in or reboot tries again). `FL stop <name>` stops it for good until `FL resume <name>`.
  *
- * The unit carries no secret: its environment is a PATH built from where `node`, `baw`, `claude` and `codex` are
+ * The unit carries no secret: its environment is a PATH built from where `node`, `baw` and the hosts' CLIs are
  * found, and `FEAST_LEAGUE_HOME`. Nothing of the shell's environment is copied into it; a keyed RPC URL
  * (`FEAST_MAINNET_RPC_URL`) is the player's to add to the unit by hand, never written by this command.
  */
@@ -31,7 +31,8 @@ export const unitName = (name: string) => `feast-league-${name}.service`;
 /** The tools the agent runs, found on PATH now: their folders, then the system's. Paths only, no other value. */
 export function daemonPath(env: Record<string, string | undefined>, node: string): string {
   const dirs = new Set<string>([dirname(node)]);
-  for (const tool of ["baw", "claude", "codex"]) {
+  // Run 19: every host's CLI (a Gemini or Cursor agent under the daemon found no CLI of its own).
+  for (const tool of ["baw", "claude", "codex", "gemini", "cursor-agent", "agent"]) {
     for (const dir of (env.PATH ?? "").split(delimiter)) {
       if (dir && existsSync(join(dir, tool))) {
         dirs.add(dir);
@@ -107,7 +108,15 @@ export function unitFile(u: UnitInput): { path: string; text: string } {
   };
 }
 
-export type DaemonResult = { ok: boolean; installed: boolean; loaded: boolean | null; unit: string | null; lines: string[] };
+/**
+ * `running`: after an install, whether the supervisor really started the agent (run 19: launchd took the bootstrap and
+ * deferred the spawn, "pending spawn, domain in on-demand-only mode", and the line said it was running). Null when
+ * not asked (status, uninstall). `startCommand`: the supervisor's own command to start it now, when it is not running.
+ */
+export type DaemonResult = { ok: boolean; installed: boolean; loaded: boolean | null; unit: string | null; lines: string[]; running?: boolean | null; startCommand?: string | null };
+
+/** How long an install waits to see the agent running (the supervisor's state, or the agent's own alive record). */
+export const DAEMON_VERIFY_MS = 10_000;
 
 /**
  * A league home in the system's temporary folder (addendum 11) is gone after a reboot, and a unit pointing at it would
@@ -137,7 +146,19 @@ export function windowsLines(o: { name: string; node: string; bin: string }): st
   ];
 }
 
-export async function daemon(o: UnitInput & { action: "install" | "uninstall" | "status"; uid: number; run: Runner; running: boolean; tempOk?: boolean }): Promise<DaemonResult> {
+export async function daemon(
+  o: UnitInput & {
+    action: "install" | "uninstall" | "status";
+    uid: number;
+    run: Runner;
+    running: boolean;
+    tempOk?: boolean;
+    /** The agent's own alive record, read again while the install waits (run 19). */
+    isRunning?: () => boolean;
+    verifyMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  },
+): Promise<DaemonResult> {
   try {
     checkAgentName(o.name);
   } catch (error) {
@@ -183,13 +204,58 @@ export async function daemon(o: UnitInput & { action: "install" | "uninstall" | 
     started = await o.run("systemctl", ["--user", "enable", "--now", unitName(o.name)]).catch((error: unknown) => ({ code: 1, stderr: String((error as Error).message) }));
   }
   const ok = started !== null && started.code === 0;
-  const lines = ok
+  if (!ok) return { ok, installed: true, loaded: false, unit: unit.path, running: false, lines: [`the unit is written (${unit.path}) but could not be loaded: ${(started?.stderr ?? "").trim().split("\n").slice(-1)[0] || "no answer"}`] };
+  // Run 19: loaded is not running. launchd may defer the spawn: kick it once (never `-k`, which would restart a running
+  // one), then look, for up to ten seconds, at the supervisor's own state and at the agent's alive record.
+  const startCommand = supervisorStart(o.platform, o.uid, o.name);
+  let running = o.running;
+  let state: string | null = null;
+  if (!running) ({ running, state } = await kickAndLook({ ...o, kick: o.platform === "darwin" }));
+  const lines = running
     ? [
         `"${o.name}" is now kept running by ${where}: it starts at log-in and after a reboot, and comes back within a minute after a crash. FL stop ${o.name} stops it until FL resume ${o.name}; FL daemon ${o.name} --uninstall removes it.`,
         ...(o.running ? [`it is running now: the daemon's own start found it running and stood down; it takes over at the next log-in or reboot`] : []),
         ...(o.platform === "linux" ? ["to start it at boot before anyone logs in: loginctl enable-linger (once, your choice)"] : []),
         "its environment is PATH and FEAST_LEAGUE_HOME only: a keyed FEAST_MAINNET_RPC_URL is not copied; add it to the unit yourself if you use one",
       ]
-    : [`the unit is written (${unit.path}) but could not be loaded: ${(started?.stderr ?? "").trim().split("\n").slice(-1)[0] || "no answer"}`];
-  return { ok, installed: true, loaded: ok, unit: unit.path, lines };
+    : [
+        `"${o.name}" has ${where} now (it starts at log-in and after a reboot), but ${o.platform === "darwin" ? "launchd" : "systemd"} has not started it: ${state ? `its state is "${state}"` : "its state could not be read"}, and the agent is NOT running. Start it now with \`${startCommand}\` (or FL start ${o.name}).`,
+        "its environment is PATH and FEAST_LEAGUE_HOME only: a keyed FEAST_MAINNET_RPC_URL is not copied; add it to the unit yourself if you use one",
+      ];
+  return { ok, installed: true, loaded: true, unit: unit.path, lines, running, startCommand: running ? null : startCommand };
+}
+
+/** The supervisor's own command that starts the agent now (said to the player when it did not). */
+export const supervisorStart = (platform: DaemonPlatform, uid: number, name: string) => (platform === "darwin" ? `launchctl kickstart gui/${uid}/${daemonLabel(name)}` : `systemctl --user start ${unitName(name)}`);
+
+type Look = { platform: DaemonPlatform; name: string; uid: number; run: Runner; isRunning?: () => boolean; verifyMs?: number; sleep?: (ms: number) => Promise<void>; kick: boolean };
+/**
+ * Run 19: start it once (launchd's `kickstart`, never `-k`, which would restart a running one; systemd's `start`), then
+ * look, for up to ten seconds, at the supervisor's own state and at the agent's alive record.
+ */
+async function kickAndLook(o: Look): Promise<{ running: boolean; state: string | null }> {
+  const label = `gui/${o.uid}/${daemonLabel(o.name)}`;
+  if (o.kick) await (o.platform === "darwin" ? o.run("launchctl", ["kickstart", label]) : o.run("systemctl", ["--user", "start", unitName(o.name)])).catch(() => null);
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const until = o.verifyMs ?? DAEMON_VERIFY_MS;
+  let state: string | null = null;
+  for (let waited = 0; ; waited += 500) {
+    const read = o.platform === "darwin" ? await o.run("launchctl", ["print", label]).catch(() => null) : await o.run("systemctl", ["--user", "is-active", unitName(o.name)]).catch(() => null);
+    state = o.platform === "darwin" ? (/^\s*state = (.+)$/m.exec(read?.stdout ?? "")?.[1]?.trim() ?? null) : read?.stdout.trim() || null;
+    const running = (o.platform === "darwin" ? state === "running" : state === "active") || o.isRunning?.() === true;
+    if (running || waited >= until) return { running, state };
+    await sleep(500);
+  }
+}
+
+/**
+ * `FL start` with a daemon installed (run 19): the daemon starts it (so it outlives the player's shell and comes back
+ * after a crash), and the result is looked at, not assumed. `installed: false` when this agent has no daemon.
+ */
+export async function kickDaemon(o: Omit<Look, "kick"> & { userHome: string }): Promise<{ installed: boolean; running: boolean; state: string | null; startCommand: string }> {
+  const startCommand = supervisorStart(o.platform, o.uid, o.name);
+  const path = o.platform === "darwin" ? join(o.userHome, "Library", "LaunchAgents", `${daemonLabel(o.name)}.plist`) : join(o.userHome, ".config", "systemd", "user", unitName(o.name));
+  if (!existsSync(path)) return { installed: false, running: false, state: null, startCommand };
+  const seen = await kickAndLook({ ...o, kick: true });
+  return { installed: true, ...seen, startCommand };
 }

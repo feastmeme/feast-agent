@@ -29,14 +29,16 @@ export function checkModel(raw: string): { ok: true; model: Model } | { ok: fals
 
 /**
  * The host's hint: `FEAST_LEAGUE_MODEL` when it names one of the four; else the host `FL enter --host` declared for
- * this home (the CLI hands it on as `FEAST_LEAGUE_HOST`, the coordinator's ruling C8); else what the host's own
- * environment says of it (Claude Code sets `CLAUDECODE=1`; the Codex CLI's sandbox sets `CODEX_SANDBOX`); else
- * "other". `FL note`'s `--model` default and the `x-feast-host` header are this one function.
+ * this home (the CLI hands it on as `FEAST_LEAGUE_HOST`, the coordinator's ruling C8): one of the four as itself, and
+ * gemini, cursor, opencode or openai as "other" (the site's accepted set is the four; run 19: a declared Gemini under
+ * Claude Code's environment said "claude"); else what the host's own environment says of it (Claude Code sets
+ * `CLAUDECODE=1`; the Codex CLI's sandbox sets `CODEX_SANDBOX`); else "other". `FL note`'s `--model` default and the
+ * `x-feast-host` header are this one function. The declared host always wins over the environment.
  */
 export function modelHint(env: Record<string, string | undefined> = process.env): Model {
   const given = checkModel(env.FEAST_LEAGUE_MODEL ?? "");
   if (given.ok) return given.model;
-  const declared = checkModel(env.FEAST_LEAGUE_HOST ?? "");
+  const declared = checkHost(env.FEAST_LEAGUE_HOST ?? "");
   if (declared.ok) return declared.model;
   if (env.CLAUDECODE === "1") return "claude";
   if (env.CODEX_SANDBOX || env.CODEX_SANDBOX_NETWORK_DISABLED) return "codex";

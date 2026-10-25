@@ -30,8 +30,14 @@ export function leagueHome(env: Record<string, string | undefined> = process.env
 const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 export function checkAgentName(name: string): string {
-  if (!NAME.test(name)) throw new Error(`an agent's name is 1–40 lowercase letters, digits or dashes (got "${name}")`);
+  if (!NAME.test(name)) throw new Error(`an agent's name is 1–40 lowercase letters, digits or dashes: an agent FL enter started is named by its Agent ID without ".ai" (got "${name}")`);
   return name;
+}
+
+/** Run 19: `helloagent.ai` names the agent `helloagent` (the Agent ID as the player sees it, typed where its name goes). */
+export function agentNameOf(raw: string): string {
+  const v = raw.trim();
+  return /\.ai$/i.test(v) && NAME.test(v.slice(0, -3)) ? v.slice(0, -3) : v;
 }
 
 export type AgentPaths = {

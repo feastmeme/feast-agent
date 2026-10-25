@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -48,10 +48,30 @@ export const askWithFor = (host: Model, detail: HostDetail | null = null): AskWi
 
 /** How the copy names the host. */
 export const hostShown = (w: AskWith) => (w === "claude" ? "Claude Code" : w === "codex" ? "Codex" : w === "gemini" ? "Gemini CLI" : w === "cursor" ? "Cursor" : w === "openai" ? "your AI endpoint" : "no host");
+/** How it is asked, for the agent's card (run 19: the card said Codex for every host but Claude Code). */
+export const hostHow = (w: AskWith) =>
+  w === "claude"
+    ? "`claude -p`, on your own login"
+    : w === "codex"
+      ? "`codex exec`, on your own login"
+      : w === "gemini"
+        ? "`gemini -p`, with your Gemini API key"
+        : w === "cursor"
+          ? "Cursor's `agent -p`, on your own login"
+          : w === "openai"
+            ? "an OpenAI-compatible endpoint, with your own key"
+            : "no host";
 
-/** Cursor's agent CLI: `cursor-agent` where it is installed under that name, else `agent` (its newer name). */
+/**
+ * Cursor's agent CLI: `cursor-agent` or `agent` (its newer name), whichever comes first on PATH, as a shell would
+ * pick (run 19: the installer puts both in one folder; a folder earlier on PATH wins); `agent` when neither is found.
+ */
 export function cursorCommand(env: NodeJS.ProcessEnv = process.env): string {
-  for (const dir of (env.PATH ?? "").split(":")) if (dir && existsSync(join(dir, "cursor-agent"))) return "cursor-agent";
+  for (const dir of (env.PATH ?? "").split(":")) {
+    if (!dir) continue;
+    if (existsSync(join(dir, "cursor-agent"))) return "cursor-agent";
+    if (existsSync(join(dir, "agent"))) return "agent";
+  }
   return "agent";
 }
 
@@ -74,9 +94,17 @@ export const GEMINI_TOOLS = [
   "google_web_search", "web_fetch", "enter_plan_mode", "exit_plan_mode", "complete_task", "update_topic",
   "tracker_create_task", "tracker_update_task", "tracker_get_task", "tracker_list_tasks", "tracker_add_dependency", "tracker_visualize",
 ];
-export function geminiSettings(): Record<string, unknown> {
+export function geminiSettings(o: { apiKey?: boolean } = {}): Record<string, unknown> {
   // `tools.exclude` (its settings reference), the flat `excludeTools` older releases read, and no extension at all.
-  return { tools: { exclude: GEMINI_TOOLS }, excludeTools: GEMINI_TOOLS, admin: { extensions: { enabled: false } } };
+  const base: Record<string, unknown> = { tools: { exclude: GEMINI_TOOLS }, excludeTools: GEMINI_TOOLS, admin: { extensions: { enabled: false } } };
+  // Run 19, on the real CLI 0.65.0: with an API key, the workspace's `security.auth.selectedType` is the one switch it
+  // takes (GEMINI_DEFAULT_AUTH_TYPE and a system settings file had no effect). Merged in, nothing else replaced.
+  return o.apiKey ? { ...base, security: { auth: { selectedType: "gemini-api-key" } } } : base;
+}
+
+/** Gemini's API key for an ask: `GEMINI_API_KEY` when set, else the agent's key file (`FL ask-key`, for FL daemon). */
+export function geminiKey(o: { home: string; name: string; env?: NodeJS.ProcessEnv }): string | null {
+  return endpointKey({ home: o.home, name: o.name, keyEnv: "GEMINI_API_KEY", env: o.env });
 }
 
 /**
@@ -86,14 +114,47 @@ export function geminiSettings(): Record<string, unknown> {
  * reads `GEMINI.md` and `.env` from the folders above it, and nobody but this user can put one there.
  */
 export const askWorkspaces = (home: string) => join(home, "ask-workspaces");
-function freshWorkspace(home: string): { root: string; cwd: string; remove: () => void } {
+/** A workspace older than this is no ask's any more (twice the longest ask): a process that died mid-ask left it. */
+export const STALE_WORKSPACE_MS = 2 * ASK_TIMEOUT_MS;
+/** The workspaces of the asks in flight: removed if the runtime exits mid-ask (`FL stop`; run 19). */
+const liveWorkspaces = new Set<string>();
+function freshWorkspace(home: string, nowMs: number = Date.now()): { root: string; cwd: string; remove: () => void } {
   const parent = askWorkspaces(home);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   chmodSync(parent, 0o700);
+  sweepWorkspaces(parent, nowMs);
   const root = mkdtempSync(join(parent, "feast-ask-"));
   const cwd = join(root, "w");
   mkdirSync(cwd);
-  return { root, cwd, remove: () => rmSync(root, { recursive: true, force: true }) };
+  liveWorkspaces.add(root);
+  onExit();
+  return {
+    root,
+    cwd,
+    remove: () => {
+      liveWorkspaces.delete(root);
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+/** Run 19: what a killed process left (a daemon's stop is a signal, no exit hook runs), never another ask's in flight. */
+export function sweepWorkspaces(parent: string, nowMs: number = Date.now()): void {
+  let names: string[];
+  try {
+    names = readdirSync(parent);
+  } catch {
+    return;
+  }
+  for (const n of names) {
+    if (!n.startsWith("feast-ask-")) continue;
+    const path = join(parent, n);
+    if (liveWorkspaces.has(path)) continue;
+    try {
+      if (nowMs - statSync(path).mtimeMs > STALE_WORKSPACE_MS) rmSync(path, { recursive: true, force: true });
+    } catch {
+      // Gone already.
+    }
+  }
 }
 
 /** What the Gemini CLI and Cursor are told besides the pack: the pack itself says the rest. */
@@ -183,6 +244,11 @@ export function endpointKey(o: { home: string; name: string; keyEnv?: string | n
  * it: the pack itself asks for the JSON), no tools, no stream, 120 s. The key goes to that endpoint only, never to a
  * log, a notice or an error line.
  */
+/** The endpoints (base URL and model) that refused `response_format: json_schema` in this run. */
+const plainEndpoints = new Set<string>();
+/** The tests' own: a fresh run. */
+export const forgetPlainEndpoints = () => plainEndpoints.clear();
+
 async function callEndpoint(o: CallInput): Promise<HostCall> {
   const who = "your AI endpoint";
   const base = o.baseUrl ? checkBaseUrl(o.baseUrl) : { ok: false as const, reason: "no --ask-base-url" };
@@ -204,11 +270,16 @@ async function callEndpoint(o: CallInput): Promise<HostCall> {
     return doFetch(`${base.url}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
   };
   let response: Response;
+  const plain = `${base.url}|${o.model}`;
   try {
-    response = await ask(true);
-    if (response.status === 400 || response.status === 422) {
+    // Run 19: an endpoint that refused the schema once (DeepSeek: 400 "This response_format type is unavailable now")
+    // is asked without it for the rest of the run, not paid a 400 round trip on every ask.
+    const structured = !plainEndpoints.has(plain);
+    response = await ask(structured);
+    if (structured && (response.status === 400 || response.status === 422)) {
       await response.body?.cancel().catch(() => undefined);
       response = await ask(false);
+      if (response.status === 200) plainEndpoints.add(plain);
     }
   } catch (error) {
     const name = (error as Error).name;
@@ -253,8 +324,21 @@ function jsonIn(text: string): unknown {
 /** The player's home folder shown as ~ in a cause (it names the user). */
 const home = (text: string) => text.split(homedir()).join("~");
 
-/** A child's words, fit to show: the tail, one line, no URL (it may carry a key). */
-const tail = (text: string) => clean(text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>").trim().split("\n").slice(-3).join(" "), 200);
+/**
+ * A child's words, fit to show: the tail, one line, no URL (it may carry a key). A stack's frames (`    at …`) are
+ * left out first (run 19: Gemini's auth error came as its last three frames), so the error's own line is kept.
+ */
+export const tail = (text: string) =>
+  clean(
+    text
+      .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>")
+      .trim()
+      .split("\n")
+      .filter((line) => !/^\s*at\s\S/.test(line))
+      .slice(-3)
+      .join(" "),
+    200,
+  );
 
 /** The groups of the asks in flight: killed if the runtime exits mid-ask (a detached group gets no ^C of its own). */
 const live = new Set<number>();
@@ -262,12 +346,23 @@ let exitHook = false;
 function track(pid: number | undefined): void {
   if (!pid) return;
   live.add(pid);
+  onExit();
+}
+/** One exit hook: the groups in flight killed, and their workspaces removed (run 19: `FL stop` mid-ask left them). */
+function onExit(): void {
   if (exitHook) return;
   exitHook = true;
   process.once("exit", () => {
     for (const p of live) {
       try {
         process.kill(-p, "SIGKILL");
+      } catch {
+        // Gone.
+      }
+    }
+    for (const root of liveWorkspaces) {
+      try {
+        rmSync(root, { recursive: true, force: true });
       } catch {
         // Gone.
       }
@@ -335,13 +430,17 @@ async function callCliIn(o: CallInput & { with: CliAsk }, fresh: { root: string;
   const { command, args } = askArgv(o.with, { cwd, schemaPath, lastMessagePath, model: o.model, pack: o.pack, env: o.env });
   // Gemini's tools off: its system settings, beside (not in) its workspace.
   const extraEnv: NodeJS.ProcessEnv = {};
+  let hidden: string | null = null;
   if (o.with === "gemini" && fresh) {
     // The workspace's own settings (run 17, on the real CLI 0.65.0): a system settings file is read only from a folder
     // root owns, which the runtime cannot make; the project's `.gemini/settings.json` is read for a trusted folder,
     // and it is above the player's own settings. The folder is a fresh empty one of ours, trusted for this one ask (its
     // documented switch), so the file is read and plan mode holds (untrusted, the CLI turns plan mode back to default).
+    // Run 19: with an API key (GEMINI_API_KEY, else `FL ask-key`), the setting that makes the CLI use it.
+    const key = geminiKey({ home: o.home, name: o.name, env: o.env });
+    if (key) extraEnv.GEMINI_API_KEY = hidden = key;
     mkdirSync(join(cwd, ".gemini"));
-    writeFileSync(join(cwd, ".gemini", "settings.json"), JSON.stringify(geminiSettings()), { mode: 0o600 });
+    writeFileSync(join(cwd, ".gemini", "settings.json"), JSON.stringify(geminiSettings({ apiKey: key !== null })), { mode: 0o600 });
     extraEnv.GEMINI_CLI_TRUST_WORKSPACE = "true";
   }
   const who = hostShown(o.with);
@@ -400,7 +499,8 @@ async function callCliIn(o: CallInput & { with: CliAsk }, fresh: { root: string;
   if (o.with === "gemini") {
     // `{ response, stats, error? }` (its headless docs); a failure's object comes on stderr, pretty-printed (0.65.0).
     const out = (parseAnswerText(run.stdout) ?? jsonIn(run.stderr)) as { response?: unknown; error?: { message?: unknown } | null } | undefined;
-    if (run.code !== 0 || (out && out.error)) return { ok: false, cause: `${who} answered an error: ${tail(home(typeof out?.error?.message === "string" ? out.error.message : run.stderr || run.stdout || `exit ${run.code}`))}` };
+    const said = home(typeof out?.error?.message === "string" ? out.error.message : run.stderr || run.stdout || `exit ${run.code}`);
+    if (run.code !== 0 || (out && out.error)) return { ok: false, cause: `${who} answered an error: ${tail(hidden ? said.split(hidden).join("<key>") : said)}` };
     const answer = typeof out?.response === "string" ? parseAnswerText(out.response) : undefined;
     return answer === undefined ? { ok: false, cause: `${who}'s answer was not JSON` } : { ok: true, answer };
   }

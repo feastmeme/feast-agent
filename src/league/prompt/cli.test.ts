@@ -144,7 +144,7 @@ describe("FL buy into a running agent waits for the outcome", () => {
       // Another coin: a second FEAST buy within 60 s is L13's, refused before anything is queued.
       const queued = await run(["buy", "demo", "0x00000000000000000000000000000000000c0dea", "0.002", "--no-wait"], env);
       expect(queued.code).toBe(0);
-      expect(queued.stdout.trim()).toBe('queued for the running agent "demo"; feast-league status demo');
+      expect(queued.stdout.trim()).toBe('queued for the running agent "demo"; FL status demo');
       expect(JSON.parse(readFileSync(join(agentPaths(home, "demo").dir, "host.json"), "utf8")).what).toBe("buy");
     } finally {
       writeStop(agentPaths(home, "demo").stop, "stop requested by the user");

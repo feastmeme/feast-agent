@@ -1,9 +1,10 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ASK_INSTRUCTION, askWorkspaces, geminiSettings, askArgv, askDirs, askKeyPath, askWithFor, callHost, checkBaseUrl, childEnv, endpointKey, LOGIN_KEPT } from "./host.ts";
+import { ASK_INSTRUCTION, askWorkspaces, geminiSettings, askArgv, askDirs, askKeyPath, askWithFor, callHost, checkBaseUrl, childEnv, cursorCommand, endpointKey, forgetPlainEndpoints, LOGIN_KEPT, STALE_WORKSPACE_MS, sweepWorkspaces, tail } from "./host.ts";
 import { ANSWER_SCHEMA } from "./pack.ts";
 
 /**
@@ -16,6 +17,7 @@ let dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs = [];
+  forgetPlainEndpoints();
 });
 
 const ANSWER = { action: "buy", coin: "c1", amountBnb: 0.006, fraction: null, reason: "floor first", memo: "bought c1 at 14:30" };
@@ -68,7 +70,9 @@ process.stdin.on("end", () => {
     chmodSync(join(bin, name), 0o755);
   }
   const home = join(dir, "home");
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, FEAST_MAINNET_RPC_URL: "https://rpc.example/with-a-key" };
+  // The machine's own Gemini key never reaches a stub (and the tests do not depend on whether it has one).
+  const { GEMINI_API_KEY: _machineKey, ...machine } = process.env;
+  const env = { ...machine, PATH: `${bin}:${process.env.PATH ?? ""}`, FEAST_MAINNET_RPC_URL: "https://rpc.example/with-a-key" };
   const read = (name: string) => JSON.parse(readFileSync(join(seen, `${name}.json`), "utf8")) as { args: string[]; stdin: string; cwd: string; env: Record<string, string | undefined>; workspace: string[]; geminiSettings: unknown };
   const grandchild = () => Number(readFileSync(join(seen, "grandchild.pid"), "utf8"));
   return { home, env, read, grandchild };
@@ -353,3 +357,90 @@ describe("addendum 11: the new adapters", () => {
   });
 });
 
+describe("run 19: what the real rehearsals found", () => {
+  it("Gemini with an API key: the workspace's settings select it, merged with the tool exclusion; the key reaches the child only by env", async () => {
+    const s = stubs("answer");
+    const env = { ...s.env, GEMINI_API_KEY: "AIza-test-0000" };
+    expect(await callHost({ with: "gemini", pack: "p", home: s.home, name: "demo", env })).toEqual({ ok: true, answer: ANSWER });
+    const seen = s.read("gemini");
+    expect(seen.geminiSettings).toEqual(geminiSettings({ apiKey: true }));
+    expect(seen.geminiSettings).toMatchObject({ security: { auth: { selectedType: "gemini-api-key" } }, tools: { exclude: expect.arrayContaining(["run_shell_command"]) }, admin: { extensions: { enabled: false } } });
+    expect(seen.env.GEMINI_API_KEY).toBe("AIza-test-0000");
+    expect(seen.args.join(" ")).not.toContain("AIza-test-0000");
+    // No key: no auth type written (the CLI's own login, where it still has one).
+    const none = stubs("answer");
+    await callHost({ with: "gemini", pack: "p", home: none.home, name: "demo", env: none.env });
+    expect(none.read("gemini").geminiSettings).not.toHaveProperty("security");
+  });
+
+  it("Gemini's key from FL ask-key's file when GEMINI_API_KEY is not set (as under FL daemon)", async () => {
+    const s = stubs("answer");
+    mkdirSync(join(s.home, "agents", "demo"), { recursive: true });
+    writeFileSync(askKeyPath(s.home, "demo"), "AIza-file-0000\n", { mode: 0o600 });
+    await callHost({ with: "gemini", pack: "p", home: s.home, name: "demo", env: s.env });
+    const seen = s.read("gemini");
+    expect(seen.env.GEMINI_API_KEY).toBe("AIza-file-0000");
+    expect(seen.geminiSettings).toMatchObject({ security: { auth: { selectedType: "gemini-api-key" } } });
+  });
+
+  it("an error under a stack keeps its own first line, not the last three frames", () => {
+    const err = "IneligibleTierError: This account is not eligible: migrate to Antigravity\n    at setupUser (file:///x/gemini.js:1:2)\n    at async main (file:///x/gemini.js:3:4)\n    at async run (file:///x/gemini.js:5:6)";
+    expect(tail(err)).toBe("IneligibleTierError: This account is not eligible: migrate to Antigravity");
+    expect(tail("one\ntwo\nthree\nfour")).toBe("two three four");
+  });
+
+  it("an endpoint that refused the schema is asked without it for the rest of the run; another model is asked with it", async () => {
+    const asked: boolean[] = [];
+    const f = (async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      asked.push("response_format" in body);
+      return body.response_format ? new Response(JSON.stringify({ error: { message: "This response_format type is unavailable now" } }), { status: 400 }) : new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(ANSWER) } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const h = mkdtempSync(join(tmpdir(), "feast-league-975-plain-"));
+    dirs.push(h);
+    const o = { with: "openai" as const, pack: "p", home: h, name: "demo", baseUrl: "https://llm.example/v1", keyEnv: "K", env: { K: "sk-test" }, fetch: f };
+    for (let i = 0; i < 3; i++) expect(await callHost({ ...o, model: "deepseek-chat" })).toEqual({ ok: true, answer: ANSWER });
+    expect(asked).toEqual([true, false, false, false]);
+    await callHost({ ...o, model: "deepseek-v4-pro" });
+    expect(asked.slice(4)).toEqual([true, false]);
+  });
+
+  it("Cursor's CLI: whichever of cursor-agent and agent comes first on PATH", () => {
+    const a = mkdtempSync(join(tmpdir(), "feast-league-975-cur-a-"));
+    const b = mkdtempSync(join(tmpdir(), "feast-league-975-cur-b-"));
+    dirs.push(a, b);
+    writeFileSync(join(a, "agent"), "");
+    writeFileSync(join(b, "cursor-agent"), "");
+    expect(cursorCommand({ PATH: `${a}:${b}` })).toBe("agent");
+    expect(cursorCommand({ PATH: `${b}:${a}` })).toBe("cursor-agent");
+    expect(cursorCommand({ PATH: "/nowhere" })).toBe("agent");
+  });
+
+  it("a workspace a dead process left is swept at the next ask; one younger than an ask's longest life is kept", () => {
+    const h = mkdtempSync(join(tmpdir(), "feast-league-975-sweep-"));
+    dirs.push(h);
+    const parent = askWorkspaces(h);
+    mkdirSync(join(parent, "feast-ask-old", "w"), { recursive: true });
+    mkdirSync(join(parent, "feast-ask-young", "w"), { recursive: true });
+    mkdirSync(join(parent, "keep-me"));
+    const now = Date.now();
+    const old = (now - STALE_WORKSPACE_MS - 60_000) / 1_000;
+    utimesSync(join(parent, "feast-ask-old"), old, old);
+    utimesSync(join(parent, "keep-me"), old, old);
+    sweepWorkspaces(parent, now);
+    expect(readdirSync(parent).sort()).toEqual(["feast-ask-young", "keep-me"]);
+  });
+
+  it("FL stop mid-ask (the runtime exits while the host still thinks): the ask's workspace goes with it", async () => {
+    const s = stubs("sleep");
+    const code = `
+      const { callHost } = await import(${JSON.stringify(join(import.meta.dirname, "host.ts"))});
+      callHost({ with: "gemini", pack: "p", home: ${JSON.stringify(s.home)}, name: "demo", env: { ...process.env } });
+      setTimeout(() => process.exit(0), 1500);
+    `;
+    await new Promise<void>((done) => execFile(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code], { cwd: join(import.meta.dirname, "..", "..", ".."), env: s.env, timeout: 30_000 }, () => done()));
+    // It did start an ask (the stub saw it) and nothing of it is left.
+    expect(existsSync(join(askWorkspaces(s.home)))).toBe(true);
+    expect(readdirSync(askWorkspaces(s.home)).filter((n) => n.startsWith("feast-ask-"))).toEqual([]);
+  }, 30_000);
+});

@@ -67,7 +67,7 @@ export async function waitForOutcome(home: string, name: string, sent: { request
 /** The outcome as one line, and the command's exit: 0 filled, 2 not done by a rule, 1 failed or not known. */
 export function outcomeLine(outcome: RequestOutcome | null, name: string): { code: 0 | 1 | 2; text: string } {
   // The request may still run: a buy is good for 2 minutes in the queue, and a sent transaction's receipt is awaited for 2 more.
-  if (!outcome) return { code: 1, text: `no outcome within ${WAIT_MS / 1_000} s: the request is still with the running agent and may yet fill. Do not send it again; feast-league status ${name} shows the trade when it lands` };
+  if (!outcome) return { code: 1, text: `no outcome within ${WAIT_MS / 1_000} s: the request is still with the running agent and may yet fill. Do not send it again; FL status ${name} shows the trade when it lands` };
   const str = (v: unknown) => clean(typeof v === "string" ? v : v === null || v === undefined ? "" : String(v), 200);
   switch (outcome.outcome) {
     case "filled":
@@ -77,7 +77,7 @@ export function outcomeLine(outcome: RequestOutcome | null, name: string): { cod
     case "failed":
       return { code: 1, text: `failed at ${str(outcome.stage)}: ${str(outcome.reason)}` };
     case "unknown":
-      return { code: 1, text: `sent, and its outcome is not known yet (${str(outcome.txHash) || "no hash"}): the runtime keeps checking; feast-league status ${name}` };
+      return { code: 1, text: `sent, and its outcome is not known yet (${str(outcome.txHash) || "no hash"}): the runtime keeps checking; FL status ${name}` };
     case "stale":
       return { code: 2, text: "dropped: the request went stale before its turn" };
     case "nothing":
