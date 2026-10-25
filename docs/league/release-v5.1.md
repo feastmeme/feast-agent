@@ -19,5 +19,5 @@ The same as `league-v5`, plus `x-feast-host-detail` (gemini, cursor, opencode or
 
 ## Verified
 
-- Tests: the full suite (no network).
-- The adapters for Gemini, Cursor and an OpenAI-compatible endpoint were rehearsed on the local stub rig against stub CLIs and a stub endpoint: enter, asks, a floor pass, a host-failure takeover and its recovery, the sign-in note. The real Gemini CLI, Cursor agent and OpenCode were not installed on the lane's machine, and no OpenAI-compatible key was available there. Those real runs are the coordinator's.
+- Tests: the full suite, 995 passed and 6 skipped (the live ones), no network; the hard limits unchanged.
+- The adapters for Gemini, Cursor and an OpenAI-compatible endpoint were rehearsed on the local stub rig (`docs/league/rehearsal-v5.1-stub-20261025.md`) against stub CLIs and a stub endpoint: enter, asks, a floor pass, a host-failure takeover and its recovery, the sign-in note. The real Gemini CLI, Cursor agent and OpenCode were not installed on the lane's machine, and no OpenAI-compatible key was available there. Those real runs are the coordinator's.

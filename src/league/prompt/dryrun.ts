@@ -30,7 +30,7 @@ import { BawSigner } from "../baw.ts";
 import { FakeEnterSite, fakeEnterChain, INDEXER as ENTER_INDEXER, SITE as ENTER_SITE } from "../enter/fakes.ts";
 import { enter } from "../enter/flow.ts";
 import { coinRow, FakeFeed, INDEXER, seeded, SITE, snapshotBody, type Asked } from "../feed/fakes.ts";
-import { HOST_HEADER, RUNTIME_HEADER } from "../headers.ts";
+import { HOST_HEADER, RUNTIME_HEADER, RUNTIME_RELEASE } from "../headers.ts";
 import { noteCommand } from "../notes/queue.ts";
 import { short, utc8 } from "../register/copy.ts";
 import { fakeBaw, leagueWire } from "../register/fakes.ts";
@@ -521,7 +521,7 @@ async function requests(): Promise<void> {
       }
       say(`### ${label}\n`);
       say(["| request | x-feast-host | x-feast-runtime | other headers |", "| --- | --- | --- | --- |", ...[...seen.entries()].map(([k, a]) => `| ${k} | ${a.headers[HOST_HEADER] ?? "—"} | ${a.headers[RUNTIME_HEADER] ?? "—"} | ${Object.keys(a.headers).filter((h) => h !== HOST_HEADER && h !== RUNTIME_HEADER).join(", ") || "—"} |`)].join("\n"));
-      say(`\n${asked.length} requests in all: ${asked.filter((a) => a.url.startsWith(SITE)).length} to feast.meme, each with both headers: ${asked.filter((a) => a.url.startsWith(SITE)).every((a) => a.headers[HOST_HEADER] && a.headers[RUNTIME_HEADER] === "league-v5")}; ${asked.filter((a) => a.url.startsWith(INDEXER)).length} to the indexer, any with either: ${asked.filter((a) => a.url.startsWith(INDEXER)).some((a) => a.headers[HOST_HEADER] || a.headers[RUNTIME_HEADER])}.\n`);
+      say(`\n${asked.length} requests in all: ${asked.filter((a) => a.url.startsWith(SITE)).length} to feast.meme, each with both headers: ${asked.filter((a) => a.url.startsWith(SITE)).every((a) => a.headers[HOST_HEADER] && a.headers[RUNTIME_HEADER] === RUNTIME_RELEASE)}; ${asked.filter((a) => a.url.startsWith(INDEXER)).length} to the indexer, any with either: ${asked.filter((a) => a.url.startsWith(INDEXER)).some((a) => a.headers[HOST_HEADER] || a.headers[RUNTIME_HEADER])}.\n`);
     }
   } finally {
     for (const k of keys) {
@@ -580,7 +580,7 @@ async function seasonEnd(): Promise<void> {
   for (const n of noticesOf(s.home).filter((x) => x.kind === "season" || x.kind === "version")) say(`- ${hm(Date.parse(n.at))} ${n.kind}: ${n.text}`);
   say("");
   fillTable(fills(s.home));
-  say("\nThe release is told once a league day: once before 21:00 UTC+8 and once after it, the dinner being a new league day; `FL status` says `runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent` meanwhile. Nothing upgrades by itself.");
+  say(`\nThe release is told once a league day: once before 21:00 UTC+8 and once after it, the dinner being a new league day; \`FL status\` says \`runtime ${RUNTIME_RELEASE} · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent\` meanwhile. Nothing upgrades by itself.`);
 }
 
 async function warmUp(): Promise<void> {
