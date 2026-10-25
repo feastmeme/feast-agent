@@ -50,7 +50,9 @@ export function modelHint(env: Record<string, string | undefined> = process.env)
  * these four say `other` there), and the host itself goes in a second header, `x-feast-host-detail`, that an older
  * site simply ignores.
  */
-export const HOST_DETAILS = ["gemini", "cursor", "opencode", "openai"] as const;
+// Run 21: `binance` (Binance AI Pro, in its sandbox; no headless CLI, so nobody is asked: manual mode). The site's
+// accepted set (src/lib/league/models.ts: grok, codex, claude, other) does not name it yet, so it says `other` there.
+export const HOST_DETAILS = ["gemini", "cursor", "opencode", "openai", "binance"] as const;
 export type HostDetail = (typeof HOST_DETAILS)[number];
 export const HOST_DETAIL_HEADER = "x-feast-host-detail";
 

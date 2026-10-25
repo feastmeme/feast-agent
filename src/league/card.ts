@@ -3,7 +3,7 @@ import { hostHow, hostShown } from "./ask/host.ts";
 import type { StaticAudit } from "./audit/static.ts";
 import { LIMIT_SPECS, WARMUP_SIZE_BNB, WARMUP_TRADES } from "./limits.ts";
 import { PRESETS } from "./presets/specs.ts";
-import { LEAGUE_CAP_BNB, PAGE_IDLE_RULE } from "./prompt/constants.ts";
+import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES, LEAGUE_CAP_BNB, PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { promptHead } from "./prompt/host.ts";
 
 /**
@@ -42,7 +42,10 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
     lines.push("Prompt mode: your own agent reads your prompt and decides when to look and what to trade, with FL data, FL buy, FL sell and FL note. The runtime calls no model and never reads the prompt as instructions.");
     lines.push(`Prompt: ${agent.prompt!.path} (sha256 ${short(agent.prompt!.sha256)})`);
     for (const line of promptHead(agent.prompt!.path)) lines.push(`  > ${line}`);
-    if (agent.preset && agent.autopilot) {
+    if (agent.manual) {
+      // Run 21: no loop runs it, so nothing of the autopilot, the asks or the stop-loss watcher is said to run.
+      lines.push(`Manual mode: no loop and no daemon run this agent. You drive it one command at a time (FL data ${agent.name}, FL buy ${agent.name} <coin> <bnb>, FL sell ${agent.name} <coin> <fraction>, FL note ${agent.name} "…"), each within the hard limits below. Nothing trades on its own: no autopilot, no floor keeper and no stop-loss watcher (the hard stop-loss L6 needs the loop). The day's floor (${ACTIVITY_FLOOR_TRADES} trades and ${ACTIVITY_FLOOR_BNB} BNB) is yours to make by hand. FL start ${agent.name} switches it to the loop on a machine that stays on.`);
+    } else if (agent.preset && agent.autopilot) {
       const spec = PRESETS[agent.preset];
       // Task 975: the backup, on by default; ruling C6 (only a trade holds it back) and C7 (steady keeps its exits).
       const back = spec.keepsExits
@@ -99,6 +102,6 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
   lines.push(`Worst case: at most ${l.maxTradesPerHour} trades an hour, at most ${l.maxDailySpendBnb} BNB of buys in any 24 h, at most ${l.budgetBnb} BNB in all.`);
   lines.push("");
   lines.push("This trades real BNB from your wallet as soon as you say yes. There is no practice mode.");
-  lines.push(`To stop: say "stop", or run \`FL stop ${agent.name}\` (or create the file STOP in the agent's folder).`);
+  lines.push(agent.manual ? `Nothing runs between your commands. To stop it for good: say "stop", or run \`FL stop ${agent.name}\` (a stop file refuses every FL buy and FL sell until FL resume ${agent.name}).` : `To stop: say "stop", or run \`FL stop ${agent.name}\` (or create the file STOP in the agent's folder).`);
   return lines.join("\n");
 }

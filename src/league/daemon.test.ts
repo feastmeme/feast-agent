@@ -21,7 +21,7 @@ function where() {
   dirs.push(dir);
   return { userHome: join(dir, "u"), home: join(dir, "u", ".feast-league"), node: "/opt/node/bin/node", bin: "/opt/feast-agent/src/league/bin.mjs", path: "/opt/node/bin:/usr/bin:/bin" };
 }
-function runner(codes: Record<string, number> = {}, says: Record<string, string> = { "launchctl print": "gui/501/meme.feast.league.maplegrin = {\n\tstate = running\n}", "systemctl --user is-active": "active\n" }) {
+function runner(codes: Record<string, number> = {}, says: Record<string, string> = { "launchctl print": "gui/501/meme.feast.league.maplegrin = {\n\tstate = running\n}", "systemctl --user is-active": "active\n", "systemctl --user is-system-running": "running\n" }) {
   const calls: string[] = [];
   const run: Runner = async (command, args) => {
     const line = [command, ...args].join(" ");
@@ -111,10 +111,25 @@ describe("install, status, uninstall", () => {
 
   it("run 19, Linux: enabled but not active: the same truth, with systemctl's own start", async () => {
     const w = where();
-    const idle = runner({}, { "systemctl --user is-active": "inactive\n" });
+    const idle = runner({}, { "systemctl --user is-active": "inactive\n", "systemctl --user is-system-running": "running\n" });
     const out = await daemon({ platform: "linux", name: "maplegrin", ...w, uid: 1000, run: idle.run, running: false, tempOk: true, sleep: async () => {}, action: "install" });
     expect(out).toMatchObject({ running: false, startCommand: "systemctl --user start feast-league-maplegrin.service" });
     expect(out.lines[0]).toContain('but systemd has not started it: its state is "inactive", and the agent is NOT running. Start it now with `systemctl --user start feast-league-maplegrin.service` (or FL start maplegrin).');
+  });
+
+  it("run 21: a Linux with no systemd user manager: no unit claimed, written or read; the line says what to do instead", async () => {
+    const w = where();
+    for (const says of [{ "systemctl --user is-system-running": "" }, { "systemctl --user is-system-running": "offline\n" }]) {
+      const none = runner({ "systemctl --user is-system-running": 1 }, says);
+      const status = await daemon({ platform: "linux", name: "maplegrin", ...w, uid: 1000, run: none.run, running: false, tempOk: true, action: "status" });
+      expect(status.lines).toEqual(["no service manager here: keep it running yourself, or FL start on a schedule", "the agent: not running"]);
+      expect(status.lines.join("\n")).not.toMatch(/systemd|unit/);
+      const install = await daemon({ platform: "linux", name: "maplegrin", ...w, uid: 1000, run: none.run, running: false, tempOk: true, action: "install", sleep: async () => {} });
+      expect(install).toMatchObject({ ok: false, installed: false, running: false });
+      expect(install.lines).toEqual(["no service manager here: keep it running yourself, or FL start on a schedule"]);
+      expect(none.calls.filter((c) => !c.endsWith("is-system-running"))).toEqual([]);
+      expect(existsSync(join(w.userHome, ".config", "systemd"))).toBe(false);
+    }
   });
 
   it("Linux: daemon-reload, enable --now; a failure to load is said in one line", async () => {
@@ -122,7 +137,7 @@ describe("install, status, uninstall", () => {
     const r = runner();
     const base = { platform: "linux" as const, name: "maplegrin", ...w, uid: 1000, run: r.run, running: true, tempOk: true };
     const installed = await daemon({ ...base, action: "install" });
-    expect(r.calls).toEqual(["systemctl --user daemon-reload", "systemctl --user enable --now feast-league-maplegrin.service"]);
+    expect(r.calls).toEqual(["systemctl --user is-system-running", "systemctl --user daemon-reload", "systemctl --user enable --now feast-league-maplegrin.service"]);
     expect(installed.lines).toContain("to start it at boot before anyone logs in: loginctl enable-linger (once, your choice)");
     expect(installed.lines).toContain("it is running now: the daemon's own start found it running and stood down; it takes over at the next log-in or reboot");
     const bad = runner({ "systemctl --user enable": 1 });

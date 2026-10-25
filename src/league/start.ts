@@ -63,6 +63,8 @@ export function prepareStart(
     confirm: boolean;
     /** Task 968: set the season gate on the agent (never part of its card). */
     league?: AgentConfig["league"];
+    /** Run 21: manual mode on (true) or off (false); undefined keeps what the agent has. Never part of its card's shape. */
+    manual?: boolean;
     now?: Date;
   },
 ): StartCheck {
@@ -75,7 +77,8 @@ export function prepareStart(
       if (agent && statusOf(home, name).running) return { kind: "running", agent };
       // The season gate stays with the agent through a new card: a restart before the start still waits.
       const league = options.league !== undefined ? options.league : agent?.league;
-      agent = league !== undefined ? { ...planned.agent, league } : planned.agent;
+      const manual = options.manual !== undefined ? options.manual : (agent?.manual ?? undefined);
+      agent = { ...planned.agent, ...(league !== undefined ? { league } : {}), ...(manual ? { manual: true } : {}) };
       saveAgent(home, agent);
       replanned = true;
     }
@@ -83,6 +86,11 @@ export function prepareStart(
   if (!agent) return { kind: "no-agent" };
   if (options.league !== undefined && JSON.stringify(agent.league ?? null) !== JSON.stringify(options.league)) {
     agent = { ...agent, league: options.league };
+    saveAgent(home, agent);
+  }
+  if (options.manual !== undefined && (agent.manual === true) !== options.manual) {
+    const { manual: _was, ...rest } = agent;
+    agent = options.manual ? { ...rest, manual: true } : rest;
     saveAgent(home, agent);
   }
   let confirmedNow = false;

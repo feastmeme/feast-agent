@@ -126,6 +126,11 @@ export type EnterInput = {
   askKeyEnv?: string;
   /** Addendum 11: the player said no to the daemon. */
   noDaemon?: boolean;
+  /**
+   * Run 21: manual mode: registered and signed in as ever, the agent recorded, and no loop and no daemon (a host whose
+   * background processes die, Binance AI Pro's sandbox). The player drives it with FL data, buy, sell, note, status.
+   */
+  manual?: boolean;
   /** Addendum 12: a tutorial's referral code: bare, or the pasted line with `?ref=<code>` or `ref: <code>`. */
   ref?: string;
   idleMinutes?: number;
@@ -248,6 +253,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     } else if (AGENT_NAME.test(given) && given !== ENTRY_AGENT) agentName = given;
     else return end(2, false, "agent", copy.agentNameNeeded(given, lang), { agentId: given });
   }
+  // Run 21: manual mode, asked now or kept on the agent (a rerun without the flag keeps it; FL start switches it to the loop).
+  const manual = startWanted && (input.manual === true || (agentName !== null && loadAgent(deps.home, agentName)?.manual === true));
   // The wallet held by the agent this entry started is ours: a meme pauses it for the launch.
   const holder = walletLockHolder(deps.home);
   const ours = agentName ?? record?.agent ?? null;
@@ -301,7 +308,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
       strategy = { kind: file.copied ? "default" : "existing", path: file.path };
     }
     const planInput: PlanInput = { name, promptPath, preset: choice.preset, idleMinutes: input.idleMinutes, ...(asked.ask ? { ask: asked.ask } : {}), params: {}, limits: {} };
-    const checked = prepareStart(deps.home, name, { plan: planInput, yes: false, confirm: true, now: new Date(now()) });
+    const checked = prepareStart(deps.home, name, { plan: planInput, yes: false, confirm: true, now: new Date(now()), ...(manual ? { manual: true } : {}) });
     if (checked.kind === "not-planned") return end(2, false, "plan", copy.notPlanned(checked.errors, lang), { errors: checked.errors });
     if (checked.kind === "running") return end(2, false, "running", copy.runningOtherCard(name, lang), { agent: name });
     if (checked.kind === "refused") return end(2, false, "start", copy.startRefused(checked.why, lang), { agent: name });
@@ -424,10 +431,15 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   /** After a yes that covered it: confirm the agent, mark it to wait for the season, and start it once. */
   const startStep = async (): Promise<string[]> => {
     if (!planned) return [];
-    const checked = prepareStart(deps.home, planned.name, { plan: null, yes: true, confirm: true, league: { waitForSeason: true }, now: new Date(now()) });
+    const checked = prepareStart(deps.home, planned.name, { plan: null, yes: true, confirm: true, league: { waitForSeason: true }, now: new Date(now()), ...(manual ? { manual: true } : {}) });
     if (checked.kind !== "ready") return [copy.startRefused(checked.kind === "refused" ? checked.why : checked.kind, lang)];
     record = { ...(record ?? { agentId: given, bodyCoin: null, launchTx: null }), agent: planned.name };
     writeJsonAtomic(paths.entry, record);
+    // Run 21: manual mode starts nothing and installs nothing; the closing lines say how to drive it.
+    if (manual) {
+      log("enter.manual", { agent: planned.name, waitForSeason: true });
+      return [];
+    }
     if (statusOf(deps.home, planned.name).running) return [copy.alreadyRunning(planned.name, lang)];
     const lock = walletLockHolder(deps.home);
     if (lock) return [copy.walletBusy(lock.agent, lang)];
@@ -457,19 +469,21 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     // Run 17: the referral binding, on a rerun too (a v5.1 entry's recorded code binds here, by itself since run 18).
     lines.push(...(input.memeOnly ? [] : await bindStep()));
     if (!planned) return end(0, true, "entered", [head, ...refLate(), ...(input.memeOnly ? [] : [copy.doneLine(lang)])], { agentId: given, bodyCoin: record!.bodyCoin, notes: record!.notes ?? null });
+    if (manual && statusOf(deps.home, planned.name).running) return end(2, false, "running", [head, copy.manualWhileRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, ...refLate(), copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     const rerunRead = await deps.site.league("today", null).catch(() => null);
     const opens = tradingOpens(rerunRead);
     const upgrade = upgradeSentence(versionView(rerunRead?.latestRuntime, now()), lang);
     const signInEnd = await signInEndNow();
     if (planned.needsYes) {
-      const digest = sha256(JSON.stringify({ stage: "start", agentId: given, start: planned.shape }));
+      const digest = sha256(JSON.stringify({ stage: "start", agentId: given, start: planned.shape, ...(manual ? { manual } : {}) }));
       if (!yesFor("start", digest)) {
         lines.push(head, ...refLate());
-        return ask("start", digest, [copy.startCard(lang), "", copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot, signInEnd }, lang)].join("\n"), { agent: planned.name });
+        return ask("start", digest, [copy.startCard(lang), "", copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot, signInEnd, manual }, lang)].join("\n"), { agent: planned.name });
       }
     }
     lines.push(head, ...refLate(), ...(await startStep()));
+    if (manual) return end(0, true, "done", copy.doneManual(planned.name, opens, lang, true), { agent: planned.name, manual: true });
     return end(0, true, "done", copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade), { agent: planned.name });
   }
 
@@ -539,13 +553,13 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     return sessionSaid(outcome, { agentId, season }, lang, "entry");
   };
   const registeredFrom = (kept: KeptAgent): NonNullable<EntryRecord["registered"]> => ({ season: kept.season ?? season, issuedAt: kept.issuedAt, seat: kept.seatNo, founding: kept.foundingNo, at: new Date(now()).toISOString() });
-  const agentSection = () => (planned ? copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot, signInEnd }, lang) : null);
+  const agentSection = () => (planned ? copy.agentSection({ strategy: planned.strategy, name: planned.name, card: planned.card, opens, autopilot: planned.autopilot, signInEnd, manual }, lang) : null);
   const finish = async (): Promise<EnterResult> => {
     lines.push(...refLate());
     if (planned) lines.push(...(await startStep()));
     // Run 17: the agent runs; then the referral binding, signed by itself (run 18) when this entry carries a code.
     lines.push(...(await bindStep()));
-    lines.push(planned ? copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade) : copy.doneLine(lang));
+    lines.push(planned ? (manual ? copy.doneManual(planned.name, opens, lang) : copy.doneRunning(planned.name, opens, lang, planned.autopilot, basename(planned.agent.prompt?.path ?? "strategy.md"), upgrade)) : copy.doneLine(lang));
     if (composed) return memeStep(composed);
     // Signed in, and the site has not given the seat yet: "registered", not done; a rerun picks it up.
     return end(0, true, record?.registered && record.registered.seat === null ? "registered" : "done", [], { agentId, season, registered: record?.registered ?? null, notes: record?.notes ?? null, agent: planned?.name ?? null });
@@ -636,7 +650,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const notesNeeded = seated && !dev && (record?.notes ?? null) === null;
     if (!seated) lines.push(copy.seatPending(season, lang));
     if (notesNeeded || planned?.needsYes) {
-      const digest = sha256(JSON.stringify({ stage: notesNeeded ? "notes" : "start", agentId, season, start: planned?.shape ?? null }));
+      const digest = sha256(JSON.stringify({ stage: notesNeeded ? "notes" : "start", agentId, season, start: planned?.shape ?? null, ...(manual ? { manual } : {}) }));
       const stage: Stage = notesNeeded ? "notes" : "start";
       if (!yesFor(stage, digest)) {
         const card = [notesNeeded ? copy.notesCard({ agentId, season, wallet }, lang) : copy.startCard(lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
@@ -649,9 +663,9 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
 
   // --- the entry card: the Register signature, the notes, the start, under one yes ---------------------------
   // The yes covers the referral code too: it is in the card and in its digest.
-  const digest = sha256(JSON.stringify({ stage: "register", agentId, season, notes: dev ? "dev" : season, start: planned?.shape ?? null, ...(ref ? { ref } : {}) }));
+  const digest = sha256(JSON.stringify({ stage: "register", agentId, season, notes: dev ? "dev" : season, start: planned?.shape ?? null, ...(ref ? { ref } : {}), ...(manual ? { manual } : {}) }));
   if (!yesFor("register", digest)) {
-    const card = [copy.entryCard({ agentId, season, notes: !dev, agent: planned?.name ?? null, wallet, seasonOn: opens.kind === "open", ref }, lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
+    const card = [copy.entryCard({ agentId, season, notes: !dev, agent: planned?.name ?? null, wallet, seasonOn: opens.kind === "open", ref, manual }, lang), ...(planned ? ["", agentSection()!] : [])].join("\n");
     return ask("register", digest, card, { season, agent: planned?.name ?? null, opens: opens.kind === "at" ? new Date(opens.at).toISOString() : opens.kind });
   }
   confirmEntry();

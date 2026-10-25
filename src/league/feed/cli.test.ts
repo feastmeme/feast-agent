@@ -113,3 +113,21 @@ describe("run 19: FL start runs the agent in the background by default", () => {
     expect(stopped.stdout.trim()).toBe('"maple" is stopped (stop requested by the user): FL resume maple removes the stop and starts it');
   }, 60_000);
 });
+
+describe("run 21: a manual agent's FL buy with no process running", () => {
+  it("the one-shot runs it under the season gate: refused with the loop's words, the last manual action kept, nothing left running", async () => {
+    const { env, home } = setup();
+    const dir = mkdtempSync(join(tmpdir(), "feast-league-975-manualbuy-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "strategy.md"), "Trade by hand.\n");
+    const planned = planAgent({ name: "handy", promptPath: join(dir, "strategy.md"), preset: "steady" });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, { ...confirmAgent(planned.agent), league: { waitForSeason: true }, manual: true });
+    const out = await run(["buy", "handy", "FEAST", "0.006"], { ...env, FEAST_LEAGUE_DAEMON: "off" });
+    expect(out.code).toBe(2);
+    expect(out.stdout.trim()).toBe("handy: refused — the season has not started; it opens when feast.meme announces the start");
+    const last = JSON.parse(readFileSync(join(home, "agents", "handy", "manual-last.json"), "utf8")) as { what: string };
+    expect(last.what).toBe("buy: handy: refused — the season has not started; it opens when feast.meme announces the start");
+    expect(existsSync(join(home, "agents", "handy", "alive.json"))).toBe(false);
+  }, 60_000);
+});

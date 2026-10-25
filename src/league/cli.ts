@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -13,7 +14,8 @@ import { applyChange, confirmAgent, loadAgent, planAgent, saveAgent, type AgentC
 import { AUDIT_RULES } from "./audit/static.ts";
 import { auditFile, auditRefusal, recordModelVerdict } from "./audit/verdict.ts";
 import { BawError, BawSigner, execRunner } from "./baw.ts";
-import { aliveLine, readAlive } from "./alive.ts";
+import { aliveLine, markStarting, readAlive, startingNow } from "./alive.ts";
+import { manualBeat, readManual, recordManual, settleBeats } from "./manual.ts";
 import { daemon, daemonPath, kickDaemon, windowsLines, type Runner } from "./daemon.ts";
 import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
@@ -35,7 +37,7 @@ import { bnbToWei, weiToBnb } from "./limits.ts";
 import { noteCommand } from "./notes/queue.ts";
 import { notesLogin, recordedAgentId } from "./notes/session.ts";
 import { checkHost, checkModel, declareHost, hostDetailHint, modelHint, readDeclaredHost } from "./headers.ts";
-import { PAGE_IDLE_RULE } from "./prompt/constants.ts";
+import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES, PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { dayLine } from "./prompt/floor.ts";
 import { readStanding } from "./data/standing.ts";
 import { cadenceLine, readCadence } from "./feed/cadence.ts";
@@ -77,7 +79,7 @@ import {
 } from "./register/copy.ts";
 import { check, prepare, readLeagueRecord, submit, type FlowDeps } from "./register/flow.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
-import { autopilotLine, awakeLine, clean, referrerLine, tradeNowLine } from "./enter/copy.ts";
+import { autopilotLine, awakeLine, clean, doneManual, driveByAnswerLine, referrerLine, tradeNowLine } from "./enter/copy.ts";
 import { enter, entryOneShot, keepReferrerRead, keptReferrer, readEntry, referrerStatus } from "./enter/flow.ts";
 import { normalizeManifesto, previewDescribes, signRequestMessage } from "./register/message.ts";
 import { referralDeps } from "./register/referral.ts";
@@ -104,7 +106,9 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   plan <name> --script <file.mjs> [--limit key=value]… [--tick s] [--sentence "…"]
                                   validate and save an agent, and print its confirmation card
   card <name>                     print the confirmation card again
-  start <name> --yes [--detach]   the user said yes: confirm and start (real BNB, no practice mode)
+  start <name> --yes [--detach]   the user said yes: confirm and start (real BNB, no practice mode), in the background
+                                  (--foreground keeps it in this shell); --manual: manual mode instead (no loop), and
+                                  FL start <name> without it switches a manual agent back to the loop
   stop <name> | --all             write the stop file and wait for the agent to halt
   resume <name> [--all] [--detach] remove the stop file (--all: the global one too) and start again
   start|resume <name> … [--poll <s>] [--live] [--no-jitter]
@@ -153,7 +157,7 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
   sell <name> <coin|FEAST> <fraction|all> [--no-wait]
   enter --name <id>.ai [--prompt <strategy.md>] [--meme "<concept>"] [--image <path>] [--no-start] [--yes] [--lang en|zh] [--json]
         [--coin-name "<…feed>" --symbol T --description "…"] [--autopilot <preset> | --no-autopilot] [--idle-minutes N]
-        [--agent <name>] [--host <claude|codex|grok|other|gemini|cursor|opencode|openai>] [--no-jitter] [--no-daemon]
+        [--agent <name>] [--host <claude|codex|grok|other|gemini|cursor|opencode|openai|binance>] [--manual] [--no-jitter] [--no-daemon]
         [--ref <code>]                  a tutorial's referral code (or the pasted line with ?ref=<code> or ref: <code>):
                                   sent with the registration, unsigned; FL status shows it
                                   one command enters the league and runs your AI: one card and one yes sign the league's
@@ -164,6 +168,8 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   (--name is the wallet's Agent ID here; FL start <name> restarts the agent). The agent's
                                   autopilot backup is on (default steady, after 30 min); --no-autopilot turns it off.
                                   --host names the AI that runs it, for feast.meme (kept here; default: the host's hint)
+                                  --manual: no loop and no daemon (a host whose background processes die, Binance AI
+                                  Pro): drive it with FL data, buy, sell, note, status; nothing trades on its own
   meme "<concept>" [--coin-name "<…feed>"] [--symbol T] [--description "…"] [--image <file.png>] [--yes]
                                   after the entry: the meme's compose card, then its preview card; one coin per agent
   register <name> --check [--body-coin 0x…] [--lang en|zh]
@@ -220,6 +226,8 @@ function spawnDetached(home: string, name: string, extra: string[]) {
   const outFd = openSync(join(paths.dir, "runtime.out"), "a", 0o600);
   const child = spawn(process.execPath, [BIN, "run", name, ...extra], { detached: true, stdio: ["ignore", outFd, outFd], env: { ...process.env, FEAST_LEAGUE_HOME: home } });
   child.unref();
+  // Run 21: "starting" in FL status until its first tick (or 30 s), never "not running" while it boots.
+  markStarting(home, name, child.pid ?? null);
   return child;
 }
 /** How long `FL start` watches the background start for an exit at once (a refusal, a signed-out wallet). */
@@ -328,6 +336,7 @@ async function main(argv: string[]): Promise<number> {
       "coin-name": { type: "string" },
       image: { type: "string" },
       "no-start": { type: "boolean", default: false },
+      manual: { type: "boolean", default: false },
       agent: { type: "string" },
       "no-notes": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -359,6 +368,15 @@ async function main(argv: string[]): Promise<number> {
   };
   /** An agent's name; `<id>.ai` (the Agent ID as the player sees it) is the same agent (run 19). */
   const agentArg = (value: string | undefined) => agentNameOf(need(value, "an agent name"));
+  /**
+   * Run 21: a manual command keeps the seat lit (the loop's heartbeat, for a player who drives by hand), at most once
+   * per 2 minutes per agent; a running loop sends its own, so nothing is sent for it here.
+   */
+  const beat = (raw: string | undefined) => {
+    const name = raw ? agentNameOf(raw) : (readEntry(home)?.agent ?? null);
+    if (!name || name === ENTRY_AGENT || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(name) || statusOf(home, name).running) return;
+    void manualBeat({ home, name, site: siteFromEnv(), fetch, wallet: () => signerFor(home, null).address() });
+  };
   /** league-entry is FL enter's own agent: the season's commands never plan, start or change it. */
   const notEntry = (name: string) => {
     if (name === ENTRY_AGENT) throw new Error(`${ENTRY_AGENT} is FL enter's; plan your season agent under another name`);
@@ -445,8 +463,14 @@ async function main(argv: string[]): Promise<number> {
           removeStop(join(home, "STOP"));
         }
       }
+      if (values.manual && command !== "start") throw new Error("--manual goes with enter or start");
+      // Run 21: FL start --manual puts the agent in manual mode (no loop); FL start without it switches it to the loop.
+      if (command === "start" && statusOf(home, name).running && values.manual) {
+        print(json, { ok: false, running: true }, () => `"${name}" is running its loop: FL stop ${name} first, then FL start ${name} --manual`);
+        return 2;
+      }
       // start --prompt: plan first when there is no agent yet, or its prompt, autopilot, parameters or limits changed.
-      const checked = prepareStart(home, name, { plan: values.prompt !== undefined ? planInput(name) : null, yes: values.yes === true, confirm: command !== "run" });
+      const checked = prepareStart(home, name, { plan: values.prompt !== undefined ? planInput(name) : null, yes: values.yes === true, confirm: command !== "run", ...(command === "start" ? { manual: values.manual === true } : {}) });
       if (checked.kind === "not-planned") {
         print(json, { ok: false, errors: checked.errors }, () => `not planned:\n- ${checked.errors.join("\n- ")}`);
         return 2;
@@ -463,6 +487,13 @@ async function main(argv: string[]): Promise<number> {
       }
       const agent = checked.agent;
       if (checked.replanned && checked.confirmedNow) console.log(`${renderCard(agent)}\n`);
+      if (agent.manual && command !== "run") {
+        const g = readGate(home, name);
+        const opensAt = g?.opensAt ? Date.parse(g.opensAt) : null;
+        const opens = g?.state === "open" ? ({ kind: "open" } as const) : opensAt !== null && Number.isFinite(opensAt) ? ({ kind: "at", at: opensAt } as const) : ({ kind: "unknown" } as const);
+        print(json, { ok: true, manual: true }, () => doneManual(name, opens, langOf(values.lang), true));
+        return 0;
+      }
       const extra = [...(values["max-runtime"] ? ["--max-runtime", values["max-runtime"]] : []), ...(values.poll !== undefined ? ["--poll", String(poll.seconds)] : []), ...(values.live ? ["--live"] : []), ...(values["no-jitter"] ? ["--no-jitter"] : [])];
       // FL start (and resume, which is a start) spreads the 20:00 start; `run` waits only what it is handed.
       const jitterMs = command === "run" ? Number(given ?? 0) * 1_000 : values["no-jitter"] ? 0 : drawStartJitter();
@@ -546,6 +577,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case "status": {
       const name = agentArg(args[0]);
+      beat(name);
       const s = statusOf(home, name);
       if (!s.agent) throw new Error("no such agent");
       const view = s.book ? bookView(s.book, undefined, Date.now()) : null;
@@ -553,7 +585,13 @@ async function main(argv: string[]): Promise<number> {
       const unread = unreadNotifications(home, name, true);
       // Task 975, addendum 2: a prompt agent's own line closes the status: in season, the host is told to trade now.
       const shownAutopilot = s.agent.preset && s.agent.autopilot ? { preset: s.agent.preset, idleMinutes: s.agent.autopilot.idleMinutes, ...(s.agent.ask ? { ask: { every: s.agent.ask.every, with: s.agent.ask.with } } : {}) } : null;
-      const standingAgent = { track: s.agent.track, autopilot: shownAutopilot, promptFile: basename(s.agent.prompt?.path ?? "strategy.md") };
+      const standingAgent = { track: s.agent.track, autopilot: shownAutopilot, promptFile: basename(s.agent.prompt?.path ?? "strategy.md"), name, manual: s.agent.manual === true };
+      // Run 21: manual mode (no loop), and "starting" in the seconds after a start, instead of "not running".
+      const manualNow = s.agent.manual === true && !s.running;
+      const startingAgent = !s.running && !manualNow && startingNow(home, name);
+      const runState = s.running ? "running" : manualNow ? "manual mode" : startingAgent ? "starting" : "not running";
+      const lastManual = readManual(home, name);
+      const manualLine = `manual mode: no loop and no daemon; last manual action ${lastManual ? `${utc8(Date.parse(lastManual.at))} UTC+8 (${duration(Date.now() - Date.parse(lastManual.at), "en")} ago): ${clean(lastManual.what, 160)}` : "none yet"}`;
       const league = values["no-league"] ? null : await leagueStanding(home, lang, standingAgent).catch(() => null);
       // The agent's figures in BNB (task 963), marked on the chain only when it holds something; a USDT figure is a reference.
       const holds = Object.keys(s.book?.positions ?? {}).length > 0;
@@ -622,6 +660,10 @@ async function main(argv: string[]): Promise<number> {
         // Run 18: where the referrer stands (null with no code: an entry with no code says nothing about referrals).
         referrer: referrerStatus(entryRecord, referrerOn, Date.now()),
         signInEndsAt: signInEnd === null ? null : new Date(signInEnd).toISOString(),
+        // Run 21.
+        state: runState,
+        manual: s.agent.manual === true,
+        lastManual,
       };
       const gate = data.season;
       const seasonOverNow = gate?.state === "over";
@@ -640,12 +682,18 @@ async function main(argv: string[]): Promise<number> {
                   // Addendum 10: after the season, nothing about asking or the floor keeper: the season-over line says it all.
                   ...(seasonOverNow
                     ? []
+                    : manualNow
+                    ? ["nothing trades on its own in manual mode: no autopilot, no floor keeper and no stop-loss watcher; trade by hand with FL buy and FL sell"]
                     : s.agent!.ask && s.agent!.ask.with !== "none"
                     ? [
                         `asking ${hostShown(s.agent!.ask.with)} every ${s.agent!.ask.every} min with ${s.agent!.ask.model ?? "its default model"} · last ask ${askState.last ? `${utc8(askState.last.at)} UTC+8 → ${askState.last.action}${askState.last.reason ? ` (${clean(askState.last.reason, 80)})` : ""}: ${clean(askState.last.result, 80)}` : "none yet"} · failures in a row ${askState.streak}${askState.floorKeeperSince !== null ? ` · on floor keeper since ${utc8(askState.floorKeeperSince)} UTC+8` : ""}`,
                         mine.autopilot ? `floor keeper: ${mine.autopilot.preset}, when ${hostShown(s.agent!.ask.with)} fails twice in a row, and 20 min before dinner with the floor unmet` : "floor keeper: none",
                       ]
-                    : [mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no trade from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss"]),
+                    : [
+                        mine.autopilot ? `autopilot: ${mine.autopilot.preset}, after ${mine.autopilot.idleMinutes} min with no trade from your agent (${mine.autopilot.active ? "trading now" : "standing by"})` : "autopilot: none; nothing trades on its own but the hard stop-loss",
+                        // Run 21: nobody is asked (--ask-with none): how the player's AI decides by hand.
+                        ...(s.agent!.track === "prompt" && mine.autopilot ? [driveByAnswerLine(name, "en")] : []),
+                      ]),
                   ...(cadenceLine(readCadence(home, name)) ? [cadenceLine(readCadence(home, name))!] : []),
                   ...activeWaits(home, name, Date.now()).concat(activeWaits(home, ENTRY_AGENT, Date.now())).map((w) => `feast.meme asked ${w.door === "notes" ? "the notes" : w.door === "session" ? "the notes session" : w.door} to wait until ${utc8(w.until)} UTC+8 (429): nothing is sent there before`),
                   ...(mine.wallet ? [`wallet: ${mine.wallet.balanceBnb} BNB, ${mine.wallet.spendableBnb} spendable (${mine.wallet.gasReserveBnb} kept for gas); left today ${mine.headroom.leftTodayBnb} BNB, this season ${mine.headroom.leftSeasonBnb} BNB`] : []),
@@ -654,7 +702,9 @@ async function main(argv: string[]): Promise<number> {
                   ...(mine.day && !mine.day.passed && !mine.day.noFloor && !seasonOverNow && !mine.autopilot?.active
                     ? [
                         // Addendum 7: in ask mode the unified line (the asks, then the floor keeper), not league-v5's first cut.
-                        s.agent!.ask && s.agent!.ask.with !== "none" && mine.autopilot
+                        manualNow
+                          ? `manual mode: the day's floor is yours to make by hand (${ACTIVITY_FLOOR_TRADES} trades and ${ACTIVITY_FLOOR_BNB} BNB), or the agent gets eaten at the dinner`
+                          : s.agent!.ask && s.agent!.ask.with !== "none" && mine.autopilot
                           ? autopilotLine({ preset: mine.autopilot.preset, idleMinutes: mine.autopilot.idleMinutes, ask: s.agent!.ask }, "en")
                           : mine.autopilot
                             ? `while your agent trades, the day's floor is its to keep; the backup takes over after ${mine.autopilot.idleMinutes} min without a trade`
@@ -668,12 +718,12 @@ async function main(argv: string[]): Promise<number> {
         : [];
       print(json, data, () =>
         [
-          `${name}: ${s.running ? "running" : "not running"}${s.stop ? ` (stop file: ${s.stop})` : ""}; ${s.agent!.track === "preset" ? `preset ${s.agent!.preset}` : s.agent!.track === "entry" ? "the league entry (FL enter)" : s.agent!.track === "prompt" ? "prompt mode" : "script"}`,
+          `${name}: ${runState}${s.stop ? ` (stop file: ${s.stop})` : ""}; ${s.agent!.track === "preset" ? `preset ${s.agent!.preset}` : s.agent!.track === "entry" ? "the league entry (FL enter)" : s.agent!.track === "prompt" ? "prompt mode" : "script"}`,
           `positions: ${data.positions.length ? data.positions.map((p) => `${p.symbol} ${p.costBnb} BNB${p.armed ? "" : " (exit not armed)"}`).join(", ") : "none"}`,
           `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...waiting,
           // Addendum 11: alive since its start, and its last safety pass that worked.
-          ...(s.agent!.track !== "entry" ? [aliveLine(readAlive(home, name), s.running, Date.now())] : []),
+          ...(s.agent!.track !== "entry" ? [manualNow ? manualLine : aliveLine(readAlive(home, name), s.running, Date.now(), startingAgent)] : []),
           // Task 975, addendum 8: the season's end, the warm-up dinner, the release, the sign-in.
           ...(gate?.state === "over" ? [SEASON_OVER_LINE] : []),
           ...(s.agent!.track === "prompt" && !mine?.day && noFloorTonight(gate?.at ? (gate as GateState) : null, Date.now()) ? ["warm-up tonight: no floor (the warm-up dinner eats nobody); the floor counts from tomorrow"] : []),
@@ -682,7 +732,7 @@ async function main(argv: string[]): Promise<number> {
           ...(data.referral ? [`referral: ${data.referral} (sent with the registration)`] : []),
           ...(data.referrer ? [referrerLine(data.referrer, lang)] : []),
           // It runs on this machine: say so, and when it last slept (task 975, addendum 3).
-          ...(s.agent!.track !== "entry" ? [awakeLine(lang)] : []),
+          ...(s.agent!.track !== "entry" && !manualNow ? [awakeLine(lang)] : []),
           ...(sleptAt ? [`slept ${sleptAt.minutes} minutes at ${utc8(sleptAt.at)} UTC+8: nothing traded while it slept`] : []),
           ...(data.paused ? [`paused: ${data.paused}`] : []),
           ...(data.warmup ? [`warm-up: ${data.warmup.trades >= 5 ? "done" : `${data.warmup.trades} of 5 trades`}`] : []),
@@ -690,7 +740,7 @@ async function main(argv: string[]): Promise<number> {
           ...(unread.length > 0 ? ["new since the last status:", ...unreadShown(unread).map((n) => (typeof n === "string" ? n : noticeLine(n, lang)))] : ["latest:", ...s.notifications.slice(-8).map((n) => noticeLine(n, lang))]),
           ...(league ? ["", ...league.lines] : []),
           // No league block (or it could not be read), and the gate says the season is open: the instruction still ends it.
-          ...(!league?.lines.length && s.agent!.track === "prompt" && gate?.state === "open" ? [tradeNowLine(shownAutopilot, standingAgent.promptFile, lang)] : []),
+          ...(!league?.lines.length && s.agent!.track === "prompt" && gate?.state === "open" ? [manualNow ? "The season is on: trade by hand with FL buy and FL sell (manual mode)." : tradeNowLine(shownAutopilot, standingAgent.promptFile, lang, name)] : []),
         ].join("\n"),
       );
       return 0;
@@ -765,6 +815,7 @@ async function main(argv: string[]): Promise<number> {
     case "buy":
     case "sell": {
       const name = agentArg(args[0]);
+      beat(name);
       const agent = loadAgent(home, name);
       if (!agent?.confirmed) throw new Error(`no confirmed agent "${name}"`);
       const coin = need(args[1], "a coin (an address or FEAST)");
@@ -779,6 +830,7 @@ async function main(argv: string[]): Promise<number> {
       // Addendum 11 (the Grok Bot routine): the host's own answer to the last `FL ask <name> --print`, checked as the
       // runtime checks an asked AI's (the pack's ids, the cap), then made through FL buy's and FL sell's road.
       const name = notEntry(agentArg(args[0]));
+      beat(name);
       const agent = loadAgent(home, name);
       if (!agent?.confirmed || agent.track !== "prompt") throw new Error(`"${name}" is not a confirmed prompt agent`);
       const printed = readPrinted(home, name);
@@ -802,6 +854,7 @@ async function main(argv: string[]): Promise<number> {
       return manualTrade(home, name, agent, request, json, values["no-wait"] === true);
     }
     case "data": {
+      beat(args[0]);
       const signer = signerFor(home, null);
       const chain = new LeagueChain(MAINNET, rpc());
       // The quoter's impacts (addendum 5), read-only: an executor that prepares and never sends; the wallet only reads.
@@ -827,9 +880,11 @@ async function main(argv: string[]): Promise<number> {
       const name = notEntry(checkAgentName(agentArg(args[0])));
       if (!loadAgent(home, name)) throw new Error(`no agent "${name}": plan it first`);
       if (args[1] === undefined) throw new Error('missing the note\'s text: FL note <name> "<text>"');
+      beat(name);
       // A 401 opens the session again, once, here only: a background flush never signs.
       const relogin = async () => (await login()).code === 0;
       const out = await noteCommand({ home, name, site: siteFromEnv(), fetch, wallet: () => signer.address(), relogin }, { text: args[1], tx: values.tx, model: values.model });
+      recordManual(home, name, `note ${(out.data as { state?: unknown }).state ?? (out.code === 0 ? "sent" : "not sent")}`);
       print(json, out.data, () => out.text);
       return out.code;
     }
@@ -1092,12 +1147,21 @@ async function manualTrade(home: string, name: string, agent: AgentConfig, reque
     }
     const outcome = await waitForOutcome(home, name, sent);
     const line = outcomeLine(outcome, name);
+    recordManual(home, name, `${request.kind}: ${line.text}`);
     print(json, { ok: line.code === 0, requestId: sent.requestId, outcome }, () => line.text);
     return line.code;
   }
-  const outcome = await runAgent({ home, name, signer: signerFor(home, name), rpcUrl: rpc(), only: [request] });
-  console.log(`${name}: ${outcome.exit} — ${outcome.reason}`);
-  return outcome.exit === "finished" ? 0 : 2;
+  // No loop (manual mode, or a stopped agent): the one-shot runs this request under the same guard, limits and gate,
+  // and (run 21) says what became of it as the loop's answer does: filled with its transaction, or refused and why.
+  const requestId = randomUUID();
+  const logPath = agentPaths(home, name).log;
+  const from = existsSync(logPath) ? statSync(logPath).size : 0;
+  const run = await runAgent({ home, name, signer: signerFor(home, name), rpcUrl: rpc(), only: [request], onlyIds: [requestId] });
+  const outcome = run.exit === "finished" ? await waitForOutcome(home, name, { requestId, from }, { timeoutMs: 1_000, pollMs: 100 }) : null;
+  const line = outcome ? outcomeLine(outcome, name) : { code: run.exit === "finished" ? (0 as const) : (2 as const), text: `${name}: ${run.exit} — ${run.reason}` };
+  recordManual(home, name, `${request.kind}: ${line.text}`);
+  print(json, { ok: line.code === 0, requestId, outcome, exit: run.exit, reason: run.reason }, () => line.text);
+  return line.code;
 }
 
 /** The machine's supervisor for FL daemon and FL enter's last step (addendum 11): launchctl or systemctl, as a child. */
@@ -1204,6 +1268,7 @@ async function enterCommand(home: string, values: Values, json: boolean, memeOnl
       lang: langOf(values.lang),
       prompt: str(values.prompt),
       noStart: values["no-start"] === true,
+      manual: values.manual === true,
       agent: str(values.agent),
       autopilot: str(values.autopilot),
       noAutopilot: values["no-autopilot"] === true,
@@ -1484,7 +1549,8 @@ async function doctor(home: string, json: boolean): Promise<number> {
 }
 
 main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
+  // Run 21: a manual command's heartbeat gets a moment to go out before the process ends.
+  (code) => settleBeats().then(() => process.exit(code)),
   (error: unknown) => {
     console.error(`feast-league: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);

@@ -58,6 +58,13 @@ export type AgentConfig = {
    * (`season-gate.ts`), and `FL start` after a restart keeps waiting. Not part of the card: it never needs a new yes.
    */
   league?: { waitForSeason: boolean } | null;
+  /**
+   * Run 21 (the owner's ruling, 2026-10-25): a manual agent. No loop and no daemon run it: the player drives it one
+   * command at a time (FL data, FL buy, FL sell, FL note, FL status), for a host whose background processes die
+   * (Binance AI Pro's sandbox). Nothing trades on its own: no autopilot, no floor keeper, no stop-loss watcher. Not part
+   * of the card's shape: `FL start <name>` switches it to the loop with the plan it was confirmed with.
+   */
+  manual?: boolean | null;
 };
 
 export type PlanInput = {

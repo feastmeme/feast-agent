@@ -188,7 +188,7 @@ describe("task 975: the autopilot backup by default, through the binary", () => 
   it("--help names --no-autopilot, the default steady and 30 min", async () => {
     const { env } = setup();
     const out = await run(["--help"], env);
-    for (const word of ["--no-autopilot", "default steady, after 30 min", "enter --name <id>.ai", "--host <claude|codex|grok|other|gemini|cursor|opencode|openai>", "--no-daemon"]) expect(out.stdout, word).toContain(word);
+    for (const word of ["--no-autopilot", "default steady, after 30 min", "enter --name <id>.ai", "--host <claude|codex|grok|other|gemini|cursor|opencode|openai|binance>", "--manual", "--no-daemon"]) expect(out.stdout, word).toContain(word);
     expect(out.stdout).not.toContain("default 60");
   }, 60_000);
 });
@@ -219,7 +219,7 @@ describe("task 975, addendum 2: FL status in season, and FL doctor's indexer", (
     const { writeGate } = await import("../season-gate.ts");
     writeGate(home, "demo", { state: "open", opensAt: "2026-10-28T12:00:00.000Z", at: new Date().toISOString() });
     const out = await run(["status", "demo", "--no-league"], env);
-    expect(out.stdout.trimEnd().split("\n").at(-1)).toBe("The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.");
+    expect(out.stdout.trimEnd().split("\n").at(-1)).toBe("The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over. Nobody is asked on a timer: to decide with your AI, run `FL ask demo --print`, answer the pack with one JSON object, and hand it over with `FL answer demo '<the JSON object>'`.");
     writeGate(home, "demo", { state: "waiting", opensAt: "2026-10-28T12:00:00.000Z", at: new Date().toISOString() });
     expect((await run(["status", "demo", "--no-league"], env)).stdout).not.toContain("Decide and trade now");
   }, 60_000);

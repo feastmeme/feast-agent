@@ -144,7 +144,7 @@ describe("task 975: FL enter --host", () => {
     const { env, home } = setup();
     const bad = await run(["enter", "--name", "maplegrin.ai", "--host", "gpt"], env);
     expect(bad.code).toBe(2);
-    expect(bad.stdout.trim()).toBe("--host is one of grok, codex, claude, other, gemini, cursor, opencode, openai");
+    expect(bad.stdout.trim()).toBe("--host is one of grok, codex, claude, other, gemini, cursor, opencode, openai, binance");
     expect(existsSync(join(home, "league-host.json"))).toBe(false);
     await run(["enter", "--name", "maplegrin.ai", "--host", "grok"], env);
     expect(JSON.parse(readFileSync(join(home, "league-host.json"), "utf8"))).toMatchObject({ host: "grok" });

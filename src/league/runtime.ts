@@ -96,6 +96,8 @@ export type RuntimeDeps = {
   maxRuntimeMs?: number;
   /** One-shot: run only these manual requests (and what follows from them, such as arming an exit), then exit. No strategy runs. */
   only?: IntentRequest[];
+  /** Run 21: the one-shot's request ids, one per `only` request: each outcome is logged as `request.outcome` under it, as the loop's are. */
+  onlyIds?: string[];
   /** The chain reads (tests pass a fake). */
   chain?: LeagueChain;
   /** How often a sent transaction whose receipt never came is asked for again. */
@@ -156,6 +158,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
   let agent = loadAgent(deps.home, deps.name);
   if (!agent) return { exit: "refused", reason: `no agent "${deps.name}": plan it first` };
   if (!agent.confirmed) return { exit: "refused", reason: `agent "${deps.name}" was never confirmed: nothing runs before the user's yes` };
+  // Run 21: a manual agent runs no loop (a daemon left from before stands down); its one-shots run as ever.
+  if (agent.manual && !deps.only) return { exit: "refused", reason: `"${deps.name}" is in manual mode: no loop runs it (FL start ${deps.name} switches it to the loop)` };
   // The league entry's own agent (task 961) runs one request at a time, as a one-shot, never a loop.
   if (agent.track === "entry" && !deps.only) return { exit: "refused", reason: `"${deps.name}" is FL enter's: it runs one request at a time, never a trading loop` };
   const checked = resolveLimits(agent.limits);
@@ -961,10 +965,12 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (waits && !(gate.opensAt !== null && clock() >= gate.opensAt)) return { exit: "refused", reason: seasonClosedLine(gate.opensAt) };
       // An outcome an earlier run could not learn is asked about first, so the guard reads a book that is up to date.
       if (book.unresolved.length > 0) await resolvePending().catch((error: unknown) => log("unresolved.check.failed", { reason: String((error as Error).message) }));
-      for (const request of deps.only) {
+      for (const [i, request] of deps.only.entries()) {
         if (gate.over && request.kind !== "sell") return { exit: "refused", reason: SEASON_OVER_LINE };
         const normal = normalizeIntent(request, { snapshot: { feast, now: clock(), limits: agent.limits }, source: "manual", slippagePct: Math.min(3, agent.limits.maxSlippagePct), ttlMs: 120_000 });
         if ("error" in normal) return { exit: "refused", reason: normal.error };
+        const requestId = deps.onlyIds?.[i];
+        if (requestId) requested.set(normal.intent.id, requestId);
         enqueue([normal.intent]);
       }
       log("one-shot", { requests: deps.only.length });
@@ -974,7 +980,9 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           save();
           return { exit: "stopped", reason: stop };
         }
-        await processIntent(queue.shift()!);
+        const next = queue.shift()!;
+        await processIntent(next);
+        report(next.id);
       }
       save();
       return { exit: "finished", reason: "the manual request ran" };

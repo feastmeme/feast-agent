@@ -1,5 +1,6 @@
 import { short, utc8, type Lang } from "../register/copy.ts";
 import { LEAGUE_CHAIN_ID, LEAGUE_DOMAIN, shownName, ZERO_ADDRESS } from "../register/message.ts";
+import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES } from "../prompt/constants.ts";
 import { utc8Day } from "../season-gate.ts";
 
 /**
@@ -274,16 +275,29 @@ export function awakeLine(lang: Lang): string {
  * Once the season is on, the host is told in so many words to start (task 975, addendum 2: in the rehearsal a host
  * that was not told ended its session; told, it traded at once). The "You're in" line and `FL status` end with it.
  */
-export function tradeNowLine(autopilot: AutopilotShown, promptFile: string, lang: Lang): string {
+/**
+ * Run 21 (the Grok cloud rehearsal): with `--ask-with none` nobody is asked on a timer, so the player's AI decides
+ * through the pack by hand: `FL ask <name> --print`, then `FL answer <name> '<json>'`. Said where the closing lines and
+ * `FL status` speak of the backup.
+ */
+export function driveByAnswerLine(name: string, lang: Lang): string {
+  return lang === "zh"
+    ? `运行时不会定时去问任何 AI：要让你的 AI 决策，运行 \`FL ask ${name} --print\`，用一个 JSON 对象回答这个包，再用 \`FL answer ${name} '<那个 JSON 对象>'\` 交给它。`
+    : `Nobody is asked on a timer: to decide with your AI, run \`FL ask ${name} --print\`, answer the pack with one JSON object, and hand it over with \`FL answer ${name} '<the JSON object>'\`.`;
+}
+
+export function tradeNowLine(autopilot: AutopilotShown, promptFile: string, lang: Lang, name?: string): string {
   const zh = lang === "zh";
   if (asking(autopilot))
     return zh
       ? `赛季已经开始。现在就按 ${promptFile} 决策和交易；你 ${autopilot.ask.every} 分钟不动，运行时就去问你的 ${hostName(autopilot.ask.with)} 该做什么。`
       : `The season is on. Decide and trade now by ${promptFile}; if you go quiet for ${autopilot.ask.every} minutes, the runtime asks your ${hostName(autopilot.ask.with)} what to do.`;
-  if (autopilot)
+  if (autopilot) {
+    const drive = name ? `${zh ? "" : " "}${driveByAnswerLine(name, lang)}` : "";
     return zh
-      ? `赛季已经开始。现在就按 ${promptFile} 决策和交易；你 ${autopilot.idleMinutes} 分钟不动，autopilot（${autopilot.preset}）就接手。`
-      : `The season is on. Decide and trade now by ${promptFile}; if you go quiet for ${autopilot.idleMinutes} minutes, autopilot (${autopilot.preset}) takes over.`;
+      ? `赛季已经开始。现在就按 ${promptFile} 决策和交易；你 ${autopilot.idleMinutes} 分钟不动，autopilot（${autopilot.preset}）就接手。${drive}`
+      : `The season is on. Decide and trade now by ${promptFile}; if you go quiet for ${autopilot.idleMinutes} minutes, autopilot (${autopilot.preset}) takes over.${drive}`;
+  }
   return zh
     ? `赛季已经开始。现在就按 ${promptFile} 决策和交易；没有 autopilot 兜底，你不动时除了硬止损什么都不交易。`
     : `The season is on. Decide and trade now by ${promptFile}; with no autopilot backup, nothing trades while you are quiet but the hard stop-loss.`;
@@ -302,7 +316,7 @@ export function strategyLine(view: StrategyShown, name: string, lang: Lang): str
 }
 
 /** The entry card: the Register signature, the notes signature, and the agent's start, under one yes. */
-export function entryCard(view: { agentId: string; season: number; notes: boolean; agent: string | null; wallet?: string; seasonOn?: boolean; ref?: string | null }, lang: Lang): string {
+export function entryCard(view: { agentId: string; season: number; notes: boolean; agent: string | null; wallet?: string; seasonOn?: boolean; ref?: string | null; manual?: boolean }, lang: Lang): string {
   const zh = lang === "zh";
   const who = shownName(view.agentId);
   const rows: [string, string][] = [
@@ -316,7 +330,9 @@ export function entryCard(view: { agentId: string; season: number; notes: boolea
   if (view.agent)
     rows.push([
       zh ? "最后" : "Last",
-      view.seasonOn
+      view.manual
+        ? zh ? `记下你的 agent「${view.agent}」，手动模式：不启动运行循环，不安装守护进程，由你逐条命令驱动（它的卡片在下面）` : `your agent "${view.agent}" is recorded in manual mode: no loop starts and no daemon is installed; you drive it command by command (its card is below)`
+        : view.seasonOn
         ? zh ? `启动你的 agent「${view.agent}」，赛季已经开始，它现在就交易（它的卡片在下面）` : `your agent "${view.agent}" starts and, the season being on, trades now (its card is below)`
         : zh ? `启动你的 agent「${view.agent}」，等待赛季开始（它的卡片在下面）` : `your agent "${view.agent}" starts and waits for the season (its card is below)`,
     ]);
@@ -334,7 +350,9 @@ export function entryCard(view: { agentId: string; season: number; notes: boolea
 }
 
 /** The agent's part of a card: the strategy, its card, when it trades, and its autopilot backup. */
-export function agentSection(view: { strategy: StrategyShown; name: string; card: string; opens: OpensShown; autopilot?: AutopilotShown; signInEnd?: number | null }, lang: Lang): string {
+export function agentSection(view: { strategy: StrategyShown; name: string; card: string; opens: OpensShown; autopilot?: AutopilotShown; signInEnd?: number | null; manual?: boolean }, lang: Lang): string {
+  // Run 21: in manual mode nothing starts and nothing backs it up: the card's own manual line says so, no "starts now".
+  if (view.manual) return [strategyLine(view.strategy, view.name, lang), "", view.card, ...(view.signInEnd ? ["", signInSentence(view.signInEnd, lang)] : [])].join("\n");
   return [strategyLine(view.strategy, view.name, lang), "", view.card, "", waitingLine(view.opens, lang, view.autopilot), ...(view.autopilot !== undefined ? [autopilotLine(view.autopilot, lang)] : []), ...(view.signInEnd ? [signInSentence(view.signInEnd, lang)] : [])].join("\n");
 }
 
@@ -610,7 +628,9 @@ export function doneRunning(name: string, opens: OpensShown, lang: Lang, autopil
 
 function doneRunningLine(name: string, opens: OpensShown, lang: Lang, autopilot?: AutopilotShown, promptFile = "strategy.md"): string {
   const zh = lang === "zh";
-  const backup = `${autopilot !== undefined ? `${autopilotLine(autopilot, lang)}${zh ? "" : " "}` : ""}${awakeLine(lang)}${zh ? "" : " "}`;
+  // Run 21: with an autopilot and nobody asked, how the player's AI decides by hand.
+  const drive = autopilot && !asking(autopilot) ? `${driveByAnswerLine(name, lang)}${zh ? "" : " "}` : "";
+  const backup = `${autopilot !== undefined ? `${autopilotLine(autopilot, lang)}${zh ? "" : " "}` : ""}${drive}${awakeLine(lang)}${zh ? "" : " "}`;
   const after = zh
     ? `如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`
     : `If it stops, run \`FL start ${name}\`. A changed strategy.md needs \`FL start ${name} --prompt strategy.md\`, its new card and your yes.`;
@@ -619,6 +639,54 @@ function doneRunningLine(name: string, opens: OpensShown, lang: Lang, autopilot?
   const when =
     opens.kind === "at" ? (zh ? `它等待赛季开始，从${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
   return zh ? `你已报名，「${name}」正在运行：${when}。${backup}${after}` : `You're in, and ${name} is running: ${when}. ${backup}${after}`;
+}
+
+/**
+ * Run 21: the closing lines of a manual entry (`--manual`): no loop and no daemon; how to drive it by hand, and what
+ * nobody does for the player in manual mode. `already`: a rerun on a wallet that is entered (no signature asked).
+ */
+export function doneManual(name: string, opens: OpensShown, lang: Lang, already = false): string {
+  const zh = lang === "zh";
+  const when =
+    opens.kind === "open"
+      ? zh ? "赛季已经开始：现在就可以交易。" : "The season is on: you can trade now."
+      : opens.kind === "at"
+        ? zh ? `${opensText(opens, lang)}开放交易；在那之前，FL buy 会被拒绝（与运行循环时的说法相同）。` : `Trading opens at ${opensText(opens, lang)}; before that, FL buy is refused (with the same words the loop would use).`
+        : zh ? "feast.meme 宣布开赛后才开放交易；在那之前，FL buy 会被拒绝。" : "Trading opens when feast.meme announces the start; before that, FL buy is refused.";
+  const head = zh
+    ? already
+      ? `「${name}」处于手动模式：没有运行循环，也没有守护进程，不需要再签名。`
+      : `你已报名，「${name}」处于手动模式：没有启动运行循环，也没有安装守护进程。`
+    : already
+      ? `"${name}" is in manual mode: no loop and no daemon run it, and nothing more is signed.`
+      : `You're in, in manual mode: "${name}" runs no loop and no daemon.`;
+  const how = zh
+    ? [
+        "由你一条命令一条命令地驱动它：",
+        `  FL data ${name}                      行情、持仓、联赛`,
+        `  FL buy ${name} <币> <BNB>            买入（在硬限额之内）`,
+        `  FL sell ${name} <币> <比例>          卖出一个比例（0–1）或 all`,
+        `  FL note ${name} "…" --tx <交易哈希>  在 feast.meme 上发一条笔记，附上这笔交易`,
+        `  FL status ${name}                    它现在的状况，以及今天的达标进度`,
+      ]
+    : [
+        "You drive it one command at a time:",
+        `  FL data ${name}                      the market, the book, the league`,
+        `  FL buy ${name} <coin> <bnb>          buy, within the hard limits`,
+        `  FL sell ${name} <coin> <fraction>    sell a fraction (0–1), or all`,
+        `  FL note ${name} "…" --tx <hash>      a note on feast.meme, with the trade's hash`,
+        `  FL status ${name}                    where it stands, and the day's floor`,
+      ];
+  const honest = zh
+    ? `手动模式下没有任何东西会自己交易：没有 autopilot，没有保底交易员，也没有止损盯盘。每个联赛日的达标线（${ACTIVITY_FLOOR_TRADES} 笔交易、${ACTIVITY_FLOOR_BNB} BNB）要你自己完成，否则它会在晚饭时被吃掉。`
+    : `In manual mode nothing trades on its own: no autopilot, no floor keeper and no stop-loss watcher. Make the day's floor yourself (${ACTIVITY_FLOOR_TRADES} trades and ${ACTIVITY_FLOOR_BNB} BNB each league day), or it gets eaten at the dinner.`;
+  const loop = zh ? `在一台一直开着的机器上，\`FL start ${name}\` 会把它切换到运行循环。` : `On a machine that stays on, \`FL start ${name}\` switches it to the loop.`;
+  return [head, ...how, honest, when, loop].join("\n");
+}
+
+/** Run 21: `FL enter --manual` while the loop runs this agent: stop it first. */
+export function manualWhileRunning(name: string, lang: Lang): string {
+  return lang === "zh" ? `「${name}」的运行循环正在运行：先 FL stop ${name}，再用 FL enter --manual 切换到手动模式。` : `"${name}" is running its loop: FL stop ${name} first, then FL enter --manual switches it to manual mode.`;
 }
 
 export function alreadyEntered(view: { agentId: string; coin: string | null; notes: string | null; season?: number | null; seat?: number | null }, lang: Lang): string {

@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { confirmAgent, loadAgent, planAgent, saveAgent } from "./agent.ts";
-import { aliveLine } from "./alive.ts";
+import { aliveLine, markStarting } from "./alive.ts";
+import { recordManual } from "./manual.ts";
 import { autopilotLine } from "./enter/copy.ts";
 import { askKeyPath, hostShown, type AskWith } from "./ask/host.ts";
 import { renderCard } from "./card.ts";
@@ -287,4 +288,45 @@ describe("run 19: an agent's name may be typed as its Agent ID", () => {
     const bad = await run(["status", "Hello Agent", "--no-league"], env);
     expect(bad.stderr).toContain('an agent FL enter started is named by its Agent ID without ".ai"');
   }, 60_000);
+});
+
+describe("run 21: FL status says manual mode, starting, and how to drive with nobody asked", () => {
+  const plan = (prompt: string, home: string, extra: Record<string, unknown> = {}) => {
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, { ...confirmAgent(planned.agent), ...extra });
+  };
+
+  it("manual mode instead of not running, with the last manual action; nothing said of a backup that runs", async () => {
+    const { prompt, home, env } = setup();
+    plan(prompt, home, { manual: true });
+    const before = (await run(["status", "demo", "--no-league"], env)).stdout;
+    expect(before).toMatch(/^demo: manual mode; prompt mode$/m);
+    expect(before).toContain("manual mode: no loop and no daemon; last manual action none yet");
+    expect(before).not.toMatch(/not running|Keep this machine awake/);
+    recordManual(home, "demo", "buy: filled: bought NOOD for 0.006 BNB, transaction 0xabc");
+    const after = await run(["status", "demo", "--no-league", "--json"], env);
+    expect(JSON.parse(after.stdout)).toMatchObject({ state: "manual mode", manual: true, lastManual: { what: "buy: filled: bought NOOD for 0.006 BNB, transaction 0xabc" } });
+    expect((await run(["status", "demo", "--no-league"], env)).stdout).toMatch(/last manual action \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\+8 \(.+ ago\): buy: filled: bought NOOD for 0\.006 BNB/);
+  }, 60_000);
+
+  it("starting for the moments after a start (a live process, under 30 s), then not running", async () => {
+    const { prompt, home, env } = setup();
+    plan(prompt, home);
+    markStarting(home, "demo", process.pid);
+    const out = (await run(["status", "demo", "--no-league"], env)).stdout;
+    expect(out).toMatch(/^demo: starting; prompt mode$/m);
+    expect(out).toContain("starting · no tick yet");
+    markStarting(home, "demo", process.pid, Date.now() - 31_000);
+    expect((await run(["status", "demo", "--no-league"], env)).stdout).toMatch(/^demo: not running; prompt mode$/m);
+  }, 60_000);
+
+  it("--ask-with none: the status and the closing lines say FL ask --print, then FL answer", async () => {
+    const { driveByAnswerLine, doneRunning } = await import("./enter/copy.ts");
+    const line = "Nobody is asked on a timer: to decide with your AI, run `FL ask demo --print`, answer the pack with one JSON object, and hand it over with `FL answer demo '<the JSON object>'`.";
+    expect(driveByAnswerLine("demo", "en")).toBe(line);
+    expect(doneRunning("demo", { kind: "unknown" }, "en", { preset: "steady", idleMinutes: 30 })).toContain(line);
+    expect(doneRunning("demo", { kind: "unknown" }, "en", { preset: "steady", idleMinutes: 30, ask: { every: 5, with: "claude" } })).not.toContain("FL answer");
+    expect(driveByAnswerLine("demo", "zh")).toContain("`FL answer demo '<那个 JSON 对象>'`");
+  });
 });

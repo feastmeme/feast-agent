@@ -193,7 +193,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
       "Registered: seat 7, and a founding seat (#7 of 100). maplegrin.ai is in Season 1.",
       "Notes session open for maplegrin.ai, season 1: your agent's notes reach feast.meme.",
       'started "maplegrin" in the background (pid 4242); FL status maplegrin',
-      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
     ]);
     expect(readSession(w.home)).toMatchObject({ token: "tok-1", season: 1, agentId: ID });
   });
@@ -743,7 +743,7 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
     expect(card.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: "none" } });
     const out = await w.run({ yes: true });
     expect(lastLine(out.text)).toBe(
-      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. ${ON_EN} Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. ${ON_EN} Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
     );
     expect(out.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: "none" } });
   });
@@ -786,7 +786,7 @@ describe("task 975, addendum 1: entering once the season is on, and the signing 
     const out = await w.run({ yes: true });
     // Addendum 2: once the season is on, the line ends by telling the host to trade now.
     expect(lastLine(out.text)).toBe(
-      `You're in, and maplegrin is running. ${ON_EN} Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.`,
+      `You're in, and maplegrin is running. ${ON_EN} Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.`,
     );
   });
 
@@ -1145,5 +1145,52 @@ describe("run 19: FL status reads the registry once the wallet is bound, then ke
     writeFileSync(entryFile, JSON.stringify({ agentId: "maplegrin", bodyCoin: null, launchTx: null }));
     keepReferrerRead(w.home, getAddress("0x000000000000000000000000000000000000b0b0"), Date.now());
     expect(readEntry(w.home)!.refBinding).toBeUndefined();
+  });
+});
+
+describe("run 21: FL enter --manual (a host whose background processes die: Binance AI Pro)", () => {
+  it("the same card and the same signatures; then no loop and no daemon; the agent kept as manual; the closing lines say how to drive it", async () => {
+    const w = world();
+    let daemons = 0;
+    w.deps.daemon = async () => (daemons++, { ok: true, running: true, lines: [] });
+    const card = await w.run({ manual: true });
+    expect(card.code).toBe(2);
+    expect(card.text).toContain(`your agent "${ID}" is recorded in manual mode: no loop starts and no daemon is installed; you drive it command by command (its card is below)`);
+    expect(card.text).toContain("Manual mode: no loop and no daemon run this agent.");
+    expect(card.text).not.toContain("Starts now and waits for the season");
+    const out = await w.run({ manual: true, yes: true });
+    expect(out).toMatchObject({ code: 0, ok: true, stage: "done" });
+    expect(w.signed().map((s) => s.type)).toEqual(["Register", "NoteSession"]);
+    expect(w.starts).toEqual([]);
+    expect(daemons).toBe(0);
+    expect(loadAgent(w.home, ID)).toMatchObject({ manual: true, league: { waitForSeason: true }, confirmed: { at: expect.any(String) } });
+    expect(out.text).toContain(copy.doneManual(ID, { kind: "at", at: Date.parse("2026-10-27T13:00:00Z") }, "en"));
+    for (const line of [`  FL data ${ID}`, `  FL buy ${ID} <coin> <bnb>`, `  FL sell ${ID} <coin> <fraction>`, `  FL note ${ID} "…" --tx <hash>`, `  FL status ${ID}`]) expect(out.text, line).toContain(line);
+    expect(out.text).toContain("In manual mode nothing trades on its own: no autopilot, no floor keeper and no stop-loss watcher. Make the day's floor yourself (3 trades and 0.02 BNB each league day), or it gets eaten at the dinner.");
+    expect(out.text).not.toMatch(/is running|started ".*" in the background|daemon:/);
+  });
+
+  it("a rerun on the entered wallet: Already entered … manual mode, and no second signature; without the flag it stays manual", async () => {
+    const w = world();
+    await w.run({ manual: true });
+    await w.run({ manual: true, yes: true });
+    const signs = w.signed().length;
+    const again = await w.run({ manual: true });
+    expect(again.code).toBe(0);
+    expect(again.text).toMatch(/^Already entered: /);
+    expect(again.text).toContain(`"${ID}" is in manual mode: no loop and no daemon run it, and nothing more is signed.`);
+    expect(w.signed()).toHaveLength(signs);
+    const plain = await w.run({});
+    expect(plain.text).toContain("is in manual mode");
+    expect(w.starts).toEqual([]);
+    expect(w.signed()).toHaveLength(signs);
+  });
+
+  it("in Chinese", async () => {
+    const w = world();
+    await w.run({ manual: true, lang: "zh" });
+    const out = await w.run({ manual: true, yes: true, lang: "zh" });
+    expect(out.text).toContain(`你已报名，「${ID}」处于手动模式：没有启动运行循环，也没有安装守护进程。`);
+    expect(out.text).toContain("手动模式下没有任何东西会自己交易：没有 autopilot，没有保底交易员，也没有止损盯盘。");
   });
 });

@@ -1,5 +1,6 @@
 import type { Standing } from "./data/standing.ts";
-import { tradeNowLine, type AutopilotShown } from "./enter/copy.ts";
+import { driveByAnswerLine, tradeNowLine, type AutopilotShown } from "./enter/copy.ts";
+import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES } from "./prompt/constants.ts";
 import { seasonLine, seatLine, shortUsd, type Lang } from "./register/copy.ts";
 import { AGENT_ID, shownName } from "./register/message.ts";
 import type { BackedRow, EarnerRow, LeagueRead, Seating } from "./register/site.ts";
@@ -32,7 +33,7 @@ export type StandingInput = {
   /** The wallet entered with `FL enter` (a body coin on record), with or without a registration. */
   entered?: boolean;
   /** Task 975: the agent `FL status` is about; a prompt agent's closing line says what actually happens. */
-  agent?: { track: string; autopilot: AutopilotShown; promptFile: string } | null;
+  agent?: { track: string; autopilot: AutopilotShown; promptFile: string; /** Run 21. */ name?: string; manual?: boolean } | null;
   /** Task 975, addendum 6: the standing from the whole field, in BNB (rank, alive, tonight's cutoff). */
   standing?: Standing | null;
 };
@@ -134,8 +135,15 @@ export function standingLines(input: StandingInput, lang: Lang): string[] {
 export function closingLine(input: Pick<StandingInput, "today" | "agent">, lang: Lang): string {
   const zh = lang === "zh";
   const agent = input.agent;
+  if (agent?.manual) {
+    // Run 21: nothing runs between the player's commands.
+    const on = input.today?.state === "season";
+    return zh
+      ? `手动模式：你的命令之间什么都不运行。${on ? "赛季已经开始：" : ""}用 FL buy 和 FL sell 亲手交易，每个联赛日的达标线（${ACTIVITY_FLOOR_TRADES} 笔、${ACTIVITY_FLOOR_BNB} BNB）要你自己完成。`
+      : `Manual mode: nothing runs between your commands. ${on ? "The season is on: t" : "T"}rade by hand with FL buy and FL sell, and make the day's floor yourself (${ACTIVITY_FLOOR_TRADES} trades and ${ACTIVITY_FLOOR_BNB} BNB each league day).`;
+  }
   if (!agent || agent.track !== "prompt") return zh ? "不管联赛怎样，你的 agent 都照常跑它的策略。" : "Your agent runs its preset whatever the league says.";
-  if (input.today?.state === "season") return tradeNowLine(agent.autopilot, agent.promptFile, lang);
+  if (input.today?.state === "season") return tradeNowLine(agent.autopilot, agent.promptFile, lang, agent.name);
   const a = agent.autopilot;
   if (a?.ask && a.ask.with !== "none") {
     const host = a.ask.with === "claude" ? "Claude Code" : a.ask.with === "codex" ? "Codex" : a.ask.with;
@@ -143,11 +151,12 @@ export function closingLine(input: Pick<StandingInput, "today" | "agent">, lang:
       ? `不管联赛怎样，联赛都不会停下你的 agent：你的 AI 按 ${agent.promptFile} 决策；它 ${a.ask.every} 分钟没有交易，运行时就问一次 ${host}；${host} 联系不上，或开饭前 20 分钟门槛未达，floor keeper（${a.preset}）兜底。`
       : `Whatever the league says, the league never stops your agent: your AI decides by ${agent.promptFile}; every ${a.ask.every} minutes without its trade the runtime asks ${host}, and the floor keeper (${a.preset}) covers it when ${host} can't be reached or the floor is unmet 20 minutes before dinner.`;
   }
+  const drive = a && agent.name ? `${zh ? "" : " "}${driveByAnswerLine(agent.name, lang)}` : "";
   if (zh)
     return a
-      ? `不管联赛怎样，联赛都不会停下你的 agent：你的 AI 按 ${agent.promptFile} 决策，autopilot 兜底（${a.preset}）只在它 ${a.idleMinutes} 分钟没有交易后才交易。`
+      ? `不管联赛怎样，联赛都不会停下你的 agent：你的 AI 按 ${agent.promptFile} 决策，autopilot 兜底（${a.preset}）只在它 ${a.idleMinutes} 分钟没有交易后才交易。${drive}`
       : `不管联赛怎样，联赛都不会停下你的 agent：你的 AI 按 ${agent.promptFile} 决策；没有 autopilot 兜底，它不动时除了硬止损什么都不交易。`;
   return a
-    ? `Whatever the league says, the league never stops your agent: your AI decides by ${agent.promptFile}, and the autopilot backup (${a.preset}) trades only after ${a.idleMinutes} minutes without its trade.`
+    ? `Whatever the league says, the league never stops your agent: your AI decides by ${agent.promptFile}, and the autopilot backup (${a.preset}) trades only after ${a.idleMinutes} minutes without its trade.${drive}`
     : `Whatever the league says, the league never stops your agent: your AI decides by ${agent.promptFile}, and with no autopilot backup nothing trades while it is quiet but the hard stop-loss.`;
 }

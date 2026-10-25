@@ -93,7 +93,7 @@ describe("the entry's backup sentence, en and zh", () => {
   it("the You're in line carries it", () => {
     const opens = { kind: "at" as const, at: Date.parse("2026-10-27T13:00:00Z") };
     expect(copy.doneRunning("maplegrin", opens, "en", { preset: "steady", idleMinutes: 30 })).toBe(
-      "You're in, and maplegrin is running: it waits for the season and trades from the season's start, Tue 10/27 21:00 UTC+8. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.",
+      "You're in, and maplegrin is running: it waits for the season and trades from the season's start, Tue 10/27 21:00 UTC+8. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; `--no-autopilot` turns it off. Nobody is asked on a timer: to decide with your AI, run `FL ask maplegrin --print`, answer the pack with one JSON object, and hand it over with `FL answer maplegrin '<the JSON object>'`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run `FL start maplegrin`. A changed strategy.md needs `FL start maplegrin --prompt strategy.md`, its new card and your yes.",
     );
     expect(copy.doneRunning("maplegrin", opens, "zh", null)).toContain("autopilot 兜底已关：除了硬止损，只有你的 agent 自己交易；去掉 `--no-autopilot` 重新规划即可再开。");
   });

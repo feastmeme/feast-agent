@@ -165,6 +165,12 @@ export async function daemon(
     return { ok: false, installed: false, loaded: null, unit: null, lines: [(error as Error).message] };
   }
   if (o.action === "install" && !o.tempOk && inTemp(o.home)) return { ok: false, installed: false, loaded: null, unit: null, lines: [`no daemon: the league home is in the temporary folder, which a reboot clears (${o.home}); FEAST_LEAGUE_HOME elsewhere first`] };
+  // Run 21 (the Grok cloud rehearsal): a Linux with no systemd user manager (a container, a cloud computer) has no
+  // unit to install or to read: say so, never "a systemd user unit".
+  if (o.platform === "linux" && o.action !== "uninstall" && !(await userManager(o.run))) {
+    const lines = [NO_MANAGER_LINE, ...(o.action === "status" ? [`the agent: ${o.running ? "running" : "not running"}`] : [])];
+    return { ok: o.action === "status", installed: false, loaded: null, unit: null, lines, running: o.action === "install" ? false : null };
+  }
   const unit = unitFile(o);
   const domain = `gui/${o.uid}`;
   const loaded = async (): Promise<boolean | null> => {
@@ -258,4 +264,15 @@ export async function kickDaemon(o: Omit<Look, "kick"> & { userHome: string }): 
   if (!existsSync(path)) return { installed: false, running: false, state: null, startCommand };
   const seen = await kickAndLook({ ...o, kick: true });
   return { installed: true, ...seen, startCommand };
+}
+
+export const NO_MANAGER_LINE = "no service manager here: keep it running yourself, or FL start on a schedule";
+
+/** Whether `systemctl --user` has a manager to talk to (missing, or "Failed to connect to bus": none). */
+async function userManager(run: Runner): Promise<boolean> {
+  const got = await run("systemctl", ["--user", "is-system-running"]).catch(() => null);
+  if (!got || got.code === 127) return false;
+  const said = `${got.stdout}\n${got.stderr}`;
+  if (/failed to connect|not been booted|no such file|command not found|offline/i.test(said)) return false;
+  return /\b(running|degraded|starting|initializing|maintenance|stopping)\b/.test(got.stdout);
 }
