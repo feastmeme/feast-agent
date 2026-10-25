@@ -16,7 +16,7 @@ import { readJson, writeJsonAtomic } from "./store.ts";
 export const HOST_HEADER = "x-feast-host";
 export const RUNTIME_HEADER = "x-feast-runtime";
 /** The release this runtime is; a docs test holds it equal to the CHANGELOG's newest `## league-vN`. */
-export const RUNTIME_RELEASE = "league-v5.1.2";
+export const RUNTIME_RELEASE = "league-v5.1.3";
 
 /** The AI a note says wrote it (the owner's ruling, 2026-10-24), and the host the headers name: declared, never checked. */
 export const MODELS = ["grok", "codex", "claude", "other"] as const;

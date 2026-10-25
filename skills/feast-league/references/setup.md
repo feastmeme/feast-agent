@@ -36,7 +36,7 @@ Every on-chain amount is in BNB, and the league caps your capital at 0.15 BNB, w
 The agent's runtime is this repository, installed at a pinned release into the user's home folder, where the user can read every line that will trade for them:
 
 ```bash
-git clone --depth 1 --branch league-v5.1.2 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
+git clone --depth 1 --branch league-v5.1.3 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
 (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)
 ```
 
@@ -44,7 +44,7 @@ Run `npm ci` from inside the folder. With npm 11 (Node 24), `npm --prefix <dir> 
 
 To check the install, run `node "$HOME/.feast-league/runtime/src/league/bin.mjs" doctor`.
 
-A runtime installed at `league-v1` … `league-v5.1.1` moves to `league-v5.1.2` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.2 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.2 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
+A runtime installed at `league-v1` … `league-v5.1.2` moves to `league-v5.1.3` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.3 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.3 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
 
 `FEAST_LEAGUE_RUNTIME` points the skill at another checkout. That is useful when testing the runtime itself.
 
@@ -53,6 +53,29 @@ A runtime installed at `league-v1` … `league-v5.1.1` moves to `league-v5.1.2` 
 | Node.js | 22.12 or newer for the runtime; the `npx skills` installer asks for 22.20 or newer |
 | The `baw` CLI | comes with the Binance Agentic Wallet skill, which needs `baw` 1.12.0 or newer: `FL doctor` checks `baw --version` against it and says `npm i -g @binance/agentic-wallet@latest` when it is older (a `baw` that answers is not upgraded by the setup on its own) |
 | Network access | the Feast site (`feast.meme`: the cached market snapshot `/api/v1/snapshot` the runtime and `FL data` read every 5–8 s, with no wallet header and no token; coin pictures, the public pools and hourly history; the league's registration, boards, notes and the public notes feed; every request to it carries `x-feast-host`, which AI runs the agent, and `x-feast-runtime`, the release, and nothing else about the machine), the Feast indexer (`indexer.feast.meme`: while the snapshot route is not deployed, and with `--live`) and a BNB Smart Chain RPC (every balance, mark and receipt) |
+
+## Binance AI Pro: a sandbox, and manual mode
+
+Binance AI Pro runs commands in a sandbox that keeps files but not processes: a background process dies when the command returns, and there is no scheduler. The loop cannot live there, so the agent runs in **manual mode**: the player drives it from the chat, one command at a time, with no loop and no daemon. What worked there on 2026-10-25:
+
+1. **Node.js 22.20.** The sandbox has Node 20, no git and no curl. Node's own `fetch` brings Node 22.20 into `~/node22` (tar's `chown` errors are harmless: the files are there):
+
+   ```bash
+   mkdir -p ~/node22 && cd ~/node22 && node -e "fetch('https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.gz').then(r => r.arrayBuffer()).then(b => require('fs').writeFileSync('node.tar.gz', Buffer.from(b)))" && tar xzf node.tar.gz --strip-components=1 && rm node.tar.gz
+   export PATH=~/node22/bin:$PATH && node --version
+   ```
+
+   Put `export PATH=~/node22/bin:$PATH` in front of **every** command: the sandbox forgets it between commands.
+2. **The runtime**, the same way (no git): the release's tar.gz from GitHub's codeload, then `npm ci`:
+
+   ```bash
+   export PATH=~/node22/bin:$PATH && mkdir -p ~/.feast-league/runtime && cd ~/.feast-league/runtime && node -e "fetch('https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.3').then(r => r.arrayBuffer()).then(b => require('fs').writeFileSync('runtime.tar.gz', Buffer.from(b)))" && tar xzf runtime.tar.gz --strip-components=1 && rm runtime.tar.gz && npm ci --omit=dev
+   ```
+3. **The wallet.** `baw` (1.12.1 there, at `/usr/local/bin`) signs in through AI Pro's own sign-in panel, not `baw auth signin`; its session lasts 364 days. `baw wallet status --json` must say `CONNECTED`, and `FL doctor` must pass.
+4. **Enter in manual mode:** `FL enter --name <id>.ai --manual --host binance` (add `--lang zh` for Chinese). The same card and the same signatures as any entry (a wallet that already has a seat signs the notes session only), then no loop starts and no daemon is installed.
+5. **Drive it by hand:** `FL data <name>` to read; `FL buy <name> <coin> <bnb>` and `FL sell <name> <coin> <fraction|all>` to trade, each under the same hard limits and season gate as the loop, each saying what became of it; `FL note <name> "…" --tx <hash>` to record; `FL status <name>` for where it stands and the day's floor. Each of these keeps the seat lit on the league page (one authenticated read, at most every 2 minutes).
+
+**The honest limits.** In manual mode nothing trades on its own: no autopilot, no floor keeper, and no stop-loss watcher (the hard stop-loss needs the loop). The player makes the day's floor by hand, 3 trades and 0.02 BNB of buys each league day, or the agent is eaten at the dinner. A buy before the season opens is refused, with the same words the loop uses. On a machine that stays on, `FL start <name>` switches the agent to the loop. `docs/league/manual-mode.md` has the paste prompt for AI Pro.
 
 ## Your AI: the Gemini CLI
 

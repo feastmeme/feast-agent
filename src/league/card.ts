@@ -95,13 +95,14 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
   lines.push("");
   const events = agent.preset && PRESETS[agent.preset].events.length > 0 ? `, and on ${PRESETS[agent.preset].events.join(", ")} events from the Feast indexer` : "";
   if (agent.track === "prompt") {
-    lines.push("Watching: the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call.");
-    if (agent.preset) lines.push(`Autopilot cadence: only while it trades, a tick every ${agent.tickSeconds} s${events}${agent.preset && PRESETS[agent.preset].keepsExits ? "; while your agent trades, the same tick for its own exits only" : ""}.`);
+    if (agent.manual) lines.push("Watching: nothing watches your positions in manual mode; each FL buy and FL sell checks the hard limits when you run it.");
+    else lines.push("Watching: the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call.");
+    if (agent.preset && !agent.manual) lines.push(`Autopilot cadence: only while it trades, a tick every ${agent.tickSeconds} s${events}${agent.preset && PRESETS[agent.preset].keepsExits ? "; while your agent trades, the same tick for its own exits only" : ""}.`);
   } else lines.push(`Cadence: a tick every ${agent.tickSeconds} s${events}.`);
   lines.push("Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview, then execute — one transaction at a time.");
   lines.push(`Worst case: at most ${l.maxTradesPerHour} trades an hour, at most ${l.maxDailySpendBnb} BNB of buys in any 24 h, at most ${l.budgetBnb} BNB in all.`);
   lines.push("");
-  lines.push("This trades real BNB from your wallet as soon as you say yes. There is no practice mode.");
+  lines.push(agent.manual ? "Every FL buy and FL sell you run trades real BNB from your wallet. There is no practice mode." : "This trades real BNB from your wallet as soon as you say yes. There is no practice mode.");
   lines.push(agent.manual ? `Nothing runs between your commands. To stop it for good: say "stop", or run \`FL stop ${agent.name}\` (a stop file refuses every FL buy and FL sell until FL resume ${agent.name}).` : `To stop: say "stop", or run \`FL stop ${agent.name}\` (or create the file STOP in the agent's folder).`);
   return lines.join("\n");
 }

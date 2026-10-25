@@ -117,7 +117,8 @@ describe("manual mode is the agent's own, never part of its card's shape", () =>
     expect(card).toContain("Manual mode: no loop and no daemon run this agent.");
     expect(card).toContain("no autopilot, no floor keeper and no stop-loss watcher");
     expect(card).toContain("The day's floor (3 trades and 0.02 BNB) is yours to make by hand.");
-    expect(card).not.toMatch(/Autopilot backup: on|Ask loop|Floor keeper:/);
+    expect(card).not.toMatch(/Autopilot backup: on|Ask loop|Floor keeper:|Autopilot cadence|watches your positions for the hard stop-loss/);
+    expect(card).toContain("Watching: nothing watches your positions in manual mode; each FL buy and FL sell checks the hard limits when you run it.");
     const off = prepareStart(home, "maplegrin", { plan: null, yes: false, confirm: true, manual: false });
     expect(off.kind).toBe("ready");
     expect(loadAgent(home, "maplegrin")!.manual).toBeUndefined();

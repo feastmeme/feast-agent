@@ -8,7 +8,8 @@
  *   npx tsx src/league/enter/dryrun.ts [--lang en|zh]
  *
  * (a) the entry card, with the season-1 default copied to ./strategy.md; (b) the --yes against a register route
- * that seats; (c) one that answers pending; (r) a tutorial's code, its referral binding signed by itself (run 18);
+ * that seats; (c) one that answers pending; (r) a tutorial's code, its referral binding signed by itself (run 18); (m)
+ * --manual, no loop and no daemon (run 21);
  * (d) the compose card; (e) the meme's preview with the host's PNG, (e2) with a JPEG, (f) with 262,145 bytes, (g)
  * with no league creature; (h) the agent under the season gate, three simulated minutes before trading opens; (i)
  * the same with no start announced.
@@ -142,6 +143,20 @@ try {
   block(bound.map((b) => JSON.stringify({ ...b, signature: `${String(b.signature).slice(0, 10)}…` })).join("\n"));
   const r3 = await r.run({ yes: true });
   say(`The next FL enter: ${bound.length === 1 ? "nothing signed again" : "signed again"}; it says: ${r3.text.split("\n").find((l) => /^(Referrer:|引荐人:)/.test(l)) ?? "nothing of the referral"}`);
+
+  // --- (m) manual mode (run 21) ---------------------------------------------------------------------------
+  section("(m) --manual: the same card and signatures, then no loop and no daemon (a host whose background processes die)");
+  const m = world();
+  const m1 = await m.run({ manual: true });
+  say(`exit ${m1.code}, stage ${m1.stage}`);
+  block(m1.text.replaceAll(m.cwd, "<cwd>"));
+  const m2 = await m.run({ manual: true, yes: true });
+  say(`exit ${m2.code}, stage ${m2.stage}`);
+  block(m2.text);
+  block(m.asked().join("\n"));
+  const m3 = await m.run({ manual: true });
+  say("The same line again, on the entered wallet:");
+  block(m3.text);
 
   // --- (d) the compose card -------------------------------------------------------------------------
   section("(d) --meme without the composed fields: the compose card");

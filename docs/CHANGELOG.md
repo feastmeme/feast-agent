@@ -2,6 +2,20 @@
 
 The league runtime's releases, as the skill pins them (`skills/feast-league/references/setup.md`). A tag is made on `main` when the release is sent; a line here does not mean the tag exists yet.
 
+## league-v5.1.3
+
+Manual mode for sandbox hosts, the host `binance`, and what the Grok cloud rehearsal found (task 975, run 21; the owner's ruling of 2026-10-25). `minSupported` stays `league-v4`.
+
+- **Manual mode.** Binance AI Pro runs commands in a sandbox where a background process dies when the command returns, and it has no scheduler, so the loop cannot live there. `FL enter … --manual` (and `FL start <name> --manual`) registers and opens the notes session exactly as before (the same card, the same signatures), records the agent as manual, starts no loop and installs no daemon. The closing lines say how to drive it (`FL data`, `FL buy`, `FL sell`, `FL note … --tx`, `FL status`), and that nothing trades on its own: no autopilot, no floor keeper, no stop-loss watcher, and the day's floor (3 trades, 0.02 BNB) by hand. Manual mode is kept on the agent, outside its card's shape: `FL enter --manual` on an entered wallet says "Already entered … manual mode" and signs nothing, `FL start <name>` switches it to the loop, and a loop (a daemon left from before) refuses a manual agent.
+- **Manual commands with no process.** `FL buy` and `FL sell` with no loop run the one-shot under the loop's guard, the hard limits L1–L16 and the season gate (before the opening, refused in the loop's own words), and now print what became of the trade as the loop's answer does ("filled: bought … transaction 0x…", or the refusal). The fill is in the book for reconciliation, and the last manual action is kept for `FL status`.
+- **The heartbeat on manual commands.** `FL data`, `FL buy`, `FL sell`, `FL note` and `FL status` each send the seat's heartbeat (the authenticated `/api/league?me=` read with the notes session's token), at most once per 2 minutes per agent, so a manual player's seat stays lit. The process waits up to 3 s for it before it exits. A running loop sends its own.
+- **`FL status`** says `manual mode` instead of `not running`, with the last manual action and the day's floor so far. Right after a start it says `starting` until the first tick or 30 s, never `not running` while the runtime boots.
+- **`--host binance`** (Binance AI Pro): accepted wherever `--host` is. The site's accepted set is claude, codex, grok, other, so it says `other` in `x-feast-host` and in a note's `model`, with `binance` in `x-feast-host-detail`; `binance` is kept in the home's record. Nobody is asked on a timer for it.
+- **`FL daemon` on a Linux without a systemd user manager** (a container, a cloud computer) says "no service manager here: keep it running yourself, or FL start on a schedule", and writes or claims no unit.
+- **`--ask-with none`**: the closing lines and `FL status` say how the player's AI decides by hand: `FL ask <name> --print`, then `FL answer <name> '<the JSON object>'`.
+- **The setup** has a Binance AI Pro section: Node 22.20 brought in with Node's own `fetch`, the runtime's tar.gz from codeload, the wallet through AI Pro's sign-in panel, `FL enter --manual --host binance`. `docs/league/manual-mode.md` holds the paste prompt.
+- **The release.** `league-v5.1.3`.
+
 ## league-v5.1.2
 
 What the coordinator's real rehearsals of 2026-10-25 found (Claude Code, Codex, Cursor and the DeepSeek endpoint through every row, and one live seat), fixed (task 975, run 19). `minSupported` stays `league-v4`.

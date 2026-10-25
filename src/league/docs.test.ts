@@ -76,7 +76,7 @@ describe("the skill, the setup, the release notes", () => {
     const setup = read("skills/feast-league/references/setup.md");
     expect(setup).toContain("--branch league-v5");
     expect(setup).not.toContain("--branch league-v4");
-    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.1` moves to `league-v5.1.2` the same way");
+    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.2` moves to `league-v5.1.3` the same way");
     expect(setup).toContain("If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it.");
   });
 
@@ -334,7 +334,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
 
   it("a Grok host is told to pass --host grok; What it sends names the two headers", () => {
     expect(section9).toContain("passes `--host grok`");
-    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.2`)");
+    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.3`)");
     expect(skill).toMatch(/Every request `FL` makes to feast\.meme carries two headers: `x-feast-host`/);
   });
 
@@ -667,5 +667,43 @@ describe("task 975, run 19: league-v5.1.2, what the real rehearsals found", () =
       const said = read(file).split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l));
       expect(said.filter((l) => /feast-league (stop|status|start|resume|set|note|audit|launch|meme|script)\b/.test(l)), file).toEqual([]);
     }
+  });
+});
+
+describe("task 975, run 21: league-v5.1.3, manual mode for Binance AI Pro", () => {
+  const log = read("docs/CHANGELOG.md");
+  const v513 = log.slice(log.indexOf("## league-v5.1.3\n"), log.indexOf("## league-v5.1.2\n"));
+  const notes = read("docs/league/release-v5.1.3.md");
+  const manual = read("docs/league/manual-mode.md");
+  const setup = read("skills/feast-league/references/setup.md");
+  const skill = read("skills/feast-league/SKILL.md");
+
+  it("the CHANGELOG and the release notes say manual mode, the heartbeat, host binance and what the site must add", () => {
+    for (const word of ["--manual", "no loop", "no daemon", "no autopilot, no floor keeper, no stop-loss watcher", "once per 2 minutes per agent", "`manual mode`", "`starting`", "--host binance", "x-feast-host-detail", "no service manager here", "FL answer <name>", "`minSupported` stays `league-v4`"]) expect(v513, word).toContain(word);
+    expect(notes).toContain("A patch on `league-v5.1.2`. `minSupported` stays `league-v4`");
+    expect(notes).toContain("add `binance` there (with a name and a mark)");
+    for (const text of [notes, v513, manual]) expect(text).not.toMatch(/0x[0-9a-fA-F]{40}|sk-[A-Za-z0-9]{8,}/);
+  });
+
+  it("the setup and manual-mode.md give the recipe that worked: Node 22.20 by fetch, the runtime's tar.gz, the sign-in panel, enter --manual --host binance", () => {
+    for (const text of [setup, manual]) {
+      expect(text).toContain("fetch('https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.gz')");
+      expect(text).toContain("tar xzf node.tar.gz --strip-components=1");
+      expect(text).toContain("export PATH=~/node22/bin:$PATH");
+      expect(text).toContain("https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.3");
+      expect(text).toContain("npm ci --omit=dev");
+      expect(text).toMatch(/chown/);
+    }
+    expect(setup).toContain("`FL enter --name <id>.ai --manual --host binance`");
+    expect(setup).toContain("AI Pro's own sign-in panel");
+    expect(manual).toContain("## The paste prompt for AI Pro");
+    expect(manual).toContain("Enter with `FL enter --name <my Agent ID>.ai --manual --host binance`");
+    expect(manual).toContain("用 `FL enter --name <我的 Agent ID>.ai --manual --host binance --lang zh` 报名");
+  });
+
+  it("SKILL says manual mode for AI Pro, the commands, and the honest limits", () => {
+    expect(skill).toContain("**Binance AI Pro: manual mode** (league-v5.1.3)");
+    expect(skill).toContain("**in manual mode nothing trades on its own.**");
+    expect(skill).toContain("`binance` (Binance AI Pro)");
   });
 });

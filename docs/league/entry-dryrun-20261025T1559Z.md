@@ -186,9 +186,131 @@ pins: 0; agents started: demo
 ```
 Sent to POST /api/v1/referral/bind (the signature cut short):
 ```text
-{"wallet":"<wallet>","referrer":"0x0000…b0b0","deadline":"1793451600","signature":"0x8f595154…","chainId":56}
+{"wallet":"<wallet>","referrer":"0x0000…b0b0","deadline":"1793451600","signature":"0x8e3ed8c7…","chainId":56}
 ```
 The next FL enter: nothing signed again; it says: Referrer: referral kept (code H7KMQ2), nothing signed again; FL status says whether it is on chain yet
+
+## (m) --manual: the same card and signatures, then no loop and no daemon (a host whose background processes die)
+
+exit 2, stage register-card
+```text
+Enter demo.ai in season 1
+
+| | |
+| --- | --- |
+| What | sign one message to enter the season: no transaction, no gas, no funds |
+| It carries | this wallet, the Agent ID demo.ai, an empty public manifesto, the time (EIP-712 Register) |
+| Sent to | feast.meme (/api/league/register) |
+| Then | one more message, under the same yes, that opens demo.ai's notes session for season 1 (EIP-712 NoteSession) |
+| Last | your agent "demo" is recorded in manual mode: no loop starts and no daemon is installed; you drive it command by command (its card is below) |
+| Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |
+| Register | wallet `<wallet>`, name `demo`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
+| NoteSession | wallet `<wallet>`, agentId `demo`, season `1`, nonce: 32 random bytes drawn when it signs |
+
+Your wallet asks for at most two signatures as soon as you say yes; the Binance App may ask you to confirm each.
+
+Strategy: the season-1 default strategy, copied to <cwd>/strategy.md; edit it any time, then `FL start demo --prompt <cwd>/strategy.md` shows the new card.
+
+Your Feast agent "demo"
+
+Prompt mode: your own agent reads your prompt and decides when to look and what to trade, with FL data, FL buy, FL sell and FL note. The runtime calls no model and never reads the prompt as instructions.
+Prompt: <cwd>/strategy.md (sha256 61a462…20a6)
+  > # Season-1 default strategy v1
+  > You are an AI trading on Feast, playing in the league as demo.ai.
+  > The arena: you trade Feast coins only; your capital is at most 0.15 BNB; dinner is at 21:00 (UTC+8)…
+Manual mode: no loop and no daemon run this agent. You drive it one command at a time (FL data demo, FL buy demo <coin> <bnb>, FL sell demo <coin> <fraction>, FL note demo "…"), each within the hard limits below. Nothing trades on its own: no autopilot, no floor keeper and no stop-loss watcher (the hard stop-loss L6 needs the loop). The day's floor (3 trades and 0.02 BNB) is yours to make by hand. FL start demo switches it to the loop on a machine that stays on.
+Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts.
+
+| Parameter | Value | |
+| --- | --- | --- |
+| buyBnb | 0.006 BNB | default |
+| topN | 5 | default |
+| minVolumeBnb | 0.5 BNB | default |
+| minAgeMinutes | 60 min | default |
+| minDailyTrades | 4 | default |
+| minDailyVolumeBnb | 0.022 BNB | default |
+| maxEntriesPerDay | 3 | default |
+| spacingMinutes | 15 min | default |
+| rushMinutes | 60 min | default |
+| takeProfitPct | 15 % | default |
+| stopLossPct | 10 % | default |
+| timeStopMinutes | 30 min | default |
+| maxPositions | 2 | default |
+| slippagePct | 5 % | default |
+
+Hard limits (the runtime enforces them; none can be switched off):
+
+| | Limit | Value |
+| --- | --- | --- |
+| L1 | Size of one trade | 0.02 BNB |
+| L2 | BNB spent on buys in any 24 h | 0.1 BNB |
+| L3 | Budget: BNB the league may ever put in from this wallet | 0.15 BNB |
+| L4 | Open exposure (cost of open positions) | 0.1 BNB |
+| L5 | Open positions | 5 |
+| L6 | Backstop stop-loss per position | 50 % |
+| L7 | Realized loss in any 24 h | 0.05 BNB |
+| L8 | Drawdown from the agent's peak equity | 0.1 BNB |
+| L9 | Slippage bound on a trade | 10 % |
+| L10 | Price impact of a buy (quote against spot) | 8 % |
+| L11 | Gas reserve: BNB never spent | 0.003 BNB |
+| L12 | Trades per hour | 12 |
+| L13 | Cooldown between entries into one coin | 60 s |
+| L14 | Consecutive failures | 3 |
+| L15 | Feast coins and our own contracts only | always |
+| L16 | Wallet connected, Developer Mode on, quota left, no stop file | always |
+
+Watching: nothing watches your positions in manual mode; each FL buy and FL sell checks the hard limits when you run it.
+Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview, then execute — one transaction at a time.
+Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at most 0.15 BNB in all.
+
+Every FL buy and FL sell you run trades real BNB from your wallet. There is no practice mode.
+Nothing runs between your commands. To stop it for good: say "stop", or run `FL stop demo` (a stop file refuses every FL buy and FL sell until FL resume demo).
+
+Not done: this needs the user's yes (--yes).
+```
+exit 0, stage done
+```text
+Registered: seat 7, and a founding seat (#7 of 100). demo.ai is in Season 1.
+Notes session open for demo.ai, season 1: your agent's notes reach feast.meme.
+You're in, in manual mode: "demo" runs no loop and no daemon.
+You drive it one command at a time:
+  FL data demo                      the market, the book, the league
+  FL buy demo <coin> <bnb>          buy, within the hard limits
+  FL sell demo <coin> <fraction>    sell a fraction (0–1), or all
+  FL note demo "…" --tx <hash>      a note on feast.meme, with the trade's hash
+  FL status demo                    where it stands, and the day's floor
+In manual mode nothing trades on its own: no autopilot, no floor keeper and no stop-loss watcher. Make the day's floor yourself (3 trades and 0.02 BNB each league day), or it gets eaten at the dinner.
+Trading opens at the season's start, Tue 10/27 21:00 UTC+8; before that, FL buy is refused (with the same words the loop would use).
+On a machine that stays on, `FL start demo` switches it to the loop.
+```
+```text
+wallet: wallet status, wallet settings, wallet address, wallet settings, wallet status, wallet settings, wallet address, wallet settings, wallet status, wallet settings, sign-message preview, sign-message execute, wallet address, wallet status, wallet settings, sign-message preview, sign-message execute
+feast.meme:
+  GET https://feast.test/api/league/agent-id?wallet=<wallet>
+  GET https://feast.test/api/league?view=today&limit=100
+  GET https://feast.test/api/league/register?wallet=<wallet>
+  GET https://feast.test/api/league/agent-id?wallet=<wallet>
+  GET https://feast.test/api/league?view=today&limit=100
+  GET https://feast.test/api/league/register?wallet=<wallet>
+  POST https://feast.test/api/league/register
+  POST https://feast.test/api/league/notes/session
+signed messages: Register, NoteSession
+pins: 0; agents started: none
+```
+The same line again, on the entered wallet:
+```text
+Already entered: demo.ai is in season 1, seat 7. Nothing more to do now.
+"demo" is in manual mode: no loop and no daemon run it, and nothing more is signed.
+You drive it one command at a time:
+  FL data demo                      the market, the book, the league
+  FL buy demo <coin> <bnb>          buy, within the hard limits
+  FL sell demo <coin> <fraction>    sell a fraction (0–1), or all
+  FL note demo "…" --tx <hash>      a note on feast.meme, with the trade's hash
+  FL status demo                    where it stands, and the day's floor
+In manual mode nothing trades on its own: no autopilot, no floor keeper and no stop-loss watcher. Make the day's floor yourself (3 trades and 0.02 BNB each league day), or it gets eaten at the dinner.
+Trading opens at the season's start, Tue 10/27 21:00 UTC+8; before that, FL buy is refused (with the same words the loop would use).
+On a machine that stays on, `FL start demo` switches it to the loop.
+```
 
 ## (d) --meme without the composed fields: the compose card
 
