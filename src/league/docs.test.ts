@@ -579,7 +579,9 @@ describe("task 975, addendum 11: the continuity package (league-v5.1)", () => {
 
 describe("task 975, addendum 12: trading opens at the start; FL enter --ref", () => {
   it("no copy a player reads says Wednesday 20:00 or an hour before the first dinner", () => {
-    for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md", "plans/league-autopilot/grok-bot-rehearsal.md", "docs/league/release-v5.1.md"]) expect(read(file), file).not.toMatch(/10\/28[ ,]*20:00|Wednesday 20:00|Wed 10\/28 20:00|an hour before the first dinner|one hour before the first dinner/);
+    // (The release notes name the old wait on purpose: what a runtime still on league-v5 does.)
+    for (const file of ["skills/feast-league/SKILL.md", "skills/feast-league/references/setup.md", "README.md", "plans/league-autopilot/grok-bot-rehearsal.md"]) expect(read(file), file).not.toMatch(/10\/28[ ,]*20:00|Wednesday 20:00|Wed 10\/28 20:00|an hour before the first dinner|one hour before the first dinner/);
+    expect(read("docs/league/release-v5.1.md")).toContain("A runtime still on `league-v5` waits until Wed 10/28 20:00 whatever the site says");
     expect(read("plans/league-autopilot/grok-bot-rehearsal.md")).toContain("season starts and trading opens Tue 10/27 21:00 UTC+8");
   });
 
