@@ -76,7 +76,7 @@ describe("the skill, the setup, the release notes", () => {
     const setup = read("skills/feast-league/references/setup.md");
     expect(setup).toContain("--branch league-v5");
     expect(setup).not.toContain("--branch league-v4");
-    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1` moves to `league-v5.1.1` the same way");
+    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.1` moves to `league-v5.1.2` the same way");
     expect(setup).toContain("If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it.");
   });
 
@@ -334,7 +334,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
 
   it("a Grok host is told to pass --host grok; What it sends names the two headers", () => {
     expect(section9).toContain("passes `--host grok`");
-    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.1`)");
+    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.2`)");
     expect(skill).toMatch(/Every request `FL` makes to feast\.meme carries two headers: `x-feast-host`/);
   });
 
@@ -638,5 +638,34 @@ describe("task 975, run 17: league-v5.1.1, the binding and the heartbeat", () =>
     for (const text of [skill, notes, v511]) expect(text).not.toMatch(/Bind your referrer|binding's (own )?card/);
     expect(skill).toContain("run `FL note --login`");
     for (const file of ["skills/feast-league/SKILL.md", "docs/league/ask-hosts.md"]) expect(read(file), file).not.toMatch(/empty temp folder|empty temporary folder|GEMINI_CLI_SYSTEM_SETTINGS_PATH/);
+  });
+});
+
+describe("task 975, run 19: league-v5.1.2, what the real rehearsals found", () => {
+  const log = read("docs/CHANGELOG.md");
+  const v512 = log.slice(log.indexOf("## league-v5.1.2\n"), log.indexOf("## league-v5.1.1\n"));
+  const notes = read("docs/league/release-v5.1.2.md");
+  const setup = read("skills/feast-league/references/setup.md");
+
+  it("the CHANGELOG and the release notes say each fix; minSupported stays league-v4", () => {
+    for (const word of ["The card names your host", "`x-feast-host` follows the declared host", "launchctl kickstart", "`FL start` runs in the background", "--foreground", "`FL <verb> <id>.ai`", "baw --version", "security.auth.selectedType", "response_format: json_schema", "Referrer: referral kept", "`minSupported` stays `league-v4`"]) expect(v512, word).toContain(word);
+    expect(notes).toContain("A patch on `league-v5.1.1`. `minSupported` stays `league-v4`");
+    expect(notes).toContain("fetch --depth 1 origin tag league-v5.1.2");
+    for (const text of [notes, v512]) expect(text).not.toMatch(/0x[0-9a-fA-F]{40}|sk-[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_-]{10,}/);
+  });
+
+  it("setup says the Gemini CLI needs a billed project's API key, and baw 1.12.0; the hosts' doc names DeepSeek's models", () => {
+    expect(setup).toContain("**The Gemini CLI needs an API key from a Google Cloud project with billing on.**");
+    expect(setup).toContain("migrate to Antigravity");
+    expect(setup).toContain("`baw` 1.12.0 or newer");
+    const hosts = read("docs/league/ask-hosts.md");
+    for (const m of ["`deepseek-flash`", "`deepseek-v4-pro`", "`deepseek-chat` still answers"]) expect(hosts, m).toContain(m);
+  });
+
+  it("no line a player reads names feast-league as the command", () => {
+    for (const file of ["src/league/card.ts", "src/league/cli.ts", "src/league/runtime.ts", "src/league/start.ts", "src/league/register/copy.ts", "src/league/audit/verdict.ts", "src/league/prompt/inbox.ts"]) {
+      const said = read(file).split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l));
+      expect(said.filter((l) => /feast-league (stop|status|start|resume|set|note|audit|launch|meme|script)\b/.test(l)), file).toEqual([]);
+    }
   });
 });

@@ -2,6 +2,22 @@
 
 The league runtime's releases, as the skill pins them (`skills/feast-league/references/setup.md`). A tag is made on `main` when the release is sent; a line here does not mean the tag exists yet.
 
+## league-v5.1.2
+
+What the coordinator's real rehearsals of 2026-10-25 found (Claude Code, Codex, Cursor and the DeepSeek endpoint through every row, and one live seat), fixed (task 975, run 19). `minSupported` stays `league-v4`.
+
+- **The card names your host.** Its "Ask loop" and "Floor keeper" lines said Codex for every host but Claude Code; they now name Gemini CLI, Cursor or your AI endpoint, as the closing lines and `FL status` do.
+- **`x-feast-host` follows the declared host.** A home entered with `--host gemini` (or cursor, opencode, openai) said `claude` under Claude Code's environment; the declared host now wins, and these say `other` (the site accepts claude, codex, grok, other), with their own name in `x-feast-host-detail`. The notes' `model` field follows.
+- **The daemon's line is true.** On macOS launchd may take the bootstrap and defer the spawn ("pending spawn"); the line said the agent ran when it did not. The install now kicks it once (`launchctl kickstart`, never `-k`) and looks for about ten seconds at launchd's state and at the agent's alive record. When it did not start, it says so and gives the command that starts it, and `FL enter` starts it in the background ("The daemon is installed, but this machine's supervisor did not start …"). `FL daemon --install` exits 2 then. The daemon's PATH now holds every host's CLI (Gemini's, Cursor's).
+- **`FL start` runs in the background.** `FL start` and `FL resume` no longer run in the player's shell and die with it. A daemon of the agent's own starts it when there is one; else it starts in the background, as `FL enter` does. A stopped agent is sent to `FL resume`; a start that ends at once says so with its own last line. `--foreground` keeps it in the shell for debugging; `FL run` (the daemon's) is unchanged.
+- **Wording.** `FL`, never `feast-league`, in every line a player reads. `FL status`'s waiting line names the date even before the agent's gate has read it (from the page). `FL <verb> <id>.ai` is the agent `<id>`, and the name's error says so.
+- **`FL doctor`.** Signed out is one NO line, not two. It checks `baw --version` against the wallet skill's 1.12.0 and says `npm i -g @binance/agentic-wallet@latest` when older.
+- **Gemini.** With an API key (`GEMINI_API_KEY`, or `FL ask-key` for the daemon) the ask's workspace settings select it (`security.auth.selectedType: "gemini-api-key"`), the one switch the CLI 0.65.0 takes. Its key is handed to the CLI only, and hidden in a cause. A cause under a stack keeps the error's own line, not its last three frames.
+- **An endpoint.** One that refused `response_format: json_schema` is asked without it for the rest of the run (DeepSeek: 400 every ask, 7 of 7).
+- **Workspaces.** An ask's workspace is removed when the runtime exits mid-ask (`FL stop`), and one a killed process left is swept at the next ask. Cursor's CLI is found by PATH order (`agent` or `cursor-agent`, whichever comes first).
+- **The referral.** A rerun of an entry whose binding is kept says so ("Referrer: referral kept (code …)"). `FL status` keeps a bound referrer and does not read the chain each time.
+- **The release.** `league-v5.1.2`.
+
 ## league-v5.1.1
 
 What the real-host checks and the coordinator's run-17 decisions brought (task 975, run 17). `minSupported` stays `league-v4`.

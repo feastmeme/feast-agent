@@ -105,22 +105,23 @@ describe("1. version awareness (G1)", () => {
 
   it("behind, current, absent: the status line, the You're in sentence, never an upgrade", () => {
     const behind = versionView(league(BEHIND).latestRuntime, T0)!;
-    expect(behind).toMatchObject({ current: "league-v5.1.1", latest: "league-v6", behind: true, unsupported: false });
-    expect(versionLine(behind)).toBe("runtime league-v5.1.1 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
+    expect(behind).toMatchObject({ current: "league-v5.1.2", latest: "league-v6", behind: true, unsupported: false });
+    expect(versionLine(behind)).toBe("runtime league-v5.1.2 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
     expect(versionLine(versionView(league(CURRENT).latestRuntime, T0))).toBeNull();
     expect(versionView(league().latestRuntime, T0)).toBeNull();
     // Addendum 11: a minor release orders: v5.1 is behind v5.2 and v6, and ahead of v5.
     expect(versionView({ tag: "league-v5.2", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: true });
     expect(versionView({ tag: "league-v5", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false, unsupported: false });
     expect(league({ latestRuntime: { tag: "league-v5.1", publishedAt: null, minSupported: "league-v4" } }).latestRuntime).toMatchObject({ tag: "league-v5.1" });
-    // Run 17: a patch release orders too: v5.1.1 is ahead of v5.1, behind v5.1.2 and v5.2.
+    // Run 17: a patch release orders too; run 19: v5.1.2 is ahead of v5.1.1 and v5.1, behind v5.1.3 and v5.2.
     expect(versionView({ tag: "league-v5.1", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
-    expect(versionView({ tag: "league-v5.1.2", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: true });
-    expect(league({ latestRuntime: { tag: "league-v5.1.1", publishedAt: null, minSupported: "league-v4" } }).latestRuntime).toMatchObject({ tag: "league-v5.1.1" });
-    expect(versionLine(versionView({ tag: "league-v7", publishedAt: null, minSupported: "league-v6" }, T0))).toBe("runtime league-v5.1.1 · latest league-v7 · upgrade: npx skills add feastmeme/feast-agent (league-v5.1.1 is older than league-v6, the oldest feast.meme still supports: upgrade before the next dinner)");
+    expect(versionView({ tag: "league-v5.1.1", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
+    expect(versionView({ tag: "league-v5.1.3", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: true });
+    expect(league({ latestRuntime: { tag: "league-v5.1.2", publishedAt: null, minSupported: "league-v4" } }).latestRuntime).toMatchObject({ tag: "league-v5.1.2" });
+    expect(versionLine(versionView({ tag: "league-v7", publishedAt: null, minSupported: "league-v6" }, T0))).toBe("runtime league-v5.1.2 · latest league-v7 · upgrade: npx skills add feastmeme/feast-agent (league-v5.1.2 is older than league-v6, the oldest feast.meme still supports: upgrade before the next dinner)");
     const opens = { kind: "open" as const };
     const shown = { preset: "steady", idleMinutes: 30, ask: { every: 5, with: "claude" } };
-    expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(behind, "en"))).toMatch(/ A newer runtime is out \(league-v6; this is league-v5\.1\.1\): upgrade with `npx skills add feastmeme\/feast-agent`; it never upgrades by itself\.$/);
+    expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(behind, "en"))).toMatch(/ A newer runtime is out \(league-v6; this is league-v5\.1\.2\): upgrade with `npx skills add feastmeme\/feast-agent`; it never upgrades by itself\.$/);
     expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(versionView(league(CURRENT).latestRuntime, T0), "en"))).toBe(doneRunning("maplegrin", opens, "en", shown));
     expect(upgradeSentence(behind, "zh")).toContain("npx skills add feastmeme/feast-agent");
   });
@@ -136,7 +137,7 @@ describe("1. version awareness (G1)", () => {
       expect(s.healths.length).toBeGreaterThanOrEqual(36);
       expect(notices(home).filter((n) => n.kind === "version")).toHaveLength(said);
       if (what === "behind") {
-        expect(notices(home).find((n) => n.kind === "version")!.text).toBe("a newer runtime is out: league-v6 (this one is league-v5.1.1). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.");
+        expect(notices(home).find((n) => n.kind === "version")!.text).toBe("a newer runtime is out: league-v6 (this one is league-v5.1.2). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.");
         expect(readVersion(home, "demo")).toMatchObject({ behind: true, latest: "league-v6" });
       } else if (what === "current") expect(readVersion(home, "demo")).toMatchObject({ behind: false });
       else expect(readVersion(home, "demo")).toBeNull();

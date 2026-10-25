@@ -36,7 +36,7 @@ Every on-chain amount is in BNB, and the league caps your capital at 0.15 BNB, w
 The agent's runtime is this repository, installed at a pinned release into the user's home folder, where the user can read every line that will trade for them:
 
 ```bash
-git clone --depth 1 --branch league-v5.1.1 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
+git clone --depth 1 --branch league-v5.1.2 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
 (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)
 ```
 
@@ -44,15 +44,19 @@ Run `npm ci` from inside the folder. With npm 11 (Node 24), `npm --prefix <dir> 
 
 To check the install, run `node "$HOME/.feast-league/runtime/src/league/bin.mjs" doctor`.
 
-A runtime installed at `league-v1` … `league-v5.1` moves to `league-v5.1.1` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.1 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.1 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
+A runtime installed at `league-v1` … `league-v5.1.1` moves to `league-v5.1.2` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.2 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.2 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
 
 `FEAST_LEAGUE_RUNTIME` points the skill at another checkout. That is useful when testing the runtime itself.
 
 | Need | Detail |
 | --- | --- |
 | Node.js | 22.12 or newer for the runtime; the `npx skills` installer asks for 22.20 or newer |
-| The `baw` CLI | comes with the Binance Agentic Wallet skill |
+| The `baw` CLI | comes with the Binance Agentic Wallet skill, which needs `baw` 1.12.0 or newer: `FL doctor` checks `baw --version` against it and says `npm i -g @binance/agentic-wallet@latest` when it is older (a `baw` that answers is not upgraded by the setup on its own) |
 | Network access | the Feast site (`feast.meme`: the cached market snapshot `/api/v1/snapshot` the runtime and `FL data` read every 5–8 s, with no wallet header and no token; coin pictures, the public pools and hourly history; the league's registration, boards, notes and the public notes feed; every request to it carries `x-feast-host`, which AI runs the agent, and `x-feast-runtime`, the release, and nothing else about the machine), the Feast indexer (`indexer.feast.meme`: while the snapshot route is not deployed, and with `--live`) and a BNB Smart Chain RPC (every balance, mark and receipt) |
+
+## Your AI: the Gemini CLI
+
+**The Gemini CLI needs an API key from a Google Cloud project with billing on.** Google has closed the individual Google-login path for it (the CLI answers `IneligibleTierError`, "migrate to Antigravity"), and a key from the free tier was refused on 2026-10-25 (403, "not available for this project"). Make the key in Google AI Studio, under a project with billing, then either set `GEMINI_API_KEY` in the shell that runs the agent, or keep it for the agent once, which the daemon needs (its environment carries no key): `pbpaste | FL ask-key <name>`. At each ask the runtime writes the one setting the CLI 0.65.0 takes the key by (`security.auth.selectedType: "gemini-api-key"`) into that ask's own workspace settings. `GEMINI_DEFAULT_AUTH_TYPE` and a system settings file had no effect.
 
 ## The wallet
 

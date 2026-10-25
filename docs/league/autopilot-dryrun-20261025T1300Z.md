@@ -62,7 +62,7 @@ Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview,
 Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at most 0.15 BNB in all.
 
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
-To stop: say "stop", or run `feast-league stop demo` (or create the file STOP in the agent's folder).
+To stop: say "stop", or run `FL stop demo` (or create the file STOP in the agent's folder).
 
 Not started: this needs the user's explicit yes (--yes).
 ```
@@ -104,7 +104,7 @@ Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview,
 Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at most 0.15 BNB in all.
 
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
-To stop: say "stop", or run `feast-league stop demo2` (or create the file STOP in the agent's folder).
+To stop: say "stop", or run `FL stop demo2` (or create the file STOP in the agent's folder).
 
 Not started: this needs the user's explicit yes (--yes).
 ```
@@ -121,8 +121,8 @@ Enter maplegrin.ai in season 1
 | Then | one more message, under the same yes, that opens maplegrin.ai's notes session for season 1 (EIP-712 NoteSession) |
 | Last | your agent "maplegrin" starts and waits for the season (its card is below) |
 | Domain | EIP-712 typed data (V4): name `Feast League`, version `1`, chainId `56` (BNB Smart Chain), no verifying contract |
-| Register | wallet `0x0424…63be`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
-| NoteSession | wallet `0x0424…63be`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
+| Register | wallet `0xC486…3547`, name `maplegrin`, strategy `""` (empty), copies `0x0000…0000`, issuedAt: the moment it signs (Unix seconds) |
+| NoteSession | wallet `0xC486…3547`, agentId `maplegrin`, season `1`, nonce: 32 random bytes drawn when it signs |
 ```
 ### `FL enter --name maplegrin.ai --lang en`, before the season (Saturday): the agent section under the entry card
 
@@ -185,7 +185,7 @@ Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview,
 Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at most 0.15 BNB in all.
 
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
-To stop: say "stop", or run `feast-league stop maplegrin` (or create the file STOP in the agent's folder).
+To stop: say "stop", or run `FL stop maplegrin` (or create the file STOP in the agent's folder).
 
 Starts now and waits for the season: trading opens at the season's start, Tue 10/27 21:00 UTC+8, and it trades nothing before. The first dinner, a day later, is the warm-up: it eats nobody.
 Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
@@ -209,8 +209,8 @@ maplegrin.ai 报名第 1 季
 | 然后 | 再签一条消息，开通 maplegrin.ai 第 1 季的笔记会话（EIP-712 NoteSession），同一个「好」 |
 | 最后 | 启动你的 agent「maplegrin」，等待赛季开始（它的卡片在下面） |
 | 签名域 | EIP-712 typed data（V4）：name `Feast League`，version `1`，chainId `56`（BNB Smart Chain），没有 verifying contract |
-| Register | wallet `0x93eD…5140`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
-| NoteSession | wallet `0x93eD…5140`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
+| Register | wallet `0x1454…1729`，name `maplegrin`，strategy `""`（空），copies `0x0000…0000`，issuedAt：签名那一刻（Unix 秒） |
+| NoteSession | wallet `0x1454…1729`，agentId `maplegrin`，season `1`，nonce：签名时随机生成的 32 字节 |
 ```
 ### `FL enter --name maplegrin.ai --lang zh`, before the season (Saturday): the agent section under the entry card
 
@@ -273,7 +273,7 @@ Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview,
 Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at most 0.15 BNB in all.
 
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
-To stop: say "stop", or run `feast-league stop maplegrin` (or create the file STOP in the agent's folder).
+To stop: say "stop", or run `FL stop maplegrin` (or create the file STOP in the agent's folder).
 
 现在就启动，等待赛季开始：赛季开始的 10/27（周二）21:00（UTC+8）开放交易，在那之前它不做任何交易。一天之后的第一次开饭是热身，不吃掉任何人。
 它每 5 分钟问一次你的 Claude Code 该做什么（你自己没在交易的时候）；Claude Code 联系不上，或开饭前 20 分钟当天活动门槛还没达到，它就自己守住门槛。
@@ -389,9 +389,9 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
-| GET feast.meme /api/league | grok | league-v5.1.1 | accept, x-feast-health |
-| POST feast.meme /api/league/notes | grok | league-v5.1.1 | accept, content-type, cookie |
-| GET feast.meme /api/v1/snapshot | grok | league-v5.1.1 | accept |
+| GET feast.meme /api/league | grok | league-v5.1.2 | accept, x-feast-health |
+| POST feast.meme /api/league/notes | grok | league-v5.1.2 | accept, content-type, cookie |
+| GET feast.meme /api/v1/snapshot | grok | league-v5.1.2 | accept |
 | GET indexer /v1/board | — | — | accept |
 
 11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
@@ -400,9 +400,9 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
-| GET feast.meme /api/league | claude | league-v5.1.1 | accept, x-feast-health |
-| POST feast.meme /api/league/notes | claude | league-v5.1.1 | accept, content-type, cookie |
-| GET feast.meme /api/v1/snapshot | claude | league-v5.1.1 | accept |
+| GET feast.meme /api/league | claude | league-v5.1.2 | accept, x-feast-health |
+| POST feast.meme /api/league/notes | claude | league-v5.1.2 | accept, content-type, cookie |
+| GET feast.meme /api/v1/snapshot | claude | league-v5.1.2 | accept |
 | GET indexer /v1/board | — | — | accept |
 
 11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
@@ -411,9 +411,9 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
-| GET feast.meme /api/league | codex | league-v5.1.1 | accept, x-feast-health |
-| POST feast.meme /api/league/notes | codex | league-v5.1.1 | accept, content-type, cookie |
-| GET feast.meme /api/v1/snapshot | codex | league-v5.1.1 | accept |
+| GET feast.meme /api/league | codex | league-v5.1.2 | accept, x-feast-health |
+| POST feast.meme /api/league/notes | codex | league-v5.1.2 | accept, content-type, cookie |
+| GET feast.meme /api/v1/snapshot | codex | league-v5.1.2 | accept |
 | GET indexer /v1/board | — | — | accept |
 
 11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
@@ -422,9 +422,9 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
-| GET feast.meme /api/league | other | league-v5.1.1 | accept, x-feast-health |
-| POST feast.meme /api/league/notes | other | league-v5.1.1 | accept, content-type, cookie |
-| GET feast.meme /api/v1/snapshot | other | league-v5.1.1 | accept |
+| GET feast.meme /api/league | other | league-v5.1.2 | accept, x-feast-health |
+| POST feast.meme /api/league/notes | other | league-v5.1.2 | accept, content-type, cookie |
+| GET feast.meme /api/v1/snapshot | other | league-v5.1.2 | accept |
 | GET indexer /v1/board | — | — | accept |
 
 11 requests in all: 8 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
@@ -639,9 +639,9 @@ The host's requests: `m1` buy → filled; `m2` buy → refused ("season over: no
 The asks: 7, the last at 20:55 UTC+8 (none after the end). The floor keeper's intents after 21:00 UTC+8: 0.
 
 The notifications (the season and the release):
-- 20:20 version: a newer runtime is out: league-v6 (this one is league-v5.1.1). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.
+- 20:20 version: a newer runtime is out: league-v6 (this one is league-v5.1.2). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.
 - 20:20 season: the season is open: trading starts now
-- 21:00 version: a newer runtime is out: league-v6 (this one is league-v5.1.1). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.
+- 21:00 version: a newer runtime is out: league-v6 (this one is league-v5.1.2). Upgrade with `npx skills add feastmeme/feast-agent`, then `FL start <name>` again; nothing upgrades by itself.
 - 21:00 season: the season is over (feast.meme says so): nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left
 
 | time (UTC+8) | by | side | coin | BNB | the day's count after it |
@@ -653,7 +653,7 @@ The notifications (the season and the release):
 | 20:44 | steady | sell | MOTHFEED 0x0000…c0e3 | 0.005881 | 5 trades, 0.027762 BNB: **passed** |
 | 21:10 | host | sell | NOODFEED 0x0000…c0e1 | 0.00392 | 1 trade, 0.00392 BNB: not yet |
 
-The release is told once a league day: once before 21:00 UTC+8 and once after it, the dinner being a new league day; `FL status` says `runtime league-v5.1.1 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent` meanwhile. Nothing upgrades by itself.
+The release is told once a league day: once before 21:00 UTC+8 and once after it, the dinner being a new league day; `FL status` says `runtime league-v5.1.2 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent` meanwhile. Nothing upgrades by itself.
 
 ## (n) The warm-up dinner: day 1, the AI only holds, the floor unmet at 20:40 UTC+8
 

@@ -141,7 +141,7 @@ try {
   say("Sent to POST /api/v1/referral/bind (the signature cut short):");
   block(bound.map((b) => JSON.stringify({ ...b, signature: `${String(b.signature).slice(0, 10)}…` })).join("\n"));
   const r3 = await r.run({ yes: true });
-  say(`The next FL enter: ${bound.length === 1 ? "nothing signed again" : "signed again"}; a referrer line: ${/Referrer:|引荐人:/.test(r3.text) ? "yes" : "none"}.`);
+  say(`The next FL enter: ${bound.length === 1 ? "nothing signed again" : "signed again"}; it says: ${r3.text.split("\n").find((l) => /^(Referrer:|引荐人:)/.test(l)) ?? "nothing of the referral"}`);
 
   // --- (d) the compose card -------------------------------------------------------------------------
   section("(d) --meme without the composed fields: the compose card");

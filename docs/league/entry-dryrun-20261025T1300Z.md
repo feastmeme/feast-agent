@@ -79,7 +79,7 @@ Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview,
 Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at most 0.15 BNB in all.
 
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
-To stop: say "stop", or run `feast-league stop demo` (or create the file STOP in the agent's folder).
+To stop: say "stop", or run `FL stop demo` (or create the file STOP in the agent's folder).
 
 Starts now and waits for the season: trading opens at the season's start, Tue 10/27 21:00 UTC+8, and it trades nothing before. The first dinner, a day later, is the warm-up: it eats nobody.
 Every 5 minutes it asks your Claude Code what to do (while you are not trading yourself); if Claude Code can't be reached, or the day's floor is still unmet 20 minutes before dinner, it keeps the floor itself.
@@ -186,9 +186,9 @@ pins: 0; agents started: demo
 ```
 Sent to POST /api/v1/referral/bind (the signature cut short):
 ```text
-{"wallet":"<wallet>","referrer":"0x0000…b0b0","deadline":"1793451600","signature":"0x0aed82f3…","chainId":56}
+{"wallet":"<wallet>","referrer":"0x0000…b0b0","deadline":"1793451600","signature":"0x8f595154…","chainId":56}
 ```
-The next FL enter: nothing signed again; a referrer line: none.
+The next FL enter: nothing signed again; it says: Referrer: referral kept (code H7KMQ2), nothing signed again; FL status says whether it is on chain yet
 
 ## (d) --meme without the composed fields: the compose card
 

@@ -65,8 +65,8 @@ const ENVS: [string, Record<string, string | undefined>, string][] = [
 ];
 
 describe("the values", () => {
-  it("x-feast-host is modelHint's, the very function behind FL note's --model default; x-feast-runtime is the release, league-v5.1.1", () => {
-    expect(RUNTIME_RELEASE).toBe("league-v5.1.1");
+  it("x-feast-host is modelHint's, the very function behind FL note's --model default; x-feast-runtime is the release, league-v5.1.2", () => {
+    expect(RUNTIME_RELEASE).toBe("league-v5.1.2");
     expect(modelHint).toBe(hintHere);
     expect(checkModel).toBe(checkModelHere);
     for (const [what, env, host] of ENVS) {

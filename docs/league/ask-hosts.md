@@ -6,7 +6,7 @@ Every N minutes without a trade from you (`--every`, default 5), the runtime ask
 | --- | --- | --- |
 | `claude` | `claude -p --output-format json --max-turns 1 --tools "" …` | Claude Code's own login. |
 | `codex` | `codex exec --json -s read-only …` | Codex's own login. |
-| `gemini` | `gemini -p "<instruction>" --output-format json --approval-mode plan -e none --allowed-mcp-server-names none`, the pack on stdin | The Gemini CLI's own login. It runs from an empty folder made for that one ask and removed after it, in the league home's own `ask-workspaces` (mode 0700, never a temp folder others may write to), outside the agent's folder. Every built-in tool is excluded in that folder's `.gemini/settings.json`. The folder is trusted for the ask (`GEMINI_CLI_TRUST_WORKSPACE`), so the CLI reads those settings and keeps plan mode. Checked on the real CLI 0.65.0: it reads a system settings file only from a root-owned folder, and it turns plan mode back to default in an untrusted folder. Its `tools.exclude` is marked deprecated for 1.0 in favour of its Policy Engine. |
+| `gemini` | `gemini -p "<instruction>" --output-format json --approval-mode plan -e none --allowed-mcp-server-names none`, the pack on stdin | An API key from a Google Cloud project with billing (Google's own login is closed to individuals, "migrate to Antigravity"; a free-tier key answered 403 on 2026-10-25): `GEMINI_API_KEY`, else the agent's `FL ask-key` file; the ask's workspace settings select it (`security.auth.selectedType: "gemini-api-key"`), the one switch the CLI 0.65.0 takes. It runs from an empty folder made for that one ask and removed after it, in the league home's own `ask-workspaces` (mode 0700, never a temp folder others may write to), outside the agent's folder. Every built-in tool is excluded in that folder's `.gemini/settings.json`. The folder is trusted for the ask (`GEMINI_CLI_TRUST_WORKSPACE`), so the CLI reads those settings and keeps plan mode. Checked on the real CLI 0.65.0: it reads a system settings file only from a root-owned folder, and it turns plan mode back to default in an untrusted folder. Its `tools.exclude` is marked deprecated for 1.0 in favour of its Policy Engine. |
 | `cursor` | `cursor-agent` (or `agent`) `-p --output-format json --mode ask --sandbox enabled --trust --workspace <an empty folder of its own>`, the pack as its prompt | Cursor's own login (`agent login`, or `CURSOR_API_KEY`). Never `--force`; no MCP server approved. |
 | `openai` | `POST <base>/chat/completions` from the runtime itself | Any OpenAI-compatible endpoint. See below. |
 | `none` | nobody | The floor keeper after 30 minutes with no trade from you. |
@@ -23,13 +23,13 @@ FL enter --name <id>.ai --prompt strategy.md --host openai \
 
 - **The base URL** is the provider's own OpenAI-compatible one, from its documentation. It is https; plain http is allowed only for a server on this machine. It never carries a key, a query or a fragment.
 - **The key** is read at each ask from the variable `--ask-key-env` names. It is never written on the command line, in `agent.json` or in a log. Under `FL daemon` the environment carries no key. Keep it once with `pbpaste | FL ask-key <name>` (or `FL ask-key <name> < keyfile`): it goes to the agent's folder at mode 0600 and is read at each ask. A variable that is set comes first.
-- **The request**: the pack as the one user message, the answer's JSON schema as `response_format`, no tools, no streaming, 120 s. An endpoint that refuses `response_format` (a 400 or 422) is asked once more without it; the pack itself asks for the JSON.
+- **The request**: the pack as the one user message, the answer's JSON schema as `response_format`, no tools, no streaming, 120 s. An endpoint that refuses `response_format` (a 400 or 422) is asked once more without it, and without it for the rest of the run (DeepSeek answers 400 "This response_format type is unavailable now"); the pack itself asks for the JSON.
 
 Providers known to serve an OpenAI-compatible endpoint, by name, and the variable a player usually keeps the key in (any name works):
 
 | Provider | Key variable (the player's choice) |
 | --- | --- |
-| DeepSeek | `DEEPSEEK_API_KEY` |
+| DeepSeek (models `deepseek-flash` and `deepseek-v4-pro` by its own error text of 2026-10-25; `deepseek-chat` still answers) | `DEEPSEEK_API_KEY` |
 | Qwen (Alibaba Cloud Model Studio / DashScope) | `DASHSCOPE_API_KEY` |
 | Kimi (Moonshot AI) | `MOONSHOT_API_KEY` |
 | xAI (Grok) | `XAI_API_KEY` |
