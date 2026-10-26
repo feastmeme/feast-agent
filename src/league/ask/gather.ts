@@ -4,6 +4,7 @@ import type { Address } from "viem";
 import type { AgentConfig } from "../agent.ts";
 import { notesCachePath } from "../data/notes.ts";
 import { exitImpacts, picture, type Picture } from "../data/picture.ts";
+import { playerTrades, rosterOf } from "../data/players.ts";
 import { selfView, type SelfChain } from "../data/self.ts";
 import { fromArena, fromField, readStanding, RULES, standing } from "../data/standing.ts";
 import type { FeastSnapshot } from "../feed/snapshot.ts";
@@ -104,6 +105,8 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     market: d.snapshot ? pictured.market : null,
     coins: pictured.coins,
     launches: pictured.launches,
+    // Task 1020: who in the league bought or sold what in the last 2 minutes, joined by the field's (or the arena's) wallets.
+    players: playerTrades(d.snapshot?.events ?? [], d.now, rosterOf(league?.field ?? league?.arena), (q) => pictured.bnbPerQuote?.[q] ?? null, d.wallet),
     quiet: pictured.quiet,
     standing: leagueRead.standing,
     rules: RULES,

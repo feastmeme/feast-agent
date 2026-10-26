@@ -69,6 +69,8 @@ export type Picture = {
   requests: number;
   /** Local quoter calls this read (the server's impact table spares them). */
   quotes?: number;
+  /** Task 1020: BNB per quote token (lowercase), as this read valued the events (1 for WBNB; null: unknown). */
+  bnbPerQuote?: Record<string, number | null>;
   /** Where each part came from: the snapshot's own field, the local computation, or neither. */
   from?: { windows: "server" | "local" | null; flow2m: "server" | "local"; impact: "server" | "local" | null; meta: "server" | "local"; launches: "server" | "local" };
 };
@@ -421,7 +423,7 @@ export async function picture(deps: PictureDeps): Promise<Picture> {
       c.impactPct = round(await deps.impact(c.coin, IMPACT_SIZE_BNB).catch(() => null), 3);
     }
   }
-  return { market: { ...market, freshness: hasFeature(snap, "freshness") ? (obj(snap?.server?.freshness) ?? null) : null }, coins: all, launches, quiet: all.length - picked.size, requests, quotes: quoted, from };
+  return { market: { ...market, freshness: hasFeature(snap, "freshness") ? (obj(snap?.server?.freshness) ?? null) : null }, coins: all, launches, quiet: all.length - picked.size, requests, quotes: quoted, from, bnbPerQuote: Object.fromEntries(quotes) };
 }
 
 /**
