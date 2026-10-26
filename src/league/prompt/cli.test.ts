@@ -10,6 +10,8 @@ import { agentPaths, writeJsonAtomic, writeStop } from "../store.ts";
 import { tradeWorld } from "./fakes.ts";
 import { splitHelp } from "../support.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /** Run 22: the help line every refusal, error and status ends with, kept apart from the output the tests read. */
 const helpOff = (stdout: string, stderr: string) => {
   const out = splitHelp(stdout);
@@ -105,10 +107,14 @@ describe("the CLI's new commands, through the binary", () => {
   }, 60_000);
 
   it("set above the cap: refused with the cap's line, exit 2", async () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
     const { env } = setup();
-    const out = await run(["set", "maple", "--limit", "budgetBnb=0.2", "--yes"], env);
+    const out = await run(["set", "maple", "--limit", "maxAtWorkBnb=0.2", "--yes"], env);
     expect(out.code).toBe(2);
-    expect(out.stdout).toContain("the league caps capital at 0.15 BNB");
+    expect(out.stdout).toContain("the league caps capital at work at 0.15 BNB in open positions (a sale frees room)");
+    const old = await run(["set", "maple", "--limit", "maxTradeBnb=0.01", "--yes"], env);
+    expect(old.code).toBe(2);
+    expect(old.stdout).toContain("L1 (the size of one trade) was removed");
   }, 60_000);
 
   it("start --prompt: the card and exit 2 without --yes; a changed prompt on a confirmed agent prints a new card", async () => {
@@ -397,7 +403,9 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
     expect(human.stdout).not.toMatch(/backup takes over|min of silence/);
     const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as Record<string, unknown>;
     expect(data.ask).toMatchObject({ every: 5, with: "claude", failuresInARow: 2, floorKeeperSince: new Date(at).toISOString() });
-    expect(data.headroom).toMatchObject({ maxTradeBnb: expect.any(Number), leftTodayBnb: expect.any(Number), leftSeasonBnb: expect.any(Number) });
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(data.headroom).toMatchObject({ roomToBuyBnb: 0.15, atWorkBnb: 0, capBnb: 0.15 });
+    expect(data.headroom).not.toHaveProperty("leftTodayBnb");
     expect(data).toHaveProperty("wallet");
   }, 60_000);
 

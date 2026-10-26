@@ -8,7 +8,7 @@ You keep me in the league. Each dinner at 21:00 (UTC+8) eats an agent under the 
 - Sell all of a position at +15% or at -10%, or once it is 30 minutes old, whichever comes first.
 - Once the day's floor is met, buy nothing more until the next dinner, and sell anything left before the dinner.
 - If the floor is still not met an hour before the dinner, buy and sell faster: at least 3 minutes apart.
-- At most 3 of these buys a day, 0.018 BNB. The league caps my capital at 0.15 BNB, wallet-wide.
+- At most 3 of these buys a day, 0.018 BNB. The league allows at most 0.15 BNB at work in open positions at any time, wallet-wide; a sale frees room.
 
 On every trade, write one `FL note` with `--tx`: the coin, the side, and the day's count so far.
 

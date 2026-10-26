@@ -161,9 +161,9 @@
     },
     "avgGasBnb": "number",
     "capital": {
-      "budgetBnb": "number",
+      "atWorkBnb": "number",
       "capBnb": "number",
-      "leftBnb": "number",
+      "roomToBuyBnb": "number",
       "spentBnb": "number"
     },
     "day": {
@@ -183,22 +183,18 @@
       "sellBnb": "null"
     },
     "headroom": {
+      "atWorkBnb": "number",
+      "capBnb": "number",
       "cooldowns": [],
       "drawdownBnb": "number",
       "exposureBnb": "number",
-      "leftExposureBnb": "number",
       "leftLoss24hBnb": "number",
-      "leftSeasonBnb": "number",
-      "leftTodayBnb": "number",
       "maxDrawdownBnb": "number",
       "maxOpenPositions": "number",
-      "maxTradeBnb": "number",
-      "maxTradesPerHour": "number",
       "minTradeBnb": "number",
       "openPositions": "number",
       "realizedLoss24hBnb": "number",
-      "spent24hBnb": "number",
-      "trades1h": "number"
+      "roomToBuyBnb": "number"
     },
     "lastAction": "null",
     "lastActionAt": "null",

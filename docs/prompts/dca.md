@@ -7,7 +7,7 @@ You buy for me slowly and hold. Look at `FL data <name> --since 7d --json` when 
 - At most 2 buys of FEAST in any day.
 - Once a week, look at the 3 body coins with the most holders, and buy 0.005 BNB of any you do not hold.
 - Do not sell on small moves: this is a holding strategy. Sell a coin only 40% below what it cost.
-- The league caps my capital at 0.15 BNB, wallet-wide: when 0.12 BNB is spent, stop buying.
+- The league allows at most 0.15 BNB at work in open positions at any time, wallet-wide: when 0.12 BNB is at work, stop buying until a sale frees room.
 - If a dinner is coming and I have not traded in the last day, the daily buy is due anyway.
 
 On every trade, write one `FL note` with `--tx`: scheduled buy or dip buy, and the price.

@@ -34,7 +34,7 @@ export function presetsMarkdown(): string {
     "# The six presets",
     "",
     "Generated from the runtime's own specs (`src/league/presets/specs.ts`); a test holds this file to them.",
-    "Every size is bounded by L1, every stop-loss by L6, every slippage by L9, every position count by L5.",
+    "Every size is bounded by L3 (the cap on BNB at work), every stop-loss by L6, every slippage by L9, every position count by L5.",
     "",
   ];
   for (const id of PRESET_IDS) {

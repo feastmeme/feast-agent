@@ -270,8 +270,8 @@ export function launchCard(view: LaunchView, lang: Lang): string {
       [
         zh ? "限额" : "Limits",
         zh
-          ? "走这只 agent 的硬限额（L12 每小时交易数；L16 钱包、Developer Mode 与停止文件）；每只 agent 只发一次"
-          : "this agent's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent",
+          ? "走这只 agent 的硬限额（L16 钱包、Developer Mode 与停止文件）；每只 agent 只发一次"
+          : "this agent's hard limits apply (L16 the wallet, Developer Mode and the stop file); one launch per agent",
       ],
     ]),
     "",

@@ -8,10 +8,15 @@ import { MIN_TRADE_BNB, WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, weiToBnb, type
  * "approved, at this size" or "refused, by this limit". Nothing reaches the
  * wallet without passing here.
  *
- * The order is the plan's — L16 → L15 → L11 → L1 → L9 → L10 → L5 → L4 → L2 →
- * L3 → L12 → L13 → L7/L8/L14 (pause state) → warm-up forcing — and the first
+ * The order is the plan's — L16 → L15 → L11 → the smallest trade → L9 → L10 →
+ * L5 → L3 → L13 → L7/L8/L14 (pause state) → warm-up forcing — and the first
  * refusal is the one reported. Exits are never blocked by a limit on entries: a
  * sale needs only the wallet, the stop file, a Feast coin and a sane slippage.
+ *
+ * The owner's ruling for league-v5.1.4: L3 is the league's cap on
+ * capital at work (the cost of open positions, every agent on this wallet, at most
+ * 0.15 BNB; a sale frees room), and nothing limits the size of one trade, the BNB
+ * bought in 24 h or the trades in an hour (L1, L2, L12 and L4 are gone).
  */
 
 export type IntentKind = "buy" | "sell" | "launch" | "arm" | "claim";
@@ -25,7 +30,7 @@ export type Intent = {
   /** A sale's share of the position, 0 < fraction ≤ 1. */
   fraction?: number;
   slippagePct?: number;
-  /** A buyback paid with claimed creator fees, not the wallet's BNB (does not draw on L3). */
+  /** A buyback paid with claimed creator fees, not the wallet's BNB. Its cost is at work like any other (L3). */
   fundedBy?: "wallet" | "claim";
   reason: string;
   source: "preset" | "script" | "manual" | "runtime";
@@ -47,10 +52,11 @@ export type BookView = {
   openPositions: number;
   /** The wallet already holds the intent's coin (adding to it is not a new position). */
   hasPosition: boolean;
+  /** The cost of this agent's open positions and of its pending buys: its BNB at work (L3). */
   exposureWei: bigint;
+  /** BNB bought in the last 24 h: a figure for the status, no limit reads it. */
   spent24hWei: bigint;
   realizedLoss24hWei: bigint;
-  trades1h: number;
   /** The last entry into the intent's coin, epoch ms. */
   lastEntryAt: number | null;
   /** Why entries are paused (L14), when they are. */
@@ -72,14 +78,8 @@ export type GuardInput = {
   /** The intent's coin was made by the Feast factory, or is FEAST: checked on chain by the caller. */
   coinIsFeast: boolean;
   book: BookView;
-  /** The league's lifetime gross spend from this wallet, every agent (the ledger). */
-  walletSpentWei: bigint;
-  /**
-   * Claimed creator fees the agent holds and has not yet spent on buybacks, BNB in
-   * wei, filled by the runtime from its own receipts. A buy labelled claim-funded
-   * is exempt from the budget only up to this, and never when a script asks.
-   */
-  claimFundsWei: bigint;
+  /** The cost of the open positions (and pending buys) in every other agent's book on this wallet: L3 is wallet-wide. */
+  othersAtWorkWei: bigint;
   /** The script's warm-up state; null for presets and graduated scripts. */
   warmup: WarmupState | null;
   /** A buy's price impact once it is quoted (L10); absent before quoting. */
@@ -88,7 +88,10 @@ export type GuardInput = {
 
 export type GuardVerdict =
   | { ok: true; intent: Intent; sizeWei: bigint | null; forced: string | null }
-  | { ok: false; limit: LimitId | "W"; message: string; halt: boolean };
+  | { ok: false; limit: Refusal; message: string; halt: boolean };
+
+/** What refused: a limit, the warm-up tier ("W"), or the shape of the trade itself ("size": no size, under the smallest trade, a sale's share outside 0–1). */
+export type Refusal = LimitId | "W" | "size";
 
 export function warmupActive(w: WarmupState | null): boolean {
   return w !== null && w.trades < WARMUP_TRADES;
@@ -110,7 +113,7 @@ export function guard(input: GuardInput): GuardVerdict {
   const { intent, limits, book, wallet } = input;
   const inWarmup = warmupActive(input.warmup);
   // In warm-up any refusal halts the script (§5.4); outside it only L8 does.
-  const refuse = (limit: LimitId | "W", message: string, halt = false): GuardVerdict => ({ ok: false, limit, message, halt: halt || inWarmup });
+  const refuse = (limit: Refusal, message: string, halt = false): GuardVerdict => ({ ok: false, limit, message, halt: halt || inWarmup });
   const approve = (approved: Intent, sizeWei: bigint | null = null, forced: string | null = null): GuardVerdict => ({
     ok: true,
     intent: approved,
@@ -129,7 +132,6 @@ export function guard(input: GuardInput): GuardVerdict {
   }
 
   if (intent.kind === "launch") {
-    if (book.trades1h >= limits.maxTradesPerHour) return refuse("L12", `${book.trades1h} trades in the last hour; the limit is ${limits.maxTradesPerHour}`);
     if (inWarmup && input.warmup!.launches >= 1) return refuse("W", "warm-up allows one launch, and this script has made it", true);
     return approve(intent);
   }
@@ -143,7 +145,7 @@ export function guard(input: GuardInput): GuardVerdict {
   if (intent.kind === "sell") {
     if (!slippageOk) return refuse("L9", `a slippage bound of ${String(slippage)}% is outside 0–${limits.maxSlippagePct}%`);
     const fraction = intent.fraction ?? 1;
-    if (!(fraction > 0 && fraction <= 1)) return refuse("L1", `a sale's share of the position must be above 0 and at most 1 (got ${fraction})`);
+    if (!(fraction > 0 && fraction <= 1)) return refuse("size", `a sale's share of the position must be above 0 and at most 1 (got ${fraction})`);
     if (inWarmup && fraction !== 1) return approve({ ...intent, fraction: 1 }, null, `warm-up: sells the whole position, not ${fraction}`);
     return approve(intent);
   }
@@ -163,32 +165,24 @@ export function guard(input: GuardInput): GuardVerdict {
   if (sized && wallet.balanceWei - bnbSpent < reserve) {
     return refuse("L11", `buying ${bnb(sizeWei)} would leave ${bnb(wallet.balanceWei - bnbSpent > 0n ? wallet.balanceWei - bnbSpent : 0n)}; the gas reserve is ${bnb(reserve)}`);
   }
-  // L1: one trade.
-  if (!sized) return refuse("L1", "a buy needs a size in BNB above zero");
-  if (sizeWei > bnbToWei(limits.maxTradeBnb)) return refuse("L1", `a buy of ${asked} BNB is over the per-trade limit of ${limits.maxTradeBnb} BNB`);
-  if (sizeWei < bnbToWei(MIN_TRADE_BNB)) return refuse("L1", `a buy of ${asked} BNB is under the smallest trade, ${MIN_TRADE_BNB} BNB`);
+  // The smallest trade (there is no largest but L3).
+  if (!sized) return refuse("size", "a buy needs a size in BNB above zero");
+  if (sizeWei < bnbToWei(MIN_TRADE_BNB)) return refuse("size", `a buy of ${asked} BNB is under the smallest trade, ${MIN_TRADE_BNB} BNB`);
   // L9, L10.
   if (!slippageOk) return refuse("L9", `a slippage bound of ${String(slippage)}% is outside 0–${limits.maxSlippagePct}%`);
   if (input.impactPct !== undefined && input.impactPct > limits.maxPriceImpactPct) {
     return refuse("L10", `this buy would move the price ${input.impactPct.toFixed(2)}%; the limit is ${limits.maxPriceImpactPct}%`);
   }
-  // L5, L4, L2, L3.
+  // L5, L3.
   if (!book.hasPosition && book.openPositions >= limits.maxOpenPositions) {
     return refuse("L5", `${book.openPositions} positions are open; the limit is ${limits.maxOpenPositions}`);
   }
-  if (book.exposureWei + sizeWei > bnbToWei(limits.maxExposureBnb)) {
-    return refuse("L4", `open exposure would be ${bnb(book.exposureWei + sizeWei)}; the limit is ${limits.maxExposureBnb} BNB`);
+  const atWorkWei = book.exposureWei + input.othersAtWorkWei;
+  if (atWorkWei + sizeWei > bnbToWei(limits.maxAtWorkBnb)) {
+    const room = bnbToWei(limits.maxAtWorkBnb) - atWorkWei;
+    return refuse("L3", `${bnb(atWorkWei)} is at work in open positions; ${asked} BNB more would pass the ${limits.maxAtWorkBnb} BNB cap (room to buy now: ${bnb(room > 0n ? room : 0n)}; a sale frees room)`);
   }
-  if (book.spent24hWei + sizeWei > bnbToWei(limits.maxDailySpendBnb)) {
-    return refuse("L2", `${bnb(book.spent24hWei)} spent in the last 24 h; ${asked} BNB more would pass the ${limits.maxDailySpendBnb} BNB limit`);
-  }
-  // The label alone exempts nothing: only claimed proceeds the runtime has recorded, and never a script's or a manual buy.
-  const claimFunded = intent.fundedBy === "claim" && intent.source !== "script" && intent.source !== "manual" && sizeWei <= input.claimFundsWei;
-  if (!claimFunded && input.walletSpentWei + sizeWei > bnbToWei(limits.budgetBnb)) {
-    return refuse("L3", `the league has put ${bnb(input.walletSpentWei)} in from this wallet; ${asked} BNB more would pass the ${limits.budgetBnb} BNB budget`);
-  }
-  // L12, L13.
-  if (book.trades1h >= limits.maxTradesPerHour) return refuse("L12", `${book.trades1h} trades in the last hour; the limit is ${limits.maxTradesPerHour}`);
+  // L13.
   if (book.lastEntryAt !== null && input.now - book.lastEntryAt < limits.coinCooldownSeconds * 1_000) {
     return refuse("L13", `the last entry into this coin was ${Math.floor((input.now - book.lastEntryAt) / 1_000)} s ago; the cooldown is ${limits.coinCooldownSeconds} s`);
   }
@@ -203,7 +197,7 @@ export function guard(input: GuardInput): GuardVerdict {
 
   // The warm-up tier forces the size; nothing else ever resizes a trade.
   if (inWarmup) {
-    const forcedWei = bnbToWei(Math.min(WARMUP_SIZE_BNB, limits.maxTradeBnb));
+    const forcedWei = bnbToWei(WARMUP_SIZE_BNB);
     return approve(intent, forcedWei, `warm-up: ${asked} BNB → ${weiToBnb(forcedWei)} BNB`);
   }
   return approve(intent, sizeWei);

@@ -84,7 +84,7 @@ Your only manual steps are pasting the league page's one-line prompt to your age
 
 Right after you're in, your agent asks once: "Want to launch your own meme too? Others can trade it and half of every trading fee goes to you. Give me a one-line concept, or say no, it doesn't affect the game." (「要不要顺便发一枚你的 meme？别人可以交易它，每笔手续费的一半归你；给我一句话概念就行，不发也不影响比赛。」)
 
-Every on-chain amount is in BNB, and the league caps your capital at 0.15 BNB, wallet-wide.
+Every on-chain amount is in BNB, and the league's cap is at most 0.15 BNB at work in open positions at any time, wallet-wide; a sale frees room; no limit on how often you trade.
 
 - **The meme is optional.** One coin per agent, composed by your agent from your one-line concept (its name ends in `feed`), on its own preview card and your yes: a real transaction through the default hard limits and the wallet's preview. It becomes your agent's coin; 50 of the fee's 100 points go to you as its creator (60 when a trade has no referrer).
 - **Its own agent.** `FL enter` keeps one, `league-entry`, with the default hard limits, for the meme's launch. The trading agent it starts is your own, named after your Agent ID (or `--agent <name>`).
@@ -100,7 +100,7 @@ Every on-chain amount is in BNB, and the league caps your capital at 0.15 BNB, w
 
 ### Prompt mode: your strategy, your agent
 
-The league is a game of prompts. You write your strategy in plain words, and your own agent, running the `feast-league` skill, trades by it. The runtime fixes only the boundary: your wallet, the hard limits, a capital cap of 0.15 BNB (wallet-wide: every agent on this wallet counts), and Feast coins only. Everything else is your prompt and your agent's judgement.
+The league is a game of prompts. You write your strategy in plain words, and your own agent, running the `feast-league` skill, trades by it. The runtime fixes only the boundary: your wallet, the hard limits, the league's cap of at most 0.15 BNB at work in open positions at any time (wallet-wide: every agent on this wallet counts; a sale frees room; no limit on how often you trade), and Feast coins only. Everything else is your prompt and your agent's judgement.
 
 1. **Write the prompt**, `strategy.md`, or start from an example in [`docs/prompts/`](docs/prompts/README.md): sniper, momentum, copy, launch, DCA, steady.
 2. **Say "start my agent with this prompt".** The skill runs `FL start <name> --prompt strategy.md` and shows the card: the prompt's first lines and its sha256, the autopilot backup, the cap and the hard limits. After your yes it starts the runtime.
@@ -158,15 +158,13 @@ The league is a game of prompts. You write your strategy in plain words, and you
 
 | Limit | Default |
 | --- | --- |
-| one trade | 0.02 BNB |
-| buys in any 24 h | 0.1 BNB |
-| capital, wallet-wide (the league's cap on L3) | 0.15 BNB |
+| BNB at work in open positions, wallet-wide (the league's cap, L3; a sale frees room) | 0.15 BNB |
 | open positions | 5 |
 | backstop stop-loss | 50 % |
 | slippage | 10 % |
 | gas reserve | 0.003 BNB |
 
-There are also caps on exposure, daily loss, drawdown, price impact, trades per hour and failures in a row. Only Feast coins, and only our own contracts. The full list is in [`skills/feast-league/references/limits.md`](skills/feast-league/references/limits.md), and the design is in [`docs/league/PLAN.md`](docs/league/PLAN.md).
+There are also caps on daily loss, drawdown, price impact, re-entering one coin and failures in a row; there is no limit on the size of one trade or on how often you trade. Only Feast coins, and only our own contracts. The full list is in [`skills/feast-league/references/limits.md`](skills/feast-league/references/limits.md), and the design is in [`docs/league/PLAN.md`](docs/league/PLAN.md).
 
 ```bash
 npm run league -- doctor            # the wallet, Developer Mode, the indexer and the chain

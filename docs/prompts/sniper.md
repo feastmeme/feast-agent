@@ -8,7 +8,7 @@ You trade new Feast coins for me. Look at `FL data <name> --json` whenever you c
 - Sell the whole position 25% below what it cost. Take profit when it doubles.
 - Whatever happens, sell what is left 30 minutes after you bought it.
 - Never chase: if a coin is already up more than 50% since its launch (`--since 2h` shows it), leave it.
-- Mind the league's 0.15 BNB cap: once FL data shows more than 0.12 BNB spent, only sell.
+- Mind the league's cap, 0.15 BNB at work in open positions: once FL data shows less than 0.03 BNB of room to buy, only sell until a sale frees room.
 - Never buy my own coin, and never a coin you cannot find in FL data.
 
 On every trade, write one `FL note` with `--tx`: why this coin, and what would make you sell it.

@@ -8,6 +8,8 @@ import { makeApi, type CoinRow, type PositionRow, type PresetExtras, type Snapsh
 import { presetStrategy } from "./logic.ts";
 import { PRESETS, resolveParams } from "./specs.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * `steady` (task 975), the floor keeper: small, spaced buys of the busiest Feast coins, each sold by a take-profit,
  * a stop-loss or a time stop, so the day's activity floor (3 trades and 0.02 BNB, own coin left out) is met early.
@@ -77,12 +79,14 @@ describe("steady: its parameters", () => {
     expect(DEFAULTS).toEqual({ buyBnb: 0.006, topN: 5, minVolumeBnb: 0.5, minAgeMinutes: 60, minDailyTrades: 4, minDailyVolumeBnb: 0.022, maxEntriesPerDay: 3, spacingMinutes: 15, rushMinutes: 60, takeProfitPct: 15, stopLossPct: 10, timeStopMinutes: 30, maxPositions: 2, slippagePct: 5 });
   });
 
-  it("L1, L5, L6 and L9 bound its keys", () => {
+  it("L3, L5, L6 and L9 bound its keys", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
     const bad = (given: Record<string, unknown>) => {
       const r = resolveParams("steady", given, DEFAULT_LIMITS);
       return r.ok ? [] : r.errors;
     };
-    expect(bad({ buyBnb: 0.021 }).join()).toMatch(/bounded by L1/);
+    expect(bad({ buyBnb: 0.021 }).join()).toBe("");
+    expect(bad({ buyBnb: 0.151 }).join()).toMatch(/bounded by L3/);
     expect(bad({ maxPositions: 6 }).join()).toMatch(/bounded by L5/);
     expect(bad({ stopLossPct: 51 }).join()).toMatch(/bounded by L6/);
     expect(bad({ slippagePct: 21 }).join()).toMatch(/bounded by L9/);
@@ -90,12 +94,13 @@ describe("steady: its parameters", () => {
     expect(bad({ minDailyVolumeBnb: 0.019 }).join()).toMatch(/minDailyVolumeBnb 0.019 is outside 0.02–0.15/);
   });
 
-  it("the cross-checks: its day's buys within L2; its own targets reachable", () => {
+  it("the cross-checks: no L2 any more (its day's buys are not limited); its own targets reachable", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
     const errors = (given: Record<string, unknown>) => {
       const r = resolveParams("steady", given, DEFAULT_LIMITS);
       return r.ok ? [] : r.errors;
     };
-    expect(errors({ maxEntriesPerDay: 12, buyBnb: 0.01 })).toContain("maxEntriesPerDay × buyBnb (0.12 BNB) is above L2's 0.1 BNB of buys a day");
+    expect(errors({ maxEntriesPerDay: 12, buyBnb: 0.01 })).toEqual([]);
     expect(errors({ maxEntriesPerDay: 1, buyBnb: 0.006, minDailyTrades: 3 })).toContain("2 × maxEntriesPerDay × buyBnb (0.012 BNB) cannot reach minDailyVolumeBnb (0.022 BNB)");
     expect(errors({ maxEntriesPerDay: 1, buyBnb: 0.02 })).toContain("minDailyTrades 4 needs at least 2 buys a day (a buy and its sale are two trades); maxEntriesPerDay is 1");
   });
@@ -111,10 +116,12 @@ describe("steady: its parameters", () => {
     expect(2 * roundTrip(b, -stop / 100)).toBeGreaterThanOrEqual(0.02);
     expect(roundTrip(b, -0.5) + roundTrip(b, 0)).toBeLessThan(target);
     expect(roundTrip(b, -0.5) + 2 * roundTrip(b, 0)).toBeGreaterThanOrEqual(target);
-    // Two buys a typical day, three at most; the opening hour and the six days after dinner 1: 7 days.
+    // Two buys a typical day, three at most.
     expect(2 * b).toBeCloseTo(0.012, 9);
     expect(entries * b).toBeCloseTo(0.018, 9);
-    expect(entries * b * 7).toBeLessThanOrEqual(0.15);
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    // What it holds at once (its positions × its size) sits well inside the cap on BNB at work.
+    expect((DEFAULTS.maxPositions as number) * b).toBeLessThanOrEqual(0.15);
   });
 });
 

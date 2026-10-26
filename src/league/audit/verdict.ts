@@ -18,7 +18,7 @@ export type AuditRecord = { sha256: string; file: string; static: StaticAudit; m
 
 export const auditPath = (home: string, sha256: string) => join(home, "audits", `${sha256}.json`);
 
-export function auditFile(home: string, path: string, options: { maxTradeBnb?: number } = {}): AuditRecord {
+export function auditFile(home: string, path: string, options: { maxBuyBnb?: number } = {}): AuditRecord {
   const file = resolve(path);
   const source = readFileSync(file, "utf8");
   const sha256 = sha256Of(source);
@@ -29,7 +29,7 @@ export function auditFile(home: string, path: string, options: { maxTradeBnb?: n
 }
 
 /** The model read's verdict. It can only be recorded on a file that passed the static rules. */
-export function recordModelVerdict(home: string, path: string, verdict: "pass" | "refuse", notes: string, options: { maxTradeBnb?: number } = {}): AuditRecord {
+export function recordModelVerdict(home: string, path: string, verdict: "pass" | "refuse", notes: string, options: { maxBuyBnb?: number } = {}): AuditRecord {
   const record = auditFile(home, path, options);
   if (record.static.verdict !== "pass" && verdict === "pass") throw new Error("the static rules refused this file: a model read cannot pass it");
   if (!notes.trim()) throw new Error("a model verdict needs its notes: the answers to the checklist");

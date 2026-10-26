@@ -5,10 +5,9 @@ import { getAddress, type Address } from "viem";
 import { bookView, type Book, type Position } from "../book.ts";
 import { readEntry } from "../enter/flow.ts";
 import { MIN_TRADE_BNB, weiToBnb, type Limits } from "../limits.ts";
-import { LEAGUE_CAP_BNB } from "../prompt/constants.ts";
 import { dayCount, dayView, leftOut, tailLines, type DayView } from "../prompt/floor.ts";
 import { lastHostAction, lastTradeAt, promptChanged, within } from "../prompt/host.ts";
-import { statusOf } from "../runtime.ts";
+import { othersAtWorkWei, statusOf } from "../runtime.ts";
 import { noFloorTonight, readGate } from "../season-gate.ts";
 import { agentPaths, readLedger } from "../store.ts";
 import { untrusted, type Untrusted } from "./untrusted.ts";
@@ -16,7 +15,7 @@ import { untrusted, type Untrusted } from "./untrusted.ts";
 /**
  * An agent's own figures, in BNB (task 963): what `FL data` and `FL status`
  * show of it. Its open positions, marked at spot on the chain; realized and
- * unrealized PnL and gas; the wallet-wide spend against the league's cap; the
+ * unrealized PnL and gas; the wallet-wide BNB at work against the league's cap; the
  * last trade and the host's last action; the day's count (task 975). The wallet's own coin is not this
  * agent's PnL, nor are other agents' positions on this machine: both are
  * listed apart. A USDT figure is never kept here: a display may
@@ -45,19 +44,23 @@ export type PositionOut = {
   exitImpactPctEstimate?: number | null;
 };
 
-/** Task 975, addendum 5: how much the hard limits leave right now, from the book and the limits (one source for FL data, FL status and the pack). */
+/**
+ * Task 975, addendum 5: how much the hard limits leave right now, from the book and the limits (one source for FL
+ * data, FL status and the pack). League-v5.1.4 (the owner's ruling): one figure for the cap, the room to
+ * buy now: the cap (L3) less the BNB at work in open positions, every agent on this wallet; a sale frees room.
+ */
 export type Headroom = {
-  maxTradeBnb: number;
   minTradeBnb: number;
-  spent24hBnb: number;
-  leftTodayBnb: number;
-  leftSeasonBnb: number;
+  /** L3: the cap on BNB at work, at most the league's 0.15. */
+  capBnb: number;
+  /** BNB at work now: the cost of open positions and pending buys, every agent on this wallet. */
+  atWorkBnb: number;
+  /** Room to buy now: the cap less the BNB at work. */
+  roomToBuyBnb: number;
+  /** This agent's own share of the BNB at work. */
   exposureBnb: number;
-  leftExposureBnb: number;
   openPositions: number;
   maxOpenPositions: number;
-  trades1h: number;
-  maxTradesPerHour: number;
   realizedLoss24hBnb: number;
   leftLoss24hBnb: number;
   drawdownBnb: number;
@@ -81,7 +84,8 @@ export type SelfView = {
   ownCoin: PositionOut[];
   otherBooks: { agent: string; positions: PositionOut[] }[];
   pnl: { realizedBnb: number; unrealizedBnb: number; gasBnb: number; unmarked: number };
-  capital: { spentBnb: number; capBnb: number; budgetBnb: number; leftBnb: number };
+  /** The cap on capital at work (wallet-wide), and the BNB bought from this wallet in all (a figure, never a limit). */
+  capital: { atWorkBnb: number; capBnb: number; roomToBuyBnb: number; spentBnb: number };
   lastTradeAt: string | null;
   lastActionAt: string | null;
   lastAction: string | null;
@@ -110,27 +114,23 @@ export function gasEstimateOf(fills: FillOut[]): SelfView["gasEstimate"] {
 
 const r = (x: number, d = 6) => Number(x.toFixed(d));
 
-export function headroomOf(book: Book | null, limits: Limits, ledgerSpentWei: bigint, now: number): Headroom {
+export function headroomOf(book: Book | null, limits: Limits, othersAtWorkWei: bigint, now: number): Headroom {
   const v = book ? bookView(book, undefined, now) : null;
-  const spent = v ? weiToBnb(v.spent24hWei) : 0;
   const exposure = v ? weiToBnb(v.exposureWei) : 0;
+  const atWork = exposure + weiToBnb(othersAtWorkWei);
   const loss = v ? weiToBnb(v.realizedLoss24hWei) : 0;
   const cooldowns = Object.entries(book?.lastEntryAt ?? {})
     .map(([coin, at]) => ({ coin, until: Number(at) + limits.coinCooldownSeconds * 1_000 }))
     .filter((c) => c.until > now)
     .map((c) => ({ coin: getAddress(c.coin), until: new Date(c.until).toISOString() }));
   return {
-    maxTradeBnb: limits.maxTradeBnb,
     minTradeBnb: MIN_TRADE_BNB,
-    spent24hBnb: r(spent),
-    leftTodayBnb: r(Math.max(0, limits.maxDailySpendBnb - spent)),
-    leftSeasonBnb: r(Math.max(0, Math.min(limits.budgetBnb, LEAGUE_CAP_BNB) - weiToBnb(ledgerSpentWei))),
+    capBnb: limits.maxAtWorkBnb,
+    atWorkBnb: r(atWork),
+    roomToBuyBnb: r(Math.max(0, limits.maxAtWorkBnb - atWork)),
     exposureBnb: r(exposure),
-    leftExposureBnb: r(Math.max(0, limits.maxExposureBnb - exposure)),
     openPositions: v?.openPositions ?? 0,
     maxOpenPositions: limits.maxOpenPositions,
-    trades1h: v?.trades1h ?? 0,
-    maxTradesPerHour: limits.maxTradesPerHour,
     realizedLoss24hBnb: r(loss),
     leftLoss24hBnb: r(Math.max(0, limits.maxDailyLossBnb - loss)),
     drawdownBnb: v ? r(weiToBnb(v.drawdownWei)) : 0,
@@ -232,6 +232,7 @@ export async function selfView(
   }
   const unrealizedWei = counted.reduce((sum, m) => (m.markWei === null ? sum : sum + m.markWei - m.costWei), 0n);
   const spentWei = readLedger(home).spentWei;
+  const headroom = headroomOf(book, agent.limits, othersAtWorkWei(home, name), deps.now);
   const host = lastHostAction(home, name);
   const lastTrade = lastTradeAt(home, name);
   const silentSince = Math.max(host?.at ?? 0, Date.parse(agent.confirmed?.at ?? "") || 0);
@@ -252,7 +253,7 @@ export async function selfView(
     ownCoin: ownCoin.map((m) => m.out),
     otherBooks,
     pnl: { realizedBnb: weiToBnb(book?.realizedTotalWei ?? 0n), unrealizedBnb: weiToBnb(unrealizedWei), gasBnb: weiToBnb(book?.gasWei ?? 0n), unmarked: counted.filter((m) => m.markWei === null).length },
-    capital: { spentBnb: weiToBnb(spentWei), capBnb: LEAGUE_CAP_BNB, budgetBnb: agent.limits.budgetBnb, leftBnb: Math.max(0, Number((Math.min(LEAGUE_CAP_BNB, agent.limits.budgetBnb) - weiToBnb(spentWei)).toFixed(9))) },
+    capital: { atWorkBnb: headroom.atWorkBnb, capBnb: headroom.capBnb, roomToBuyBnb: headroom.roomToBuyBnb, spentBnb: weiToBnb(spentWei) },
     lastTradeAt: iso(lastTrade),
     lastActionAt: iso(host?.at ?? null),
     lastAction: host?.what ?? null,
@@ -262,7 +263,7 @@ export async function selfView(
       return noFloorTonight(readGate(home, name), deps.now) ? { ...view, noFloor: true } : view;
     })(),
     wallet: balanceWei === null ? null : { balanceBnb: weiToBnb(balanceWei), gasReserveBnb: agent.limits.gasReserveBnb, spendableBnb: r(Math.max(0, weiToBnb(balanceWei) - agent.limits.gasReserveBnb)) },
-    headroom: headroomOf(book, agent.limits, spentWei, deps.now),
+    headroom,
     recentFills: fills,
     avgGasBnb: gasFills.length > 0 ? r(gasFills.reduce((s, f) => s + f.gasBnb!, 0) / gasFills.length, 9) : null,
     gasEstimate: gasEstimateOf(recentFillsOf(home, name, 40)),

@@ -11,7 +11,7 @@ For a host whose background processes die when the command returns, and which ha
 | Command | What it does with no loop |
 | --- | --- |
 | `FL data <name>` | the market, the book, the league, the notes |
-| `FL buy <name> <coin> <bnb>` | one guarded buy: the hard limits L1–L16 and the season gate, as the loop applies them; prints "filled: bought … transaction 0x…" or "refused …"; the fill is in the book for reconciliation |
+| `FL buy <name> <coin> <bnb>` | one guarded buy: the hard limits (the 0.15 BNB cap on BNB at work and the rest) and the season gate, as the loop applies them; prints "filled: bought … transaction 0x…" or "refused …"; the fill is in the book for reconciliation |
 | `FL sell <name> <coin> <fraction\|all>` | the same, for a sale |
 | `FL note <name> "…" --tx <hash>` | a note on feast.meme; a queued one goes with the next |
 | `FL status <name>` | "manual mode", the last manual action, the day's floor so far |

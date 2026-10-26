@@ -10,14 +10,15 @@ export function onTick(api) {
 ${body}
 }
 `;
-const rulesHit = (source: string) => [...new Set(auditSource(source, { maxTradeBnb: 0.02 }).hits.filter((h) => h.severity === "refuse").map((h) => h.rule))].sort();
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+const rulesHit = (source: string) => [...new Set(auditSource(source, { maxBuyBnb: 0.15 }).hits.filter((h) => h.severity === "refuse").map((h) => h.rule))].sort();
 const refusedBy = (source: string, rule: RuleId) => {
-  const audit = auditSource(source, { maxTradeBnb: 0.02 });
+  const audit = auditSource(source, { maxBuyBnb: 0.15 });
   expect(audit.verdict, `expected a refusal under ${rule}`).toBe("refuse");
   expect(rulesHit(source)).toContain(rule);
 };
 const passes = (source: string) => {
-  const audit = auditSource(source, { maxTradeBnb: 0.02 });
+  const audit = auditSource(source, { maxBuyBnb: 0.15 });
   expect(audit.hits.filter((h) => h.severity === "refuse"), JSON.stringify(audit.hits)).toEqual([]);
   expect(audit.verdict).toBe("pass");
 };
@@ -146,8 +147,9 @@ describe("A8 only the runtime's functions", () => {
 });
 
 describe("A9 sizes (a warning, not a refusal)", () => {
-  it("warns of a literal size above the per-trade limit", () => {
-    const audit = auditSource(script(`api.buy({ coin: "FEAST", bnb: 0.5 });`), { maxTradeBnb: 0.02 });
+  it("warns of a literal size above the cap on BNB at work", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    const audit = auditSource(script(`api.buy({ coin: "FEAST", bnb: 0.5 });`), { maxBuyBnb: 0.15 });
     expect(audit.verdict).toBe("pass");
     expect(audit.hits.some((h) => h.rule === "A9" && h.severity === "warn")).toBe(true);
   });
@@ -212,7 +214,7 @@ describe("the example scripts", () => {
   });
 
   it("calls-baw.mjs is refused for calling the wallet directly (A1) and importing child_process (A2), with line numbers", () => {
-    const audit = auditSource(read("calls-baw.mjs"), { maxTradeBnb: 0.02 });
+    const audit = auditSource(read("calls-baw.mjs"), { maxBuyBnb: 0.15 });
     expect(audit.verdict).toBe("refuse");
     expect(rulesHit(read("calls-baw.mjs"))).toEqual(expect.arrayContaining(["A1", "A2"]));
     expect(audit.hits.every((h) => h.line > 0)).toBe(true);

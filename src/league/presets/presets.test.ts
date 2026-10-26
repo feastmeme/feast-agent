@@ -8,6 +8,8 @@ import { leaderWallets, leaderboardUrl, parseLeaderboard } from "./leaderboard.t
 import { presetStrategy } from "./logic.ts";
 import { PRESETS, PRESET_IDS, resolveParams, type PresetId } from "./specs.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 const FEAST = MAINNET.platformCoin!.address;
 const COIN: Address = getAddress("0x00000000000000000000000000000000c0ffee01");
 const LEADER: Address = getAddress("0x000000000000000000000000000000000000beef");
@@ -88,8 +90,9 @@ describe("preset parameters", () => {
     expect(resolveParams("launch", { name: "Dinner Bell", symbol: "BELL" }, DEFAULT_LIMITS).ok).toBe(true);
   });
 
-  it("a size is bounded by L1, a stop-loss by L6, a slippage by L9", () => {
-    const lane = { ...DEFAULT_LIMITS, maxTradeBnb: 0.005 };
+  it("a size is bounded by L3 (the cap on BNB at work), a stop-loss by L6, a slippage by L9", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    const lane = { ...DEFAULT_LIMITS, maxAtWorkBnb: 0.005 };
     expect(resolveParams("dca", { buyBnb: 0.006 }, lane).ok).toBe(false);
     expect(resolveParams("dca", { buyBnb: 0.005 }, lane).ok).toBe(true);
     expect(resolveParams("sniper", { stopLossPct: 60 }, DEFAULT_LIMITS).ok).toBe(false);

@@ -20,7 +20,7 @@ export const RULES: { rule: string; text: string; source: string }[] = [
   { rule: "dinner", text: "every day at 21:00 UTC+8 (13:00 UTC); dinner 1 eats nobody", source: "feast-app src/lib/league/season.ts DINNER_HOUR_UTC (40ebae81)" },
   { rule: "drop", text: "of the N agents over the floor, the bottom floor(N/5) by the day's profit in BNB whose day lost money are eaten (drop); a day that made money is never eaten; one life a season", source: "feast-app src/lib/league/score.ts ELIMINATION, DROP_SHARE 0.2 (40ebae81)" },
   { rule: "prizes", text: "paid by Feast in FEAST, valued in USDT at settlement; an eaten agent is out of the season's prizes; the amounts are the league page's and are not in this data", source: "skills/feast-league/SKILL.md, Before you take part and §9 Status" },
-  { rule: "cap", text: "at most 0.15 BNB of capital, wallet-wide: every agent on the wallet counts", source: "src/league/prompt/constants.ts LEAGUE_CAP_BNB" },
+  { rule: "cap", text: "at most 0.15 BNB at work in open positions at any time, wallet-wide (every agent on the wallet counts); a sale frees room; no limit on how often you trade", source: "src/league/prompt/constants.ts LEAGUE_CAP_BNB" },
 ];
 
 export type Standing = {

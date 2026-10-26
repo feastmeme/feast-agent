@@ -1,5 +1,7 @@
 import { formatEther, parseEther } from "viem";
 
+import { LEAGUE_CAP_BNB } from "./prompt/constants.ts";
+
 /**
  * The hard risk limits (PLAN.md §3).
  *
@@ -9,19 +11,19 @@ import { formatEther, parseEther } from "viem";
  * empty value, NaN or Infinity is refused, never read as "no limit". Two more
  * limits are not configurable at all and live in the guard: L15 (Feast coins and
  * our own call targets only) and L16 (the wallet's state and the stop file).
+ *
+ * The owner's ruling for league-v5.1.4: the league's cap is capital at
+ * work, the cost of open positions at any moment, at most 0.15 BNB (L3, which took
+ * in L4); a sale frees that position's cost in proportion. There is no limit on
+ * the size of one trade (L1), on the BNB bought in 24 h (L2) or on the trades in
+ * an hour (L12) any more: those ids are retired, never reused.
  */
 
-export type LimitId = "L1" | "L2" | "L3" | "L4" | "L5" | "L6" | "L7" | "L8" | "L9" | "L10" | "L11" | "L12" | "L13" | "L14" | "L15" | "L16";
+export type LimitId = "L3" | "L5" | "L6" | "L7" | "L8" | "L9" | "L10" | "L11" | "L13" | "L14" | "L15" | "L16";
 
 export type Limits = {
-  /** L1: the size of one trade, BNB. */
-  maxTradeBnb: number;
-  /** L2: BNB spent on buys in any 24 hours. */
-  maxDailySpendBnb: number;
-  /** L3: the budget, BNB the league may ever put in from this wallet (gross, every agent). */
-  budgetBnb: number;
-  /** L4: open exposure, the cost basis of open positions, BNB. */
-  maxExposureBnb: number;
+  /** L3: the league cap, BNB at work: the cost of open positions (fee included), every agent on this wallet. */
+  maxAtWorkBnb: number;
   /** L5: open positions. */
   maxOpenPositions: number;
   /** L6: the backstop stop-loss, percent below entry. */
@@ -36,8 +38,6 @@ export type Limits = {
   maxPriceImpactPct: number;
   /** L11: BNB never spent, kept for gas. */
   gasReserveBnb: number;
-  /** L12: trades per hour. */
-  maxTradesPerHour: number;
   /** L13: seconds between two entries into one coin. */
   coinCooldownSeconds: number;
   /** L14: consecutive failures before the agent pauses. */
@@ -62,25 +62,61 @@ export type LimitSpec = {
 };
 
 export const LIMIT_SPECS: readonly LimitSpec[] = [
-  { id: "L1", key: "maxTradeBnb", label: "Size of one trade", default: 0.02, min: 0.001, max: 0.25, integer: false, looser: "higher", unit: "BNB", onHit: "that trade is refused" },
-  { id: "L2", key: "maxDailySpendBnb", label: "BNB spent on buys in any 24 h", default: 0.1, min: "maxTradeBnb", max: 1, integer: false, looser: "higher", unit: "BNB", onHit: "buys are refused until the window frees room" },
-  { id: "L3", key: "budgetBnb", label: "Budget: BNB the league may ever put in from this wallet", default: 0.25, min: "maxDailySpendBnb", max: 10, integer: false, looser: "higher", unit: "BNB", onHit: "buys are refused; you are told the budget is used" },
-  { id: "L4", key: "maxExposureBnb", label: "Open exposure (cost of open positions)", default: 0.1, min: "maxTradeBnb", max: 2, integer: false, looser: "higher", unit: "BNB", onHit: "buys are refused" },
+  { id: "L3", key: "maxAtWorkBnb", label: "League cap: BNB at work in open positions (their cost, every agent on this wallet)", default: LEAGUE_CAP_BNB, min: 0.001, max: LEAGUE_CAP_BNB, integer: false, looser: "higher", unit: "BNB", onHit: "buys are refused until a sale frees room" },
   { id: "L5", key: "maxOpenPositions", label: "Open positions", default: 5, min: 1, max: 20, integer: true, looser: "higher", unit: "", onHit: "buys into new coins are refused" },
   { id: "L6", key: "backstopStopLossPct", label: "Backstop stop-loss per position", default: 50, min: 5, max: 90, integer: false, looser: "higher", unit: "%", onHit: "the runtime sells the position, whatever the strategy says (never the agent's own launch)" },
   { id: "L7", key: "maxDailyLossBnb", label: "Realized loss in any 24 h", default: 0.05, min: 0.001, max: 0.5, integer: false, looser: "higher", unit: "BNB", onHit: "entries pause until the loss leaves the 24 h window" },
-  { id: "L8", key: "maxDrawdownBnb", label: "Drawdown from the agent's peak equity", default: 0.1, min: 0.001, max: "budgetBnb", integer: false, looser: "higher", unit: "BNB", onHit: "the agent halts and writes its stop file" },
+  { id: "L8", key: "maxDrawdownBnb", label: "Drawdown from the agent's peak equity", default: 0.1, min: 0.001, max: LEAGUE_CAP_BNB, integer: false, looser: "higher", unit: "BNB", onHit: "the agent halts and writes its stop file" },
   { id: "L9", key: "maxSlippagePct", label: "Slippage bound on a trade", default: 10, min: 0.1, max: 20, integer: false, looser: "higher", unit: "%", onHit: "a trade asking for more is refused" },
   { id: "L10", key: "maxPriceImpactPct", label: "Price impact of a buy (quote against spot)", default: 8, min: 0.5, max: 25, integer: false, looser: "higher", unit: "%", onHit: "that buy is refused" },
   { id: "L11", key: "gasReserveBnb", label: "Gas reserve: BNB never spent", default: 0.003, min: 0.001, max: 0.1, integer: false, looser: "lower", unit: "BNB", onHit: "a buy that would dip into it is refused" },
-  { id: "L12", key: "maxTradesPerHour", label: "Trades per hour", default: 12, min: 1, max: 60, integer: true, looser: "higher", unit: "", onHit: "the trade is refused" },
   { id: "L13", key: "coinCooldownSeconds", label: "Cooldown between entries into one coin", default: 60, min: 15, max: 3600, integer: true, looser: "lower", unit: "s", onHit: "the buy is refused" },
   { id: "L14", key: "maxConsecutiveFailures", label: "Consecutive failures", default: 3, min: 2, max: 10, integer: true, looser: "higher", unit: "", onHit: "the agent pauses and tells you (in warm-up: two, then it stops)" },
 ];
 
+/**
+ * The limits a runtime before league-v5.1.4 wrote into `agent.json`, and what became of each (the owner's ruling,
+ * for league-v5.1.4). Given again by a user they are refused with this line; read from disk they are folded by `migrateLimits`.
+ */
+export const RETIRED_LIMITS: Readonly<Record<string, string>> = {
+  maxTradeBnb: "L1 (the size of one trade) was removed: the league has no per-trade, hourly or daily volume limit",
+  maxDailySpendBnb: "L2 (BNB bought in 24 h) was removed: the league has no per-trade, hourly or daily volume limit",
+  maxTradesPerHour: "L12 (trades per hour) was removed: the league has no per-trade, hourly or daily volume limit",
+  budgetBnb: `the lifetime budget is now L3 maxAtWorkBnb: at most ${LEAGUE_CAP_BNB} BNB at work in open positions, and a sale frees room`,
+  maxExposureBnb: `L4 is now L3 maxAtWorkBnb: at most ${LEAGUE_CAP_BNB} BNB at work in open positions, and a sale frees room`,
+};
+
+/** The old default of L4 (open exposure): a stored 0.1 was never the user's own choice, so it does not tighten the cap. */
+const OLD_EXPOSURE_DEFAULT = 0.1;
+
+/**
+ * Limits as an earlier runtime stored them, in today's shape: L1, L2 and L12 dropped; the old budget (L3) and
+ * exposure (L4) folded into the at-work cap, never above LEAGUE_CAP_BNB and never looser than a lower value the user
+ * chose; L8 kept under its new ceiling. Limits already in today's shape come back as they are, in LIMIT_SPECS' order.
+ */
+export function migrateLimits<T>(stored: T): T {
+  if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return stored;
+  const given = stored as Record<string, unknown>;
+  if (!Object.keys(RETIRED_LIMITS).some((key) => key in given)) return stored;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+  const merged: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(given)) if (!(key in RETIRED_LIMITS)) merged[key] = value;
+  if (!("maxAtWorkBnb" in merged)) {
+    const exposure = num(given.maxExposureBnb);
+    const tighter = [LEAGUE_CAP_BNB, num(given.budgetBnb), exposure === OLD_EXPOSURE_DEFAULT ? null : exposure].filter((v): v is number => v !== null);
+    merged.maxAtWorkBnb = Math.min(...tighter);
+  }
+  const drawdown = num(merged.maxDrawdownBnb);
+  if (drawdown !== null && drawdown > LEAGUE_CAP_BNB) merged.maxDrawdownBnb = LEAGUE_CAP_BNB;
+  const ordered: Record<string, unknown> = {};
+  for (const spec of LIMIT_SPECS) if (spec.key in merged) ordered[spec.key] = merged[spec.key];
+  for (const [key, value] of Object.entries(merged)) if (!(key in ordered)) ordered[key] = value;
+  return ordered as T;
+}
+
 export const DEFAULT_LIMITS: Limits = Object.fromEntries(LIMIT_SPECS.map((spec) => [spec.key, spec.default])) as Limits;
 
-/** The smallest trade the league makes, and the floor of L1. */
+/** The smallest trade the league makes (a buy below it is refused; there is no largest but the cap, L3). */
 export const MIN_TRADE_BNB = 0.001;
 /** The warm-up tier: a new script's first five trades … */
 export const WARMUP_TRADES = 5;
@@ -111,7 +147,8 @@ export function resolveLimits(input: unknown): { ok: true; limits: Limits } | { 
   const errors: string[] = [];
   const known = new Set<string>(LIMIT_SPECS.map((spec) => spec.key));
   for (const key of Object.keys(given)) {
-    if (!known.has(key)) errors.push(`unknown limit "${key}"; the limits are ${[...known].join(", ")}`);
+    if (key in RETIRED_LIMITS) errors.push(`${key}: ${RETIRED_LIMITS[key]}`);
+    else if (!known.has(key)) errors.push(`unknown limit "${key}"; the limits are ${[...known].join(", ")}`);
   }
   const values = { ...DEFAULT_LIMITS };
   for (const spec of LIMIT_SPECS) {

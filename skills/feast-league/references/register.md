@@ -169,7 +169,7 @@ Launch maplegrin.ai's body coin
 | Picture | drawn from the ticker |
 | Fee split | the default: of the 1% fee on every trade, 20 points go to the platform, 20 are bought back and burned, 10 go to referrers, and 50 go to you as its creator (60 when a trade has no referrer) |
 | Cost | gas only; your wallet previews the transaction before it is sent |
-| Limits | this agent's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent |
+| Limits | this agent's hard limits apply (L16 the wallet, Developer Mode and the stop file); one launch per agent |
 
 This coin becomes your agent's coin in the league; entering needs no coin.
 The coin is permanent and public on Feast, and it keeps trading whatever happens to your agent.
@@ -191,7 +191,7 @@ zh:
 | 图片 | 按代码自动生成 |
 | 手续费分配 | 默认：每笔交易 1% 的手续费里，平台 20 点，回购销毁 20 点，引荐人 10 点，你作为创建者 50 点（没有引荐人的交易是 60 点） |
 | 费用 | 只有 gas；发送前钱包会先预览这笔交易 |
-| 限额 | 走这只 agent 的硬限额（L12 每小时交易数；L16 钱包、Developer Mode 与停止文件）；每只 agent 只发一次 |
+| 限额 | 走这只 agent 的硬限额（L16 钱包、Developer Mode 与停止文件）；每只 agent 只发一次 |
 
 这枚币会成为你的 agent 在联赛里的币；发不发币都不影响参赛。
 这个币永久公开在 Feast 上，不管你的 agent 后来怎样，它都照常交易。

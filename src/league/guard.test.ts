@@ -1,9 +1,12 @@
 import type { Address } from "viem";
 import { describe, expect, it } from "vitest";
 
+import { bookView, emptyBook as emptyAgentBook, recordBuy, recordSell, type Book } from "./book.ts";
 import { backstopExits, type PositionMark } from "./exits.ts";
 import { guard, warmupActive, warmupAfter, type BookView, type GuardInput, type Intent, type WarmupState } from "./guard.ts";
 import { DEFAULT_LIMITS, bnbToWei } from "./limits.ts";
+
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
 
 const COIN: Address = "0x00000000000000000000000000000000c0ffee01";
 const NOW = 1_800_000_000_000;
@@ -15,7 +18,6 @@ const emptyBook: BookView = {
   exposureWei: 0n,
   spent24hWei: 0n,
   realizedLoss24hWei: 0n,
-  trades1h: 0,
   lastEntryAt: null,
   paused: null,
   drawdownWei: 0n,
@@ -37,8 +39,7 @@ function input(intent: Intent, over: Partial<GuardInput> = {}, book: Partial<Boo
     stopped: false,
     coinIsFeast: true,
     book: { ...emptyBook, ...book },
-    walletSpentWei: 0n,
-    claimFundsWei: 0n,
+    othersAtWorkWei: 0n,
     warmup: null,
     ...over,
   };
@@ -81,18 +82,19 @@ describe("each limit refuses a buy that breaks it, at its edge", () => {
 
   it("L11 a buy paid in the quote token spends no BNB: only the reserve itself must be there", () => {
     const thin = { connected: true, devMode: true, quotaLeftUsd: 1_000, balanceWei: wei(0.003) };
-    expect(refusedBy(input(buy(0.02, { payIn: "quote", fundedBy: "claim" }), { wallet: thin, claimFundsWei: wei(1) }))).toBe("ok");
+    expect(refusedBy(input(buy(0.02, { payIn: "quote", fundedBy: "claim" }), { wallet: thin }))).toBe("ok");
     expect(refusedBy(input(buy(0.02), { wallet: thin }))).toBe("L11");
     expect(refusedBy(input(buy(0.02, { payIn: "quote" }), { wallet: { ...thin, balanceWei: wei(0.0029) } }))).toBe("L11");
   });
 
-  it("L1 the size of one trade, and the minimum trade", () => {
-    expect(refusedBy(input(buy(0.0201)))).toBe("L1");
-    expect(refusedBy(input(buy(0.02)))).toBe("ok");
-    expect(refusedBy(input(buy(0.0009)))).toBe("L1");
-    expect(refusedBy(input(buy(0.006), { limits: { ...DEFAULT_LIMITS, maxTradeBnb: 0.005 } }))).toBe("L1");
-    expect(refusedBy(input(buy(Number.NaN)))).toBe("L1");
-    expect(refusedBy(input(buy(0.01, { bnb: undefined })))).toBe("L1");
+  it("no limit on the size of one trade (L1 is gone), but the smallest trade stays", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(refusedBy(input(buy(0.0201)))).toBe("ok");
+    expect(refusedBy(input(buy(0.05)))).toBe("ok");
+    expect(refusedBy(input(buy(0.15)))).toBe("ok");
+    expect(refusedBy(input(buy(0.0009)))).toBe("size");
+    expect(refusedBy(input(buy(Number.NaN)))).toBe("size");
+    expect(refusedBy(input(buy(0.01, { bnb: undefined })))).toBe("size");
   });
 
   it("L9 slippage", () => {
@@ -112,36 +114,32 @@ describe("each limit refuses a buy that breaks it, at its edge", () => {
     expect(refusedBy(input(buy(0.01), {}, { openPositions: 4 }))).toBe("ok");
   });
 
-  it("L4 open exposure", () => {
-    expect(refusedBy(input(buy(0.02), {}, { exposureWei: wei(0.0801) }))).toBe("L4");
-    expect(refusedBy(input(buy(0.02), {}, { exposureWei: wei(0.08) }))).toBe("ok");
+  it("L3 the cap on BNB at work: the cost of open positions, at most 0.15 BNB", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(refusedBy(input(buy(0.02), {}, { exposureWei: wei(0.1301) }))).toBe("L3");
+    expect(refusedBy(input(buy(0.02), {}, { exposureWei: wei(0.13) }))).toBe("ok");
+    // An agent may set its own cap lower.
+    expect(refusedBy(input(buy(0.02), { limits: { ...DEFAULT_LIMITS, maxAtWorkBnb: 0.05 } }, { exposureWei: wei(0.0301) }))).toBe("L3");
+    expect(refusedBy(input(buy(0.02), { limits: { ...DEFAULT_LIMITS, maxAtWorkBnb: 0.05 } }, { exposureWei: wei(0.03) }))).toBe("ok");
   });
 
-  it("L2 spend in any 24 h, buybacks from claims included", () => {
-    expect(refusedBy(input(buy(0.02), {}, { spent24hWei: wei(0.0801) }))).toBe("L2");
-    expect(refusedBy(input(buy(0.02), {}, { spent24hWei: wei(0.08) }))).toBe("ok");
-    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), {}, { spent24hWei: wei(0.0801) }))).toBe("L2");
+  it("L3 is wallet-wide: the open positions of every other agent on the wallet count", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(refusedBy(input(buy(0.02), { othersAtWorkWei: wei(0.1001) }, { exposureWei: wei(0.03) }))).toBe("L3");
+    expect(refusedBy(input(buy(0.02), { othersAtWorkWei: wei(0.1) }, { exposureWei: wei(0.03) }))).toBe("ok");
   });
 
-  it("L3 the budget, across the wallet; a buyback paid from claims does not draw on it", () => {
-    expect(refusedBy(input(buy(0.02), { walletSpentWei: wei(0.2301) }))).toBe("L3");
-    expect(refusedBy(input(buy(0.02), { walletSpentWei: wei(0.23) }))).toBe("ok");
-    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), { walletSpentWei: wei(0.25), claimFundsWei: wei(0.02) }))).toBe("ok");
+  it("no limit on BNB bought in 24 h (L2 is gone): only what is at work counts", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(refusedBy(input(buy(0.02), {}, { spent24hWei: wei(5) }))).toBe("ok");
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), {}, { spent24hWei: wei(5) }))).toBe("ok");
   });
 
-  it("L3 cannot be dodged by calling a buy claim-funded: only claimed proceeds actually held count, and never for a script", () => {
-    // No claimed proceeds held: the label buys nothing.
-    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), { walletSpentWei: wei(0.25) }))).toBe("L3");
-    // More than the claimed proceeds held: counted against the budget.
-    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), { walletSpentWei: wei(0.25), claimFundsWei: wei(0.0199) }))).toBe("L3");
-    // A script's intent never carries the exemption, whatever it says.
-    expect(refusedBy(input(buy(0.02, { fundedBy: "claim", source: "script" }), { walletSpentWei: wei(0.25), claimFundsWei: wei(1) }))).toBe("L3");
-    expect(refusedBy(input(buy(0.02, { fundedBy: "claim", source: "manual" }), { walletSpentWei: wei(0.25), claimFundsWei: wei(1) }))).toBe("L3");
-  });
-
-  it("L12 trades per hour", () => {
-    expect(refusedBy(input(buy(0.01), {}, { trades1h: 12 }))).toBe("L12");
-    expect(refusedBy(input(buy(0.01), {}, { trades1h: 11 }))).toBe("ok");
+  it("a buyback paid from claims is at work like any other buy: the label exempts nothing from L3", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim" }), {}, { exposureWei: wei(0.1301) }))).toBe("L3");
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim", source: "script" }), {}, { exposureWei: wei(0.1301) }))).toBe("L3");
+    expect(refusedBy(input(buy(0.02, { fundedBy: "claim", source: "manual" }), {}, { exposureWei: wei(0.1301) }))).toBe("L3");
   });
 
   it("L13 the per-coin cooldown", () => {
@@ -169,27 +167,32 @@ describe("each limit refuses a buy that breaks it, at its edge", () => {
 });
 
 describe("the evaluation order (PLAN.md §3): the first refusal wins", () => {
-  it("L16 before L15 before L11 before L1", () => {
+  it("L16 before L15 before L11 before the smallest trade", () => {
     const broke = { connected: false, devMode: true, quotaLeftUsd: 1_000, balanceWei: 0n };
     expect(refusedBy(input(buy(0.5), { wallet: broke, coinIsFeast: false }))).toBe("L16");
     expect(refusedBy(input(buy(0.5), { coinIsFeast: false, wallet: { ...broke, connected: true } }))).toBe("L15");
     expect(refusedBy(input(buy(0.5), { wallet: { ...broke, connected: true } }))).toBe("L11");
   });
 
-  it("L1 before L9 before L5 before L4 before L2 before L3", () => {
-    const all: Partial<BookView> = { openPositions: 5, exposureWei: wei(0.1), spent24hWei: wei(0.1) };
-    expect(refusedBy(input(buy(0.03, { slippagePct: 50 }), { walletSpentWei: wei(0.25) }, all))).toBe("L1");
-    expect(refusedBy(input(buy(0.01, { slippagePct: 50 }), { walletSpentWei: wei(0.25) }, all))).toBe("L9");
-    expect(refusedBy(input(buy(0.01), { walletSpentWei: wei(0.25) }, all))).toBe("L5");
-    expect(refusedBy(input(buy(0.01), { walletSpentWei: wei(0.25) }, { ...all, openPositions: 0 }))).toBe("L4");
-    expect(refusedBy(input(buy(0.01), { walletSpentWei: wei(0.25) }, { spent24hWei: wei(0.1) }))).toBe("L2");
-    expect(refusedBy(input(buy(0.01), { walletSpentWei: wei(0.25) }))).toBe("L3");
+  it("the smallest trade before L9 before L5 before L3 before L13", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    const all: Partial<BookView> = { openPositions: 5, exposureWei: wei(0.15), lastEntryAt: NOW };
+    expect(refusedBy(input(buy(0.0005, { slippagePct: 50 }), {}, all))).toBe("size");
+    expect(refusedBy(input(buy(0.01, { slippagePct: 50 }), {}, all))).toBe("L9");
+    expect(refusedBy(input(buy(0.01), {}, all))).toBe("L5");
+    expect(refusedBy(input(buy(0.01), {}, { ...all, openPositions: 0 }))).toBe("L3");
+    expect(refusedBy(input(buy(0.01), {}, { lastEntryAt: NOW }))).toBe("L13");
   });
 
   it("names the limit, its value and the figure that broke it", () => {
-    const v = guard(input(buy(0.006), { limits: { ...DEFAULT_LIMITS, maxTradeBnb: 0.005 } }));
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    const v = guard(input(buy(0.006), { limits: { ...DEFAULT_LIMITS, maxAtWorkBnb: 0.005 } }));
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.message).toMatch(/0\.006.*0\.005|0\.005.*0\.006/);
+    if (!v.ok) {
+      expect(v.limit).toBe("L3");
+      expect(v.message).toMatch(/0\.006.*0\.005|0\.005.*0\.006/);
+      expect(v.message).toContain("a sale frees room");
+    }
   });
 });
 
@@ -200,7 +203,6 @@ describe("exits are never blocked by entry limits", () => {
     exposureWei: wei(5),
     spent24hWei: wei(5),
     realizedLoss24hWei: wei(5),
-    trades1h: 60,
     lastEntryAt: NOW,
     paused: "3 consecutive failures",
     drawdownWei: wei(5),
@@ -208,7 +210,7 @@ describe("exits are never blocked by entry limits", () => {
 
   it("a sale passes with every entry limit spent and no BNB above the reserve", () => {
     const poor = { connected: true, devMode: true, quotaLeftUsd: 1_000, balanceWei: wei(0.001) };
-    expect(refusedBy(input(sell(), { wallet: poor, walletSpentWei: wei(10) }, everythingSpent))).toBe("ok");
+    expect(refusedBy(input(sell(), { wallet: poor, othersAtWorkWei: wei(10) }, everythingSpent))).toBe("ok");
   });
 
   it("a sale still needs the wallet, Developer Mode, no stop file, a Feast coin and a sane slippage", () => {
@@ -227,17 +229,19 @@ describe("exits are never blocked by entry limits", () => {
     expect(refusedBy(input(arm, { coinIsFeast: false }))).toBe("L15");
   });
 
-  it("a launch counts against trades per hour", () => {
+  it("a launch counts against no trade count (L12 is gone): only the wallet and the stop file", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
     const launch: Intent = { id: "l", kind: "launch", reason: "launch", source: "preset", createdAt: NOW, launch: { name: "A", symbol: "A", quote: "WBNB" } };
     expect(refusedBy(input(launch))).toBe("ok");
-    expect(refusedBy(input(launch, {}, { trades1h: 12 }))).toBe("L12");
+    expect(refusedBy(input(launch, {}, everythingSpent))).toBe("ok");
     expect(refusedBy(input(launch, { stopped: true }))).toBe("L16");
   });
 });
 
 describe("refusals outside warm-up do not halt (except L8)", () => {
-  it("L1 refuses but does not halt", () => {
-    const v = guard(input(buy(0.03)));
+  it("L3 refuses but does not halt", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    const v = guard(input(buy(0.03), {}, { exposureWei: wei(0.14) }));
     expect(v.ok || v.halt).toBe(false);
   });
 });
@@ -268,13 +272,14 @@ describe("the warm-up tier (PLAN.md §5.4)", () => {
   });
 
   it("any limit hit in warm-up halts the script", () => {
-    const v = guard(input(buy(0.03, { source: "script" }), { warmup: fresh }));
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    const v = guard(input(buy(0.03, { source: "script" }), { warmup: fresh }, { exposureWei: wei(0.15) }));
     expect(v.ok).toBe(false);
     if (!v.ok) {
-      expect(v.limit).toBe("L1");
+      expect(v.limit).toBe("L3");
       expect(v.halt).toBe(true);
     }
-    const w = guard(input(buy(0.002, { source: "script" }), { warmup: fresh }, { trades1h: 12 }));
+    const w = guard(input(buy(0.002, { source: "script" }), { warmup: fresh }, { lastEntryAt: NOW }));
     expect(w.ok || w.halt).toBe(true);
   });
 
@@ -337,5 +342,57 @@ describe("the backstop stop-loss (L6)", () => {
 
   it("follows a tightened limit", () => {
     expect(backstopExits([pos(0.008)], { ...DEFAULT_LIMITS, backstopStopLossPct: 20 }, NOW)).toHaveLength(1);
+  });
+});
+
+describe("the cap on capital at work, with a real book (league-v5.1.4)", () => {
+  // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+  const coin = (n: number) => `0x00000000000000000000000000000000c0ffee${String(n).padStart(2, "0")}` as Address;
+  const bought = (book: Book, c: Address, bnb: number, at: number) =>
+    recordBuy(book, { coin: c, symbol: "C", quote: COIN, coinsOut: wei(bnb) * 1_000n, bnbInWei: wei(bnb), gasWei: 0n, at, fundedBy: "wallet", ownLaunch: false, source: "manual" });
+  const sold = (book: Book, c: Address, share: bigint, at: number) => {
+    const held = book.positions[c.toLowerCase()]!;
+    return recordSell(book, { coin: c, coinsIn: (held.coins * share) / 100n, bnbOutWei: (held.costWei * share) / 100n, gasWei: 0n, at });
+  };
+  const verdictOn = (book: Book, c: Address, bnb: number, at: number) => guard(input(buy(bnb, { coin: c }), { now: at }, bookView(book, c, at)));
+
+  it("a sale frees room, and the next buy is accepted", () => {
+    let book = bought(emptyAgentBook(), coin(1), 0.15, NOW);
+    const full = verdictOn(book, coin(2), 0.01, NOW + 120_000);
+    expect(full.ok).toBe(false);
+    if (!full.ok) expect(full.limit).toBe("L3");
+    book = sold(book, coin(1), 50n, NOW + 180_000);
+    expect(verdictOn(book, coin(2), 0.05, NOW + 240_000).ok).toBe(true);
+    expect(verdictOn(book, coin(2), 0.0751, NOW + 240_000).ok).toBe(false);
+  });
+
+  it("a buy that pushes the cost of open positions over 0.15 BNB is refused", () => {
+    const book = bought(bought(emptyAgentBook(), coin(1), 0.07, NOW), coin(2), 0.05, NOW + 1_000);
+    const over = verdictOn(book, coin(3), 0.0301, NOW + 120_000);
+    expect(over.ok).toBe(false);
+    if (!over.ok) {
+      expect(over.limit).toBe("L3");
+      expect(over.message).toMatch(/0\.12 BNB is at work/);
+    }
+    expect(verdictOn(book, coin(3), 0.03, NOW + 120_000).ok).toBe(true);
+  });
+
+  it("a single 0.05 BNB buy, and 20 trades within an hour, are accepted while under the cap", () => {
+    expect(verdictOn(emptyAgentBook(), coin(1), 0.05, NOW).ok).toBe(true);
+    let book = emptyAgentBook();
+    let trades = 0;
+    for (let i = 0; i < 10; i += 1) {
+      // Ten round trips across five coins, every entry past L13's cooldown: twenty trades in under an hour.
+      const c = coin(i % 5);
+      const at = NOW + i * 5 * 60_000;
+      const v = verdictOn(book, c, 0.01, at);
+      expect(v.ok, `buy ${i}`).toBe(true);
+      book = bought(book, c, 0.01, at);
+      book = sold(book, c, 100n, at + 30_000);
+      trades += 2;
+    }
+    expect(trades).toBe(20);
+    expect(book.trades.filter((t) => t > NOW + 50 * 60_000 - 60 * 60_000).length).toBe(20);
+    expect(verdictOn(book, coin(9), 0.05, NOW + 50 * 60_000).ok).toBe(true);
   });
 });

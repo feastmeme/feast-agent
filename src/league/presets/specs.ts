@@ -5,13 +5,13 @@ import type { Limits } from "../limits.ts";
 
 /**
  * The six presets' parameters (PLAN.md §4; `steady`, task 975): every default and
- * range, and the hard limit a parameter is bounded by — a size by L1, a
+ * range, and the hard limit a parameter is bounded by — a size by L3 (the cap on BNB at work), a
  * stop-loss by L6, a slippage by L9, a position count by L5.
  */
 
 export type PresetId = "sniper" | "momentum" | "copy" | "launch" | "dca" | "steady";
 
-type Bound = number | "L1" | "L5" | "L6" | "L9";
+type Bound = number | "L3" | "L5" | "L6" | "L9";
 
 export type ParamSpec =
   | { key: string; kind: "number"; default: number; min: number; max: Bound; integer?: boolean; unit?: string; meaning: string }
@@ -47,7 +47,7 @@ export const PRESETS: Record<PresetId, PresetSpec> = {
     tickSeconds: 15,
     events: ["coin.created", "trade"],
     params: [
-      { key: "buyBnb", kind: "number", default: 0.005, min: 0.001, max: "L1", unit: "BNB", meaning: "size of each snipe" },
+      { key: "buyBnb", kind: "number", default: 0.005, min: 0.001, max: "L3", unit: "BNB", meaning: "size of each snipe" },
       { key: "maxAgeSeconds", kind: "number", default: 90, min: 10, max: 900, integer: true, unit: "s", meaning: "only coins launched less than this long ago" },
       { key: "quotes", kind: "quotes", default: "all", meaning: "which pairs to snipe: all, or a list such as WBNB,BNCB" },
       { key: "requireMetadata", kind: "boolean", default: true, meaning: "skip coins launched without metadata" },
@@ -73,7 +73,7 @@ export const PRESETS: Record<PresetId, PresetSpec> = {
       { key: "minPriceChangePct", kind: "number", default: 10, min: 0, max: 500, unit: "%", meaning: "price rise in the window" },
       { key: "minAgeMinutes", kind: "number", default: 10, min: 0, max: 10080, integer: true, unit: "min", meaning: "skip a coin's first minutes" },
       { key: "maxAgeHours", kind: "number", default: 72, min: 1, max: 720, integer: true, unit: "h", meaning: "skip coins older than this" },
-      { key: "buyBnb", kind: "number", default: 0.01, min: 0.001, max: "L1", unit: "BNB", meaning: "size of each entry" },
+      { key: "buyBnb", kind: "number", default: 0.01, min: 0.001, max: "L3", unit: "BNB", meaning: "size of each entry" },
       { key: "maxPositions", kind: "number", default: 3, min: 1, max: "L5", integer: true, meaning: "momentum positions at once" },
       { key: "exhaustionWindowMinutes", kind: "number", default: 5, min: 1, max: 60, integer: true, unit: "min", meaning: "the exhaustion window" },
       { key: "exhaustionRatio", kind: "number", default: 0.3, min: 0.05, max: 1, meaning: "exit when the volume rate falls below this × the entry rate" },
@@ -95,8 +95,8 @@ export const PRESETS: Record<PresetId, PresetSpec> = {
       { key: "topN", kind: "number", default: 5, min: 1, max: 20, integer: true, meaning: "how many leaders to follow (leaderboard source)" },
       { key: "delaySeconds", kind: "number", default: 5, min: 0, max: 600, integer: true, unit: "s", meaning: "wait before copying" },
       { key: "sizeMode", kind: "enum", default: "fixed", options: ["fixed", "proportional"], meaning: "fixed size, or a share of the leader's" },
-      { key: "buyBnb", kind: "number", default: 0.005, min: 0.001, max: "L1", unit: "BNB", meaning: "fixed size" },
-      { key: "proportionalPct", kind: "number", default: 10, min: 1, max: 100, unit: "%", meaning: "share of the leader's size, capped by the per-trade limit" },
+      { key: "buyBnb", kind: "number", default: 0.005, min: 0.001, max: "L3", unit: "BNB", meaning: "fixed size" },
+      { key: "proportionalPct", kind: "number", default: 10, min: 1, max: 100, unit: "%", meaning: "share of the leader's size, capped by the cap on BNB at work (L3)" },
       { key: "minLeaderBuyBnb", kind: "number", default: 0.01, min: 0, max: 10, unit: "BNB", meaning: "ignore leader buys smaller than this" },
       { key: "maxChasePct", kind: "number", default: 10, min: 0, max: 100, unit: "%", meaning: "skip if the price rose more than this since the leader's fill" },
       { key: "copySells", kind: "boolean", default: true, meaning: "sell a copied coin when its leader sells it" },
@@ -119,7 +119,7 @@ export const PRESETS: Record<PresetId, PresetSpec> = {
       { key: "quote", kind: "enum", default: "WBNB", options: QUOTE_SYMBOLS, meaning: "the pair" },
       { key: "burnPoints", kind: "number", default: 20, min: 0, max: 30, integer: true, meaning: "points of the 1% fee bought back and burned" },
       { key: "referrerPoints", kind: "number", default: 10, min: 0, max: 30, integer: true, meaning: "points of the 1% fee for referrers" },
-      { key: "openingBuyBnb", kind: "number", default: 0.005, min: 0, max: "L1", unit: "BNB", meaning: "bought right after the launch, and held" },
+      { key: "openingBuyBnb", kind: "number", default: 0.005, min: 0, max: "L3", unit: "BNB", meaning: "bought right after the launch, and held" },
       { key: "buybackEveryMinutes", kind: "number", default: 60, min: 15, max: 1440, integer: true, unit: "min", meaning: "how often to claim and buy back" },
       { key: "minClaimBnb", kind: "number", default: 0.0005, min: 0, max: 1, unit: "BNB", meaning: "skip smaller claims (gas)" },
       { key: "buybackPct", kind: "number", default: 100, min: 0, max: 100, unit: "%", meaning: "share of each claim spent on the buyback" },
@@ -136,9 +136,9 @@ export const PRESETS: Record<PresetId, PresetSpec> = {
       { key: "topN", kind: "number", default: 3, min: 1, max: 10, integer: true, meaning: "how many of the most-held coins (topHolders)" },
       { key: "buyOnStart", kind: "boolean", default: true, meaning: "first buy as soon as it starts" },
       { key: "everyMinutes", kind: "number", default: 1440, min: 60, max: 10080, integer: true, unit: "min", meaning: "how often to buy" },
-      { key: "buyBnb", kind: "number", default: 0.005, min: 0.001, max: "L1", unit: "BNB", meaning: "size of each scheduled buy" },
+      { key: "buyBnb", kind: "number", default: 0.005, min: 0.001, max: "L3", unit: "BNB", meaning: "size of each scheduled buy" },
       { key: "dipPct", kind: "number", default: 15, min: 0, max: 80, unit: "%", meaning: "extra buy this far below the 24 h high (0: none)" },
-      { key: "dipBuyBnb", kind: "number", default: 0.005, min: 0.001, max: "L1", unit: "BNB", meaning: "size of a dip buy" },
+      { key: "dipBuyBnb", kind: "number", default: 0.005, min: 0.001, max: "L3", unit: "BNB", meaning: "size of a dip buy" },
       { key: "maxBuysPerDay", kind: "number", default: 2, min: 1, max: 24, integer: true, meaning: "at most this many buys a day" },
       { key: "takeProfitPct", kind: "optional-number", default: null, min: 10, max: 1000, unit: "%", meaning: "sell all this far above entry (off by default: DCA holds)" },
       { key: "slippagePct", kind: "number", default: 1, min: 0.1, max: "L9", unit: "%", meaning: "slippage bound" },
@@ -152,7 +152,7 @@ export const PRESETS: Record<PresetId, PresetSpec> = {
     events: [],
     keepsExits: true,
     params: [
-      { key: "buyBnb", kind: "number", default: 0.006, min: 0.001, max: "L1", unit: "BNB", meaning: "size of each buy" },
+      { key: "buyBnb", kind: "number", default: 0.006, min: 0.001, max: "L3", unit: "BNB", meaning: "size of each buy" },
       { key: "topN", kind: "number", default: 5, min: 1, max: 20, integer: true, meaning: "choose among the N busiest coins by 24 h volume" },
       { key: "minVolumeBnb", kind: "number", default: 0.5, min: 0.01, max: 100, unit: "BNB", meaning: "a coin's 24 h volume at least this (none does: the busiest with any)" },
       { key: "minAgeMinutes", kind: "number", default: 60, min: 0, max: 10080, integer: true, unit: "min", meaning: "skip a coin's first minutes" },
@@ -174,7 +174,7 @@ export const PRESET_IDS = Object.keys(PRESETS) as PresetId[];
 
 function boundOf(bound: Bound, limits: Limits): number {
   if (typeof bound === "number") return bound;
-  return { L1: limits.maxTradeBnb, L5: limits.maxOpenPositions, L6: limits.backstopStopLossPct, L9: limits.maxSlippagePct }[bound];
+  return { L3: limits.maxAtWorkBnb, L5: limits.maxOpenPositions, L6: limits.backstopStopLossPct, L9: limits.maxSlippagePct }[bound];
 }
 
 function parseNumber(raw: unknown): number | null {
@@ -272,7 +272,6 @@ export function resolveParams(preset: PresetId, given: Record<string, unknown>, 
     const buy = params.buyBnb as number;
     const entries = params.maxEntriesPerDay as number;
     const bnb = (x: number) => Number(x.toFixed(9));
-    if (entries * buy > limits.maxDailySpendBnb) errors.push(`maxEntriesPerDay × buyBnb (${bnb(entries * buy)} BNB) is above L2's ${limits.maxDailySpendBnb} BNB of buys a day`);
     // A round trip is about twice its size in volume: its own target must be reachable inside its own counts.
     if (2 * entries * buy < (params.minDailyVolumeBnb as number)) errors.push(`2 × maxEntriesPerDay × buyBnb (${bnb(2 * entries * buy)} BNB) cannot reach minDailyVolumeBnb (${params.minDailyVolumeBnb} BNB)`);
     if (2 * entries < (params.minDailyTrades as number)) errors.push(`minDailyTrades ${params.minDailyTrades} needs at least ${Math.ceil((params.minDailyTrades as number) / 2)} buys a day (a buy and its sale are two trades); maxEntriesPerDay is ${entries}`);

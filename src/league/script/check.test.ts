@@ -14,6 +14,8 @@ import { agentPaths } from "../store.ts";
 import { checkPath, checkScript, scriptCheckPassed, writeCheckReport } from "./check.ts";
 import { stubWorld } from "./world.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 let dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
@@ -83,12 +85,14 @@ describe("FL script check", () => {
   const failing: [string, string, string][] = [
     ["throws", tick(`throw new Error("boom");`), "calls"],
     ["overruns", tick(`let i = 0; while (true) { i += 1; }`), "calls"],
-    ["buys over L1", tick(`api.buy({ coin: "FEAST", bnb: 0.05 });`), "size"],
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    ["buys over the cap on BNB at work in one buy", tick(`api.buy({ coin: "FEAST", bnb: 0.2 });`), "guard"],
     ["buys under the smallest trade", tick(`api.buy({ coin: "FEAST", bnb: 0.0001 });`), "size"],
     ["buys a coin that is not a Feast coin", tick(`api.buy({ coin: "0x000000000000000000000000000000000000dEaD", bnb: 0.002 });`), "feast"],
     ["sells a coin it does not hold", tick(`api.sell({ coin: "FEAST", fraction: 1 });`), "held"],
     ["launches twice", tick(`api.state.n = (api.state.n || 0) + 1; if (api.state.n <= 2) api.launch({ name: "Twice", symbol: "TWO" });`), "launch"],
-    ["passes L2 over the day", tick(`const c = api.read.coins({ sort: "new", limit: 8 })[(api.state.k = ((api.state.k || 0) + 1) % 8)]; if (c) api.buy({ coin: c.coin, bnb: 0.02 });`), "guard"],
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    ["passes the cap on BNB at work (L3) over the day, never selling", tick(`const c = api.read.coins({ sort: "new", limit: 8 })[(api.state.k = ((api.state.k || 0) + 1) % 8)]; if (c) api.buy({ coin: c.coin, bnb: 0.02 });`), "guard"],
     ["asks for an unknown event", `export const meta = { name: "t", tickSeconds: 60, events: ["block"] };\nexport function onTick(api) {}\n`, "meta"],
     ["a tick outside 15–3600 s", `export const meta = { name: "t", tickSeconds: 5 };\nexport function onTick(api) {}\n`, "meta"],
   ];

@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { goldenRun, shapeOf } from "./golden.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * Task 975, addendum 5: `FL data --json`'s shape, pinned. A change to it is deliberate: regenerate
  * `golden-data-shape.json` from `golden.ts`'s run and say so in the CHANGELOG.

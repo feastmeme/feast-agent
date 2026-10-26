@@ -16,6 +16,8 @@ import { askChoice } from "./start.ts";
 import { agentPaths } from "./store.ts";
 import { splitHelp } from "./support.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /** Run 22: the help line every refusal, error and status ends with, kept apart from the output the tests read. */
 const helpOff = (stdout: string, stderr: string) => {
   const out = splitHelp(stdout);
@@ -175,7 +177,8 @@ describe("FL answer, the Grok routine's hands", () => {
     printed(Date.now(), 1);
     const out = await run(["answer", "demo", answer({ action: "buy", coin: "c1", amountBnb: 0.5, reason: "big" })], env);
     expect(out.code).toBe(2);
-    expect(out.stdout).toMatch(/^refused by L1: .*\(nothing was asked of the wallet\)$/m);
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(out.stdout).toMatch(/^refused by L3: .*0\.5 BNB more would pass the 0\.15 BNB cap .*a sale frees room\) \(nothing was asked of the wallet\)$/m);
     const log = readFileSync(agentPaths(home, "demo").log, "utf8");
     expect(log).toContain('"event":"answer.taken"');
     expect(log).toContain('"event":"intent.refused"');

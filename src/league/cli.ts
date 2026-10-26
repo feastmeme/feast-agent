@@ -39,7 +39,7 @@ import { bnbToWei, weiToBnb } from "./limits.ts";
 import { noteCommand } from "./notes/queue.ts";
 import { liveToken, notesLogin, recordedAgentId } from "./notes/session.ts";
 import { checkHost, checkModel, declareHost, hostDetailHint, modelHint, readDeclaredHost, RUNTIME_RELEASE } from "./headers.ts";
-import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES, PAGE_IDLE_RULE } from "./prompt/constants.ts";
+import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES, LEAGUE_CAP_BNB, PAGE_IDLE_RULE } from "./prompt/constants.ts";
 import { dayLine } from "./prompt/floor.ts";
 import { readStanding } from "./data/standing.ts";
 import { cadenceLine, readCadence } from "./feed/cadence.ts";
@@ -451,7 +451,7 @@ async function main(argv: string[]): Promise<number> {
       const existing = loadAgent(home, name);
       if (existing && statusOf(home, name).running) throw new Error(`agent "${name}" is running; stop it, or change it with FL set`);
       saveAgent(home, planned.agent);
-      if (planned.audit) auditFile(home, planned.agent.script!.path, { maxTradeBnb: planned.agent.limits.maxTradeBnb });
+      if (planned.audit) auditFile(home, planned.agent.script!.path, { maxBuyBnb: planned.agent.limits.maxAtWorkBnb });
       print(json, { ok: true, agent: planned.agent, audit: planned.audit, card: renderCard(planned.agent, planned.audit) }, () => renderCard(planned.agent, planned.audit));
       return 0;
     }
@@ -701,7 +701,7 @@ async function main(argv: string[]): Promise<number> {
       const signed = (n: number) => `${n >= 0 ? "+" : ""}${Number(n.toPrecision(6))} BNB`;
       const selfLines = mine
         ? [
-            `PnL: realized ${signed(mine.pnl.realizedBnb)}, unrealized ${holds ? signed(mine.pnl.unrealizedBnb) : "none"}${usdRef ? ` (≈ ${((mine.pnl.realizedBnb + mine.pnl.unrealizedBnb) * usdRef.bnbUsd).toFixed(2)} USDT)` : ""}; capital: ${mine.capital.spentBnb} of ${mine.capital.capBnb} BNB, wallet-wide`,
+            `PnL: realized ${signed(mine.pnl.realizedBnb)}, unrealized ${holds ? signed(mine.pnl.unrealizedBnb) : "none"}${usdRef ? ` (≈ ${((mine.pnl.realizedBnb + mine.pnl.unrealizedBnb) * usdRef.bnbUsd).toFixed(2)} USDT)` : ""}; at work: ${mine.capital.atWorkBnb} of ${mine.capital.capBnb} BNB in open positions, wallet-wide (a sale frees room)`,
             ...(mine.prompt
               ? [
                   `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: FL start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
@@ -722,7 +722,7 @@ async function main(argv: string[]): Promise<number> {
                       ]),
                   ...(cadenceLine(readCadence(home, name)) ? [cadenceLine(readCadence(home, name))!] : []),
                   ...activeWaits(home, name, Date.now()).concat(activeWaits(home, ENTRY_AGENT, Date.now())).map((w) => `feast.meme asked ${w.door === "notes" ? "the notes" : w.door === "session" ? "the notes session" : w.door} to wait until ${utc8(w.until)} UTC+8 (429): nothing is sent there before`),
-                  ...(mine.wallet ? [`wallet: ${mine.wallet.balanceBnb} BNB, ${mine.wallet.spendableBnb} spendable (${mine.wallet.gasReserveBnb} kept for gas); left today ${mine.headroom.leftTodayBnb} BNB, this season ${mine.headroom.leftSeasonBnb} BNB`] : []),
+                  ...(mine.wallet ? [`wallet: ${mine.wallet.balanceBnb} BNB, ${mine.wallet.spendableBnb} spendable (${mine.wallet.gasReserveBnb} kept for gas); room to buy now ${mine.headroom.roomToBuyBnb} BNB`] : []),
                   `last trade ${ago(mine.lastTradeAt)}; last action by your agent ${ago(mine.lastActionAt)}`,
                   ...(mine.day ? [dayLine(mine.day, Date.now())] : []),
                   ...(mine.day && !mine.day.passed && !mine.day.noFloor && !seasonOverNow && !mine.autopilot?.active
@@ -746,7 +746,7 @@ async function main(argv: string[]): Promise<number> {
         [
           `${name}: ${runState}${s.stop ? ` (stop file: ${s.stop})` : ""}; ${s.agent!.track === "preset" ? `preset ${s.agent!.preset}` : s.agent!.track === "entry" ? "the league entry (FL enter)" : s.agent!.track === "prompt" ? "prompt mode" : "script"}`,
           `positions: ${data.positions.length ? data.positions.map((p) => `${p.symbol} ${p.costBnb} BNB${p.armed ? "" : " (exit not armed)"}`).join(", ") : "none"}`,
-          `spent in 24 h: ${data.spent24hBnb} BNB; the league in all: ${data.leagueSpentBnb} BNB of ${s.agent!.limits.budgetBnb}; realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
+          `bought in 24 h: ${data.spent24hBnb} BNB; bought in all from this wallet: ${data.leagueSpentBnb} BNB (a figure, not a limit); realized ${data.realizedBnb} BNB; gas ${data.gasBnb} BNB`,
           ...waiting,
           // Addendum 11: alive since its start, and its last safety pass that worked.
           ...(s.agent!.track !== "entry" ? [manualNow ? manualLine : aliveLine(readAlive(home, name), s.running, Date.now(), startingAgent)] : []),
@@ -824,7 +824,7 @@ async function main(argv: string[]): Promise<number> {
       const verdict = values["model-verdict"];
       const record = verdict
         ? recordModelVerdict(home, file, verdict === "pass" ? "pass" : "refuse", values.notes ?? "")
-        : auditFile(home, file, { maxTradeBnb: 0.02 });
+        : auditFile(home, file, { maxBuyBnb: LEAGUE_CAP_BNB });
       print(json, record, () =>
         [
           `${record.file}`,

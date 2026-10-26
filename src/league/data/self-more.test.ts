@@ -8,7 +8,10 @@ import { confirmAgent, planAgent, saveAgent } from "../agent.ts";
 import { emptyBook, recordBuy, serializeBook } from "../book.ts";
 import { DEFAULT_LIMITS } from "../limits.ts";
 import { addToLedger, agentPaths, appendJsonl, writeFileAtomic } from "../store.ts";
+import { othersAtWorkWei } from "../runtime.ts";
 import { headroomOf, recentFillsOf, selfView } from "./self.ts";
+
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
 
 /**
  * Task 975, addendum 5: where the agent stands, from its book, its limits and its log: the headroom, the wallet's
@@ -30,12 +33,29 @@ afterEach(() => {
 const bought = (at: number, wei: bigint) => recordBuy(emptyBook(), { coin: C1, symbol: "C01", quote: C1, coinsOut: 1_000n * E18, bnbInWei: wei, gasWei: 0n, at, fundedBy: "wallet", ownLaunch: false, source: "manual" });
 
 describe("headroom", () => {
-  it("per trade, today, this season, exposure, positions, trades this hour, loss, drawdown, and the cooldowns", () => {
+  it("the room to buy now (the cap less the BNB at work, every agent on the wallet), positions, loss, drawdown, and the cooldowns", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
     const book = bought(NOW - 30_000, 6n * 10n ** 15n);
     const h = headroomOf(book, DEFAULT_LIMITS, 3n * 10n ** 16n, NOW);
-    expect(h).toMatchObject({ maxTradeBnb: DEFAULT_LIMITS.maxTradeBnb, minTradeBnb: 0.001, spent24hBnb: 0.006, leftTodayBnb: Number((DEFAULT_LIMITS.maxDailySpendBnb - 0.006).toFixed(6)), leftSeasonBnb: 0.12, exposureBnb: 0.006, openPositions: 1, trades1h: 1 });
+    expect(h).toMatchObject({ minTradeBnb: 0.001, capBnb: 0.15, atWorkBnb: 0.036, roomToBuyBnb: 0.114, exposureBnb: 0.006, openPositions: 1 });
+    expect(h).not.toHaveProperty("maxTradeBnb");
+    expect(h).not.toHaveProperty("leftTodayBnb");
+    expect(h).not.toHaveProperty("leftSeasonBnb");
+    expect(h).not.toHaveProperty("trades1h");
     expect(h.cooldowns).toEqual([{ coin: C1, until: new Date(NOW - 30_000 + DEFAULT_LIMITS.coinCooldownSeconds * 1_000).toISOString() }]);
     expect(headroomOf(book, DEFAULT_LIMITS, 0n, NOW + 10 * MIN).cooldowns).toEqual([]);
+  });
+});
+
+describe("the BNB at work in the other agents' books (L3 is wallet-wide)", () => {
+  it("sums the cost of their open positions; an unreadable book counts as the whole cap (fail closed)", () => {
+    const h = mkdtempSync(join(tmpdir(), "feast-league-1020-atwork-"));
+    dirs.push(h);
+    writeFileAtomic(agentPaths(h, "one").state, serializeBook(bought(NOW, 2n * 10n ** 16n)));
+    writeFileAtomic(agentPaths(h, "self").state, serializeBook(bought(NOW, 5n * 10n ** 16n)));
+    expect(othersAtWorkWei(h, "self")).toBe(2n * 10n ** 16n);
+    writeFileAtomic(agentPaths(h, "two").state, "{ not a book");
+    expect(othersAtWorkWei(h, "self")).toBe(2n * 10n ** 16n + 15n * 10n ** 16n);
   });
 });
 
@@ -77,7 +97,10 @@ describe("the agent's own figures", () => {
     const v = await selfView(h, "demo", { chain, now: NOW, wallet: WALLET, exitImpact: async () => 4.25 });
     expect(v.wallet).toEqual({ balanceBnb: 0.05, gasReserveBnb: DEFAULT_LIMITS.gasReserveBnb, spendableBnb: Number((0.05 - DEFAULT_LIMITS.gasReserveBnb).toFixed(6)) });
     expect(v.positions[0]).toMatchObject({ coin: C1, pnlPct: -50, ageMinutes: 30, peakPnlPct: 50, exitImpactPct: 4.25 });
-    expect(v.headroom.leftSeasonBnb).toBe(0.144);
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    // The ledger's lifetime 0.006 refuses nothing: the room is the cap less what is at work now.
+    expect(v.headroom.roomToBuyBnb).toBe(0.144);
+    expect(v.capital).toEqual({ atWorkBnb: 0.006, capBnb: 0.15, roomToBuyBnb: 0.144, spentBnb: 0.006 });
     // No wallet, no balance: nothing is guessed.
     expect((await selfView(h, "demo", { chain, now: NOW })).wallet).toBeNull();
   });

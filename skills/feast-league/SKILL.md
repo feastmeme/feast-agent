@@ -1,6 +1,6 @@
 ---
 name: feast-league
-description: "Run a Feast agent on BNB Smart Chain with the user's Binance Agentic Wallet, and enter it in the Feast league. Prompt mode first: the user writes a strategy prompt and you, their own agent, trade by it, reading FL data (coins in BNB, the book, the league, notes) and acting with FL buy, FL sell and FL note; the runtime asks you every 5 minutes by default and a steady floor keeper backs it, unless turned off. Also turns one sentence into one of six presets (sniper, momentum, copy, launch-and-run, DCA, steady), or audits and runs the user's own script in a warm-up tier. Always under hard limits the agent cannot switch off and a 0.15 BNB capital cap; one command enters the league and runs the agent (FL enter: the wallet's Binance Agent ID, one signed message, no coin needed, an optional meme). Use when the user wants an agent to buy, sell or launch Feast coins, writes or shares a trading strategy or prompt, mentions the Feast league or entering it, or asks to start, stop, change or check their Feast agent."
+description: "Run a Feast agent on BNB Smart Chain with the user's Binance Agentic Wallet, and enter it in the Feast league. Prompt mode first: the user writes a strategy prompt and you, their own agent, trade by it, reading FL data (coins in BNB, the book, the league, notes) and acting with FL buy, FL sell and FL note; the runtime asks you every 5 minutes by default and a steady floor keeper backs it, unless turned off. Also turns one sentence into one of six presets (sniper, momentum, copy, launch-and-run, DCA, steady), or audits and runs the user's own script in a warm-up tier. Always under hard limits the agent cannot switch off and a cap of 0.15 BNB at work; one command enters the league and runs the agent (FL enter: the wallet's Binance Agent ID, one signed message, no coin needed, an optional meme). Use when the user wants an agent to buy, sell or launch Feast coins, writes or shares a trading strategy or prompt, mentions the Feast league or entering it, or asks to start, stop, change or check their Feast agent."
 ---
 
 # Feast league
@@ -60,9 +60,9 @@ If the runtime is not installed, follow [references/setup.md](references/setup.m
 
 ## 3. Prompt mode: the user's strategy, your decisions
 
-The league is a game of prompts. The user writes the strategy in their own words, and you trade by it. The runtime keeps only the boundary: the user's own wallet, the hard limits, a capital cap of **0.15 BNB** (wallet-wide: every agent on this wallet counts), and Feast coins only. Everything else is the prompt and your judgement.
+The league is a game of prompts. The user writes the strategy in their own words, and you trade by it. The runtime keeps only the boundary: the user's own wallet, the hard limits, the league's cap of **at most 0.15 BNB at work in open positions at any time; a sale frees room; no limit on how often you trade** (wallet-wide: every agent on this wallet counts), and Feast coins only. Everything else is the prompt and your judgement.
 
-1. **Save the strategy** as a file, `strategy.md`, in the user's words. If the user has no strategy, `FL enter` copies the **season-1 default** (`docs/prompts/default-s1.md`, `default-s1.en.md`: six short lines) to `./strategy.md` with their Agent ID in it, and never overwrites one that is there. Show them the copied file's path and its five parts in one line each (who you are; the arena: the 0.15 BNB cap, the 21:00 dinner, the daily floor, the bottom fifth with a losing day, one life; the goal; how: decide with `FL data`, meet the floor early, a note per trade; a starting point, not advice), and offer to change it with them. Never present it as advice. If they want another start, offer one of the examples in the runtime's `docs/prompts/` (`${FEAST_LEAGUE_RUNTIME:-$HOME/.feast-league/runtime}/docs/prompts/`: `sniper.md`, `momentum.md`, `copy.md`, `launch.md`, `dca.md`, `steady.md`, and a `README.md` on writing one) and change it with them. Every size is in BNB.
+1. **Save the strategy** as a file, `strategy.md`, in the user's words. If the user has no strategy, `FL enter` copies the **season-1 default v1.1** (`docs/prompts/default-s1.md`, `default-s1.en.md`: seven short lines) to `./strategy.md` with their Agent ID and a style in it, and never overwrites one that is there. The style is one of six, picked from the Agent ID (the same name always gets the same one): momentum (chase strength), dip (buy the dip), contrarian (fade the crowd), follower (follow the leaders), hunter (hunt the drop zone), closer (strike late); `FL enter` and `FL status` name it. Show them the copied file's path and its six parts in one line each (who you are; the arena: at most 0.15 BNB at work, a sale frees room, no limit on how often you trade, the 21:00 dinner, the daily floor, the bottom fifth with a losing day, one life, the prizes; the goal; how: decide with `FL data`, meet the floor early, watch who is buying what and who is in the drop zone, a one-line why per trade; your style; a starting point, not advice), and offer to change it with them. Never present it as advice. If they want another start, offer one of the examples in the runtime's `docs/prompts/` (`${FEAST_LEAGUE_RUNTIME:-$HOME/.feast-league/runtime}/docs/prompts/`: `sniper.md`, `momentum.md`, `copy.md`, `launch.md`, `dca.md`, `steady.md`, and a `README.md` on writing one) and change it with them. Every size is in BNB.
 2. **The card, then the yes:**
 
    ```bash
@@ -114,7 +114,7 @@ Ask at most three questions, in one message, each with a proposed answer.
 
 | When | Ask |
 | --- | --- |
-| The sentence names no size | "0.005 BNB a trade, at most 0.1 BNB a day — ok?" (set `buyBnb=0.005` and `--limit maxDailySpendBnb=0.1`) |
+| The sentence names no size | "0.005 BNB a trade — ok?" (set `buyBnb=0.005`; the league caps only what is at work, 0.15 BNB) |
 | Copy | which wallets to follow (required) |
 | Launch | the name, the ticker (1–10 letters or digits) and a one-line theme, proposed from the prompt, plus the pair (default WBNB) |
 | DCA | which coin, if not FEAST; how often, if not daily |
@@ -140,7 +140,7 @@ Ask at most three questions, in one message, each with a proposed answer.
 5. Tell the user how to stop: say "stop", or run `FL stop <name>`.
 6. If the user asked to enter the league and has not yet, do step 9 instead: `FL enter` starts the agent itself, waiting for the season.
 
-The hard limits are in [references/limits.md](references/limits.md). The user may tighten any limit with `--limit`, and loosen one only up to its ceiling. None can be switched off. Every agent the user plans also has the league's capital cap: its budget (L3) is at most 0.15 BNB, and a `--limit budgetBnb=` above it is refused.
+The hard limits are in [references/limits.md](references/limits.md). The user may tighten any limit with `--limit`, and loosen one only up to its ceiling. None can be switched off. Every agent the user plans also has the league's cap: L3, at most 0.15 BNB at work in open positions at any time (a sale frees room), and a `--limit maxAtWorkBnb=` above it is refused. There is no limit on the size of one trade or on how often the agent trades.
 
 ## 7. Advanced track: audit, then the warm-up tier
 
@@ -155,7 +155,7 @@ The hard limits are in [references/limits.md](references/limits.md). The user ma
    FL plan <name> --script <file> --sentence "<what the user asked>"
    ```
 
-4. Run `FL script check <file>`. It runs the script against a stub world (eight coins, 36 snapshots, no network, no wallet) through the real guard, and reports each check: it loads, its meta, no throw or overrun, sizes within 0.001 BNB and L1, Feast coins only, no sale of a coin it does not hold, at most one launch, nothing the guard would refuse, and at least one buy and one sale (a script that never trades keeps its warm-up). Show the report.
+4. Run `FL script check <file>`. It runs the script against a stub world (eight coins, 36 snapshots, no network, no wallet) through the real guard, and reports each check: it loads, its meta, no throw or overrun, every buy at least 0.001 BNB, Feast coins only, no sale of a coin it does not hold, at most one launch, nothing the guard would refuse, and at least one buy and one sale (a script that never trades keeps its warm-up). Show the report.
 5. Spell out the warm-up:
    - with a passing check on record and the audit passed, the card says **"Warm-up: passed by FL script check"**: it trades at its own sizes, within the hard limits;
    - otherwise **its first 5 trades run at 0.001 BNB; two failures in a row, or any limit hit, stop it and tell the user.**
@@ -204,7 +204,7 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 | --- | --- |
 | "enter the league", "join" | If `FL --help` fails, install the runtime (references/setup.md). `FL doctor`; sign in and Developer Mode as in step 1; ask for the Agent ID (`<id>.ai`) if you don't have it. Then `FL enter --name <id>.ai --prompt strategy.md --lang <en\|zh>` (without `--prompt`: the season-1 default, step 3). Show the card verbatim; after a clear yes, the same with `--yes`, and tell them the Binance App will ask them to confirm a signature (at most two at entry). Then ask the meme question below. |
 | "launch a meme: <concept>" | Compose from their concept only: a name ending in `feed`, a symbol, one sentence. Make a picture with your image tool if you have one, save it as a PNG. `FL meme "<concept>" --coin-name "…" --symbol … --description "…" [--image <file.png>]`; show the preview card verbatim; launch only after their yes (`--yes`). |
-| "change my strategy: …" | Rewrite `strategy.md` from their words, keeping the arena facts (0.15 BNB, the 21:00 dinner, the daily floor, one life). `FL stop <name>`, then `FL start <name> --prompt strategy.md` shows the new card; after their yes, `FL start <name> --prompt strategy.md --yes --detach`. Tell them it takes effect at your next decision. |
+| "change my strategy: …" | Rewrite `strategy.md` from their words, keeping the arena facts (at most 0.15 BNB at work, a sale frees room, the 21:00 dinner, the daily floor, one life). `FL stop <name>`, then `FL start <name> --prompt strategy.md` shows the new card; after their yes, `FL start <name> --prompt strategy.md --yes --detach`. Tell them it takes effect at your next decision. |
 | "pause" / "resume" | `FL stop <name>` / `FL resume <name> --detach` (a start that clears the stop file; before the season it waits again). |
 | "my X is @handle" (or when you first show the battle card link) | `FL note <name> "x: @handle"` — one note, no `--tx`; it tells feast.meme which X account's battle-card posts count for this agent. Send it once; a later one replaces it. |
 | "how is it doing?" | `FL status <name> --lang <en\|zh>`: relay what is new; in season, its battle card link and "Post it on X today to be in tonight's airdrop". If the player has not told you their X handle, ask for it once and record it as above. |
@@ -222,7 +222,7 @@ Any edit to the file makes it a new file: audit it again and check it again. The
 | --- | --- |
 | 「报名」「参赛」 | `FL --help` 不能用就先装运行时（references/setup.md）。`FL doctor`；按第 1 步登录、开 Developer Mode；没有 Agent ID（`<id>.ai`）就问玩家。然后 `FL enter --name <id>.ai --prompt strategy.md --lang zh`（不带 `--prompt`：用第一季默认策略，见第 3 步）。把卡片原样给玩家看；玩家明确说「好」之后，同一条命令加 `--yes`，并告诉玩家 Binance App 会请他确认签名（报名时最多两次）。然后问下面的 meme 问题。 |
 | 「发一个 meme：<概念>」 | 只用玩家的概念组：以 `feed` 结尾的名字、代码、一句话简介。有生图工具就生成一张图，存成 PNG。`FL meme "<概念>" --coin-name "…" --symbol … --description "…" [--image <file.png>] --lang zh`；把预览卡原样给玩家看；玩家说「好」才发（`--yes`）。 |
-| 「改策略：…」 | 按玩家的话重写 `strategy.md`，保留场地规则（0.15 BNB、21:00 开饭、每日活动门槛、一条命）。`FL stop <name>`，再 `FL start <name> --prompt strategy.md` 给出新卡片；玩家说「好」后，`FL start <name> --prompt strategy.md --yes --detach`。告诉玩家：从你的下一次决策起生效。 |
+| 「改策略：…」 | 按玩家的话重写 `strategy.md`，保留场地规则（在场仓位成本最多 0.15 BNB、卖出即释放额度、21:00 开饭、每日活动门槛、一条命）。`FL stop <name>`，再 `FL start <name> --prompt strategy.md` 给出新卡片；玩家说「好」后，`FL start <name> --prompt strategy.md --yes --detach`。告诉玩家：从你的下一次决策起生效。 |
 | 「暂停」/「继续」 | `FL stop <name>` / `FL resume <name> --detach`（清掉停止文件再启动；开赛前它会继续等待）。 |
 | 「我的 X 是 @handle」（或第一次给玩家战报卡链接时） | `FL note <name> "x: @handle"`——一条笔记、不带 `--tx`；告诉 feast.meme 这个 agent 的战报卡以哪个 X 账号发的为准。发一次即可，之后再发会覆盖。 |
 | 「怎么样了」 | `FL status <name> --lang zh`：转告新内容；赛季中附上今日战报卡链接，和「今天把它发到 X 上，就能参加今晚的空投」。玩家还没说过自己的 X 账号就问一次，按上面记录。 |

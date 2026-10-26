@@ -9,6 +9,8 @@ import * as copy from "../enter/copy.ts";
 import { autopilotChoice, prepareStart } from "../start.ts";
 import { DEFAULT_AUTOPILOT, DEFAULT_IDLE_MINUTES, IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, PAGE_IDLE_RULE } from "./constants.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * Task 975, the owner's ruling A: a prompt agent planned by FL enter, FL start --prompt or FL plan --prompt gets the
  * steady autopilot backup by default, after 30 minutes with no trade from its host; --no-autopilot turns it off.
@@ -59,7 +61,8 @@ describe("the card's backup line", () => {
     if (!planned.ok) throw new Error(planned.errors.join("; "));
     const card = renderCard(planned.agent);
     expect(card).toContain(BACKUP_ON);
-    expect(card).toContain("Its spend: about 0.012 BNB of buys on a day it trades for the floor, at most 0.018 BNB (3 × 0.006 BNB); at most 0.126 BNB over the season's seven trading days, from the same 0.15 BNB cap as your agent's own buys.");
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(card).toContain("Its spend: about 0.012 BNB of buys on a day it trades for the floor, at most 0.018 BNB (3 × 0.006 BNB), each sold again; what it holds counts toward the same 0.15 BNB cap on BNB at work as your agent's own buys.");
     for (const row of ["| buyBnb | 0.006 BNB | default |", "| minDailyTrades | 4 | default |", "| minDailyVolumeBnb | 0.022 BNB | default |", "| maxEntriesPerDay | 3 | default |", "| spacingMinutes | 15 min | default |", "| rushMinutes | 60 min | default |", "| takeProfitPct | 15 % | default |", "| stopLossPct | 10 % | default |", "| timeStopMinutes | 30 min | default |", "| maxPositions | 2 | default |"]) expect(card).toContain(row);
   });
 

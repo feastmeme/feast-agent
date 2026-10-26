@@ -132,7 +132,8 @@ describe("league-entry is FL enter's own", () => {
     ["start", "league-entry", "--yes"],
     ["resume", "league-entry"],
     ["run", "league-entry"],
-    ["set", "league-entry", "--limit", "maxTradeBnb=0.25", "--yes"],
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    ["set", "league-entry", "--limit", "maxAtWorkBnb=0.1", "--yes"],
   ]) {
     it(`${args[0]} refuses it, in one line`, async () => {
       const { env, home, baw } = setup();

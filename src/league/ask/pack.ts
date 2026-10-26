@@ -115,10 +115,10 @@ const pct = (x: number | null | undefined) => (x === null || x === undefined ? "
 /** A symbol or a name, as the pack shows it: cleaned, and with nothing that could close a fence or a table. */
 const shown = (raw: string | null | undefined, max = 24) => clean(raw ?? "", max).replace(/[`|<>]/g, "") || "?";
 
-/** The most a buy may be now: L1, the day's (L2), the season's (L3) and the exposure's (L4) headroom, and the spendable balance. */
+/** The most a buy may be now: the room the cap on BNB at work leaves (L3), and the spendable balance. */
 export function maxBuyBnb(input: Pick<PackInput, "headroom" | "wallet">): number {
   const h = input.headroom;
-  const cap = Math.min(h.maxTradeBnb, h.leftTodayBnb, h.leftSeasonBnb, h.leftExposureBnb, input.wallet?.spendableBnb ?? 0);
+  const cap = Math.min(h.roomToBuyBnb, input.wallet?.spendableBnb ?? 0);
   return Math.max(0, Math.floor(cap * 1e6) / 1e6);
 }
 
@@ -164,7 +164,7 @@ export function buildPack(input: PackInput): Pack {
     "",
     "## The rules (each with its source)",
     ...input.rules.map((r) => `- ${r.rule}: ${r.text} [${r.source}]`),
-    `- hard limits in force [src/league/limits.ts, this agent's confirmed limits]: one trade at most ${l.maxTradeBnb} BNB; at most ${l.maxDailySpendBnb} BNB of buys in any 24 h; at most ${l.budgetBnb} BNB in all from this wallet; at most ${l.maxExposureBnb} BNB open; at most ${l.maxOpenPositions} positions; ${l.maxTradesPerHour} trades an hour; ${l.coinCooldownSeconds} s between two entries into one coin; a hard stop-loss at -${l.backstopStopLossPct}%; ${l.gasReserveBnb} BNB is never spent.`,
+    `- hard limits in force [src/league/limits.ts, this agent's confirmed limits]: at most ${l.maxAtWorkBnb} BNB at work in open positions at any time (their cost, every agent on this wallet; a sale frees room; no limit on how often you trade); at most ${l.maxOpenPositions} positions; ${l.coinCooldownSeconds} s between two entries into one coin; a hard stop-loss at -${l.backstopStopLossPct}%; ${l.gasReserveBnb} BNB is never spent.`,
     "",
     `## The player's strategy (sha256 ${input.prompt.sha256 ? `${input.prompt.sha256.slice(0, 6)}…${input.prompt.sha256.slice(-4)}` : "?"}; changed since your last answer: ${input.prompt.changed ? "yes" : "no"})`,
     "<<<STRATEGY",
@@ -179,7 +179,7 @@ export function buildPack(input: PackInput): Pack {
       : `today's floor: ${input.day.trades} trades and ${bnb(input.day.volumeBnb)} BNB of volume so far (needs ${ACTIVITY_FLOOR_TRADES} and ${ACTIVITY_FLOOR_BNB} BNB; ${FLOOR_COUNTS}): ${input.day.passed ? "met" : "NOT met yet"}.`,
     ...(!input.season.noFloorTonight && !input.day.passed && toDinner <= 60 ? [`FLOOR UNMET, ${toDinner} minutes left: meet it now with small round trips, or the agent is eaten at the dinner. 20 minutes before the dinner the runtime's floor keeper does it instead.`] : []),
     `wallet: ${input.wallet ? `${bnb(input.wallet.balanceBnb)} BNB, ${input.wallet.gasReserveBnb} BNB of it the gas reserve, ${bnb(input.wallet.spendableBnb)} BNB spendable` : "the balance could not be read: no buy fits"}.`,
-    `headroom: a buy now at most ${cap} BNB; left today ${bnb(h.leftTodayBnb)} BNB (spent ${bnb(h.spent24hBnb)} in 24 h); left this season ${bnb(h.leftSeasonBnb)} BNB; open ${bnb(h.exposureBnb)} of ${bnb(h.exposureBnb + h.leftExposureBnb)} BNB; positions ${h.openPositions} of ${h.maxOpenPositions}; trades this hour ${h.trades1h} of ${h.maxTradesPerHour}; realized loss in 24 h ${bnb(h.realizedLoss24hBnb)} BNB (${bnb(h.leftLoss24hBnb)} left); drawdown ${bnb(h.drawdownBnb)} of ${bnb(h.maxDrawdownBnb)} BNB${h.cooldowns.length > 0 ? `; in cooldown: ${h.cooldowns.map((c) => `${idOf.get(c.coin.toLowerCase()) ?? "a coin not listed"} until ${utc8(Date.parse(c.until))}`).join(", ")}` : ""}.`,
+    `headroom: a buy now at most ${cap} BNB; room to buy now ${bnb(h.roomToBuyBnb)} BNB (at work ${bnb(h.atWorkBnb)} of ${bnb(h.capBnb)} BNB; a sale frees room); positions ${h.openPositions} of ${h.maxOpenPositions}; realized loss in 24 h ${bnb(h.realizedLoss24hBnb)} BNB (${bnb(h.leftLoss24hBnb)} left); drawdown ${bnb(h.drawdownBnb)} of ${bnb(h.maxDrawdownBnb)} BNB${h.cooldowns.length > 0 ? `; in cooldown: ${h.cooldowns.map((c) => `${idOf.get(c.coin.toLowerCase()) ?? "a coin not listed"} until ${utc8(Date.parse(c.until))}`).join(", ")}` : ""}.`,
     `PnL: realized ${bnb(input.pnl.realizedBnb)} BNB, unrealized ${bnb(input.pnl.unrealizedBnb)} BNB, gas ${bnb(input.pnl.gasBnb)} BNB; last trade ${input.lastTradeAt ? `${utc8(Date.parse(input.lastTradeAt))} UTC+8` : "never"}.`,
     st
       ? `the league today (in BNB): rank ${st.rank ?? "?"} of ${st.alive} alive; ${st.pnlBnb === null ? "not in the arena" : `today ${bnb(st.pnlBnb)} BNB`}; ${st.gapUpBnb !== null ? `${bnb(st.gapUpBnb)} BNB behind the next up` : "nobody above"}; ${st.gapDownBnb !== null ? `${bnb(st.gapDownBnb)} BNB ahead of the next down` : "nobody below"}; tonight's cutoff: ${st.cutoff.bottom} of ${st.cutoff.passing} over the floor may be dropped, the best of them at ${bnb(st.cutoff.cutoffPnlBnb)} BNB; you: ${st.cutoff.me}${st.cutoff.toSafetyBnb !== null ? `, ${bnb(st.cutoff.toSafetyBnb)} BNB more today takes you out of it` : ""}.`

@@ -14,6 +14,8 @@ import { BOB, C1, C2, C3, C5, CAROL, EVIL, FakeFeast, fakeFaceChain, hourly, IND
 import { candles, parseSince, sqrtToBnb } from "./ohlcv.ts";
 import * as feedFakes from "../feed/fakes.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 const NOW = Date.parse("2026-10-29T05:00:00Z");
 const E18 = 10n ** 18n;
 let homes: string[] = [];
@@ -126,7 +128,9 @@ describe("FL data: the JSON", () => {
       ownCoin: [{ coin: OWN, costBnb: 0.001, markBnb: 0.0005 }],
       otherBooks: [{ agent: ENTRY_AGENT, positions: [{ coin: C2, costBnb: 0.01, markBnb: 0.02 }] }],
       pnl: { unrealizedBnb: 0.001, realizedBnb: 0, gasBnb: 0 },
-      capital: { spentBnb: 0.013, capBnb: 0.15, budgetBnb: 0.15 },
+      // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+      // At work: this book's 0.002 and its own coin's 0.001, and league-entry's 0.01 (wallet-wide).
+      capital: { atWorkBnb: 0.013, capBnb: 0.15, roomToBuyBnb: 0.137, spentBnb: 0.013 },
       lastTradeAt: new Date(NOW - 3 * 3_600_000).toISOString(),
       lastActionAt: new Date(NOW - 12 * 60_000).toISOString(),
     });

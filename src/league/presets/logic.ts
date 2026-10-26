@@ -213,7 +213,7 @@ function copy(): Strategy {
         api.log(`copy: skipped, the price is ${(((price - item.leaderPrice) / item.leaderPrice) * 100).toFixed(1)}% above the leader's fill`);
         continue;
       }
-      const size = p.sizeMode === "fixed" ? p.buyBnb : Math.min((item.leaderBnb ?? 0) * (p.proportionalPct / 100), api.read.limits().maxTradeBnb);
+      const size = p.sizeMode === "fixed" ? p.buyBnb : Math.min((item.leaderBnb ?? 0) * (p.proportionalPct / 100), api.read.limits().maxAtWorkBnb);
       if (size < 0.001) continue;
       if (api.buy({ coin: item.coin, bnb: Number(size.toFixed(6)), reason: "copy: a followed wallet bought" })) mine[lc(item.coin)] = now;
     }

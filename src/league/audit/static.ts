@@ -35,7 +35,7 @@ export const AUDIT_RULES: readonly { id: RuleId; rule: string }[] = [
   { id: "A6", rule: "Bounded loops, no timers" },
   { id: "A7", rule: "Shape: named exports meta, params, onTick, onEvent; a tick of 15–3600 s; declarations only at the top; at most 64 KB; ASCII identifiers" },
   { id: "A8", rule: "Only the runtime's functions: api.buy, api.sell, api.launch, api.read.*, api.state, api.params, api.log" },
-  { id: "A9", rule: "Literal sizes above the per-trade limit (a warning: the runtime refuses those trades anyway)" },
+  { id: "A9", rule: "Literal sizes above the league cap on BNB at work (a warning: the runtime refuses those trades anyway)" },
 ];
 
 export const MAX_SCRIPT_BYTES = 64 * 1024;
@@ -172,7 +172,7 @@ function readableKey(node: Node): boolean {
   }
 }
 
-export function auditSource(source: string, options: { maxTradeBnb?: number } = {}): StaticAudit {
+export function auditSource(source: string, options: { maxBuyBnb?: number } = {}): StaticAudit {
   const hits: AuditHit[] = [];
   const bytes = Buffer.byteLength(source, "utf8");
   const sha256 = sha256Of(source);
@@ -400,12 +400,12 @@ export function auditSource(source: string, options: { maxTradeBnb?: number } = 
         const callee = node.callee as Node;
         const isBuy = callee.type === "MemberExpression" && isApi(callee.object as Node) && String((callee.property as Node).name) === "buy";
         const arg = (node.arguments as Node[])[0];
-        if (isBuy && arg?.type === "ObjectExpression" && options.maxTradeBnb !== undefined) {
+        if (isBuy && arg?.type === "ObjectExpression" && options.maxBuyBnb !== undefined) {
           for (const p of arg.properties as Node[]) {
             const key = (p.key as Node | undefined)?.name ?? (p.key as Node | undefined)?.value;
             const value = p.value as Node | undefined;
-            if (key === "bnb" && value?.type === "Literal" && typeof value.value === "number" && value.value > options.maxTradeBnb) {
-              hit("A9", value, `a buy of ${value.value} BNB is above the per-trade limit of ${options.maxTradeBnb} BNB; the runtime will refuse it`, "warn");
+            if (key === "bnb" && value?.type === "Literal" && typeof value.value === "number" && value.value > options.maxBuyBnb) {
+              hit("A9", value, `a buy of ${value.value} BNB is above the cap of ${options.maxBuyBnb} BNB at work; the runtime will refuse it`, "warn");
             }
           }
         }

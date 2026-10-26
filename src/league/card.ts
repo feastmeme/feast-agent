@@ -20,16 +20,13 @@ const shown = (value: unknown, unit?: string) => {
 
 const short = (hex: string) => `${hex.slice(0, 6)}…${hex.slice(-4)}`;
 
-/** The season's trading days the floor is kept on: the opening hour's day and the six after dinner 1 (task 975, C9). */
-const SEASON_DAYS = 7;
-
-/** What `steady` spends, from its parameters: a floor day's buys, the most in a day, the season's most; all inside L3's cap. */
+/** What `steady` spends, from its parameters: a floor day's buys and the most in a day; its open positions sit inside L3's cap. */
 function steadySpend(params: Record<string, unknown>): string {
   const buy = Number(params.buyBnb);
   const entries = Number(params.maxEntriesPerDay);
   const typical = Math.min(entries, Math.ceil(Number(params.minDailyTrades) / 2)) * buy;
   const bnb = (x: number) => Number(x.toFixed(6));
-  return `Its spend: about ${bnb(typical)} BNB of buys on a day it trades for the floor, at most ${bnb(entries * buy)} BNB (${entries} × ${buy} BNB); at most ${bnb(SEASON_DAYS * entries * buy)} BNB over the season's seven trading days, from the same ${LEAGUE_CAP_BNB} BNB cap as your agent's own buys.`;
+  return `Its spend: about ${bnb(typical)} BNB of buys on a day it trades for the floor, at most ${bnb(entries * buy)} BNB (${entries} × ${buy} BNB), each sold again; what it holds counts toward the same ${LEAGUE_CAP_BNB} BNB cap on BNB at work as your agent's own buys.`;
 }
 
 /** `warmupPassed`: a passing `FL script check` is on record for the script's sha256 (task 963). */
@@ -71,9 +68,9 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
     lines.push(`Your script: ${agent.script!.path}`);
     lines.push(`Audit: static rules ${audit?.verdict ?? "see FL audit"}; the model read must pass too before it starts.`);
     if (options.warmupPassed) lines.push(`Warm-up: passed by FL script check (sha ${short(agent.script!.sha256)}). It trades at its own sizes, within the limits; any edit is a new file, a new audit, a new check.`);
-    else lines.push(`Warm-up: its first ${WARMUP_TRADES} trades run at ${Math.min(WARMUP_SIZE_BNB, l.maxTradeBnb)} BNB; two failures in a row, or any limit hit, stop it and tell you.`);
+    else lines.push(`Warm-up: its first ${WARMUP_TRADES} trades run at ${WARMUP_SIZE_BNB} BNB; two failures in a row, or any limit hit, stop it and tell you.`);
   }
-  if (agent.track !== "entry" && l.budgetBnb <= LEAGUE_CAP_BNB) lines.push(`Capital cap: ${LEAGUE_CAP_BNB} BNB, wallet-wide: every agent on this wallet counts.`);
+  if (agent.track !== "entry") lines.push(`League cap: at most ${l.maxAtWorkBnb} BNB at work in open positions at any time, wallet-wide (every agent on this wallet counts); a sale frees room; no limit on how often you trade.`);
   if (agent.sentence) lines.push(`From your sentence: "${agent.sentence}"`);
   lines.push("");
   if (agent.preset) {
@@ -100,7 +97,7 @@ export function renderCard(agent: AgentConfig, audit: StaticAudit | null = null,
     if (agent.preset && !agent.manual) lines.push(`Autopilot cadence: only while it trades, a tick every ${agent.tickSeconds} s${events}${agent.preset && PRESETS[agent.preset].keepsExits ? "; while your agent trades, the same tick for its own exits only" : ""}.`);
   } else lines.push(`Cadence: a tick every ${agent.tickSeconds} s${events}.`);
   lines.push("Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview, then execute — one transaction at a time.");
-  lines.push(`Worst case: at most ${l.maxTradesPerHour} trades an hour, at most ${l.maxDailySpendBnb} BNB of buys in any 24 h, at most ${l.budgetBnb} BNB in all.`);
+  lines.push(`Worst case: at most ${l.maxAtWorkBnb} BNB at work in open positions at any time; entries pause after ${l.maxDailyLossBnb} BNB of realized loss in 24 h, and the agent halts ${l.maxDrawdownBnb} BNB below its peak.`);
   lines.push("");
   lines.push(agent.manual ? "Every FL buy and FL sell you run trades real BNB from your wallet. There is no practice mode." : "This trades real BNB from your wallet as soon as you say yes. There is no practice mode.");
   lines.push(agent.manual ? `Nothing runs between your commands. To stop it for good: say "stop", or run \`FL stop ${agent.name}\` (a stop file refuses every FL buy and FL sell until FL resume ${agent.name}).` : `To stop: say "stop", or run \`FL stop ${agent.name}\` (or create the file STOP in the agent's folder).`);

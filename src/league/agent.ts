@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { auditSource, sha256Of, type StaticAudit } from "./audit/static.ts";
-import { DEFAULT_LIMITS, loosenedBeyond, resolveLimits, type Limits } from "./limits.ts";
+import { DEFAULT_LIMITS, loosenedBeyond, migrateLimits, resolveLimits, type Limits } from "./limits.ts";
 import { PRESETS, resolveParams, type PresetId } from "./presets/specs.ts";
 import { CAP_REFUSAL, DEFAULT_IDLE_MINUTES, IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, LEAGUE_CAP_BNB, SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
 import { readPrompt } from "./prompt/host.ts";
@@ -87,12 +87,11 @@ const TICK_MIN = 15;
 const TICK_MAX = 3_600;
 
 /**
- * The league's capital cap on a plan's limits (task 963): a budget the user gives above it is refused, and
- * none given is the cap. It only ever tightens L3, which `resolveLimits` allows.
+ * The league's cap on a plan's limits (task 963; the owner's ruling for league-v5.1.4: capital at work): a cap the
+ * user gives above it is refused with the league's own line; none given is the cap (L3's default).
  */
 function capped(given: Record<string, unknown>): { ok: true; limits: Record<string, unknown> } | { ok: false } {
-  if (!("budgetBnb" in given)) return { ok: true, limits: { ...given, budgetBnb: Math.min(DEFAULT_LIMITS.budgetBnb, LEAGUE_CAP_BNB) } };
-  return aboveCap(given.budgetBnb) ? { ok: false } : { ok: true, limits: given };
+  return aboveCap(given.maxAtWorkBnb) ? { ok: false } : { ok: true, limits: given };
 }
 const aboveCap = (raw: unknown) => {
   const value = typeof raw === "string" && /^\d+(\.\d+)?$/.test(raw.trim()) ? Number(raw.trim()) : raw;
@@ -130,7 +129,7 @@ export function planAgent(input: PlanInput, now = new Date()): { ok: true; agent
     const path = resolve(input.scriptPath!);
     if (!existsSync(path)) return { ok: false, errors: [...errors, `no script at ${path}`] };
     const source = readFileSync(path, "utf8");
-    audit = auditSource(source, { maxTradeBnb: limits.limits.maxTradeBnb });
+    audit = auditSource(source, { maxBuyBnb: limits.limits.maxAtWorkBnb });
     script = { path, sha256: sha256Of(source) };
     params = input.params ?? {};
     tick = input.tickSeconds ?? audit.tickSeconds ?? 60;
@@ -250,7 +249,7 @@ export function applyChange(
   options: { byReview: boolean },
 ): { ok: true; agent: AgentConfig } | { ok: false; errors: string[] } {
   if (!agent.confirmed) return { ok: false, errors: ["the agent was never confirmed"] };
-  if (change.limits && "budgetBnb" in change.limits && aboveCap(change.limits.budgetBnb)) return { ok: false, errors: [CAP_REFUSAL] };
+  if (change.limits && "maxAtWorkBnb" in change.limits && aboveCap(change.limits.maxAtWorkBnb)) return { ok: false, errors: [CAP_REFUSAL] };
   if (agent.track === "prompt" && !agent.preset) {
     if (Object.keys(change.params ?? {}).length > 0) return { ok: false, errors: ["a prompt agent without an autopilot has no parameters: the prompt is the strategy"] };
     if (change.tickSeconds !== undefined) return { ok: false, errors: ["a prompt agent without an autopilot has no tick: your agent decides when to look"] };
@@ -359,8 +358,11 @@ function reviewLoosens(next: Record<string, unknown>, confirmed: Record<string, 
   return errors;
 }
 
+/** An agent as written, with limits an earlier runtime stored read in today's shape (league-v5.1.4: `migrateLimits`). */
 export function loadAgent(home: string, name: string): AgentConfig | null {
-  return readJson<AgentConfig>(agentPaths(home, name).agent);
+  const agent = readJson<AgentConfig>(agentPaths(home, name).agent);
+  if (!agent) return null;
+  return { ...agent, limits: migrateLimits(agent.limits), confirmed: agent.confirmed ? { ...agent.confirmed, limits: migrateLimits(agent.confirmed.limits) } : agent.confirmed };
 }
 
 export function saveAgent(home: string, agent: AgentConfig): void {

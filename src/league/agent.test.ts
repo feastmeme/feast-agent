@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { applyChange, confirmAgent, planAgent, type AgentConfig } from "./agent.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 const LEADER = "0x000000000000000000000000000000000000bEEF";
 const OTHER = "0x000000000000000000000000000000000000c0DE";
 
@@ -51,8 +53,10 @@ describe("the hourly review stays inside the envelope the user confirmed", () =>
 
   it("may not loosen a limit", () => {
     const dca = confirmed("dca");
-    expect(review(dca, {}, { maxTradeBnb: 0.01 }).ok).toBe(true);
-    expect(review(dca, {}, { maxTradeBnb: 0.03 }).ok).toBe(false);
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(review(dca, {}, { maxAtWorkBnb: 0.1 }).ok).toBe(true);
+    expect(review(dca, {}, { maxOpenPositions: 4 }).ok).toBe(true);
+    expect(review(dca, {}, { maxOpenPositions: 6 }).ok).toBe(false);
   });
 
   it("may not change a script's parameters at all", () => {

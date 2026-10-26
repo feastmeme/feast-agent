@@ -10,7 +10,7 @@ import { loadAgent, type AgentConfig } from "./agent.ts";
 import { sha256Of } from "./audit/static.ts";
 import { auditRefusal } from "./audit/verdict.ts";
 import { BawError, type Signer } from "./baw.ts";
-import { bookView, clearPause, emptyBook, pendingBuysWei, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
+import { bookView, clearPause, emptyBook, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
 import { autopilotLine } from "./enter/copy.ts";
@@ -26,7 +26,7 @@ import { checkNote, flushNotes, notesPath, readNotes } from "./notes/queue.ts";
 import { liveToken } from "./notes/session.ts";
 import { presetStrategy } from "./presets/logic.ts";
 import { PRESETS } from "./presets/specs.ts";
-import { SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
+import { LEAGUE_CAP_BNB, SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
 import { dayCount, leftOut } from "./prompt/floor.ts";
 import { autopilotGate, lastHostAction, promptChanged, recordHostAction } from "./prompt/host.ts";
 import { callHost, hostShown, type HostCall } from "./ask/host.ts";
@@ -46,7 +46,7 @@ import { healthFlag, modelHint, withHealth, withHostHeaders, type Health } from 
 import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
 import { freshMemory, pastEnd, sessionStep, sessionView, signInNoteText, type SessionMemory, type SessionView } from "./session.ts";
-import { addToLedger, acquireWalletLock, agentPaths, bootId, otherBoot, pidAlive, appendJsonl, readJson, readLedger, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
+import { addToLedger, acquireWalletLock, agentPaths, bootId, otherBoot, pidAlive, appendJsonl, readJson, stopReason, writeFileAtomic, writeJsonAtomic, writeStop } from "./store.ts";
 import { makeApi, normalizeIntent, type IntentRequest, type Meta, type PresetExtras, type Snapshot, type StrategyEvent } from "./strategy.ts";
 
 /**
@@ -433,7 +433,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
 
     const warmup = () =>
       agent!.track === "script" && book.warmup && warmupActive(book.warmup)
-        ? { active: true, remaining: WARMUP_TRADES - book.warmup.trades, sizeBnb: Math.min(WARMUP_SIZE_BNB, agent!.limits.maxTradeBnb) }
+        ? { active: true, remaining: WARMUP_TRADES - book.warmup.trades, sizeBnb: WARMUP_SIZE_BNB }
         : null;
     const halt = (reason: string) => {
       writeStop(paths.stop, reason);
@@ -745,8 +745,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         stopped: stopReason(deps.home, deps.name) !== null,
         coinIsFeast,
         book: bookView(book, intent.coin, now),
-        walletSpentWei: readLedger(deps.home).spentWei + pendingBuysWei(book, "wallet"),
-        claimFundsWei: book.claimFundsWei,
+        othersAtWorkWei: othersAtWorkWei(deps.home, deps.name),
         warmup: agent!.track === "script" ? book.warmup : null,
       };
       const verdict = guard(input);
@@ -1508,6 +1507,28 @@ export function statusOf(home: string, name: string): { agent: AgentConfig | nul
   // A pid file written under another boot names whatever process has that pid now (addendum 8): not running.
   const running = existsSync(paths.pid) && pidAlive(Number(readFileSync(paths.pid, "utf8").trim())) && !otherBoot(readJson<{ boot?: unknown }>(`${paths.pid}.boot`)?.boot);
   return { agent, book, notifications, stop: stopReason(home, name), running };
+}
+
+/**
+ * The cost of the open positions and pending buys in every other agent's book on this wallet's league home (the
+ * owner's ruling for league-v5.1.4: the cap on capital at work is wallet-wide, every agent counts).
+ */
+export function othersAtWorkWei(home: string, name: string): bigint {
+  const dir = join(home, "agents");
+  if (!existsSync(dir)) return 0n;
+  let sum = 0n;
+  for (const other of readdirSync(dir)) {
+    if (other === name || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(other)) continue;
+    const state = agentPaths(home, other).state;
+    if (!existsSync(state)) continue;
+    try {
+      sum += bookView(parseBook(readFileSync(state, "utf8")), undefined, Date.now()).exposureWei;
+    } catch {
+      // Fail closed: a book this runtime cannot read counts as the whole cap at work, so no buy passes on a guess.
+      sum += bnbToWei(LEAGUE_CAP_BNB);
+    }
+  }
+  return sum;
 }
 
 export type { Limits };

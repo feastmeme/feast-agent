@@ -147,7 +147,8 @@ describe("the presets read the snapshot's events as they read the indexer's", ()
     const market = new Market(chain, { log: () => {} });
     return (await Promise.all(events.map((e) => market.ingest(e, now, new Set())))).flat();
   }
-  const snapshotFor = (now: number): Snapshot => ({ now, balanceBnb: 1, limits: { maxTradeBnb: 0.02 } as never, warmup: null, coins: [], positions: [], trades: [], holders: {}, launchesByCreator: {}, feast: C1, launched: null, stale: null });
+  // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+  const snapshotFor = (now: number): Snapshot => ({ now, balanceBnb: 1, limits: { maxAtWorkBnb: 0.15 } as never, warmup: null, coins: [], positions: [], trades: [], holders: {}, launchesByCreator: {}, feast: C1, launched: null, stale: null });
 
   it("copy: a trade carries the payer's full address, and a followed wallet's buy is queued to copy", async () => {
     const at = Date.parse(String(tradeRow(150, 0).at));

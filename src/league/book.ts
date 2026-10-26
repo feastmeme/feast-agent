@@ -31,7 +31,7 @@ export type Position = {
 export type Book = {
   version: 1;
   positions: Record<string, Position>;
-  /** Buys in the last 24 h, for L2. */
+  /** Buys in the last 24 h (a figure for the status since league-v5.1.4: no limit reads it). */
   spends: { at: number; wei: bigint; fundedBy: "wallet" | "claim" }[];
   /** Everything this agent has put in from the wallet, gross. */
   lifetimeSpentWei: bigint;
@@ -39,7 +39,7 @@ export type Book = {
   realized: { at: number; pnlWei: bigint }[];
   realizedTotalWei: bigint;
   gasWei: bigint;
-  /** Trade times in the last hour, for L12. */
+  /** Trade times in the last hour (kept in the file's shape; no limit reads it since league-v5.1.4). */
   trades: number[];
   lastEntryAt: Record<string, number>;
   failureStreak: number;
@@ -278,7 +278,6 @@ export function bookView(book: Book, coin: Address | undefined, now: number): Bo
     exposureWei: positions.reduce((sum, p) => sum + p.costWei, 0n) + pending,
     spent24hWei: live.spends.reduce((sum, s) => sum + s.wei, 0n) + pending,
     realizedLoss24hWei: lossWei,
-    trades1h: live.trades.length,
     lastEntryAt: coin !== undefined ? live.lastEntryAt[key(coin)] ?? null : null,
     paused: pauseReason(live),
     drawdownWei: live.peakEquityWei > live.lastEquityWei ? live.peakEquityWei - live.lastEquityWei : 0n,

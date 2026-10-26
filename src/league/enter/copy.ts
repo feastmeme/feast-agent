@@ -577,7 +577,7 @@ export function memeCard(view: { name: string; symbol: string; description: stri
           : "the default: of the 1% fee on every trade, 20 points go to the platform, 20 are bought back and burned, 10 go to referrers, and 50 go to you as its creator (60 when a trade has no referrer)",
       ],
       [zh ? "费用" : "Cost", zh ? "只有 gas；发送前钱包会先预览这笔交易" : "gas only; your wallet previews the transaction before it is sent"],
-      [zh ? "限额" : "Limits", zh ? "走 league-entry 的硬限额（L12 每小时交易数；L16 钱包、Developer Mode 与停止文件）；每只 agent 只发一次" : "league-entry's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent"],
+      [zh ? "限额" : "Limits", zh ? "走 league-entry 的硬限额（L16 钱包、Developer Mode 与停止文件）；每只 agent 只发一次" : "league-entry's hard limits apply (L16 the wallet, Developer Mode and the stop file); one launch per agent"],
     ]),
     "",
     ...(view.first ? [zh ? "这枚币会成为你的 agent 的币。" : "This coin becomes your agent's coin."] : []),

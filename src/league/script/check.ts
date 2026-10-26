@@ -6,7 +6,6 @@ import { clean } from "../enter/copy.ts";
 import { bookView, emptyBook, positionOf, recordBuy, recordSell, type Book } from "../book.ts";
 import { guard, type Intent } from "../guard.ts";
 import { MIN_TRADE_BNB, bnbToWei, resolveLimits, weiToBnb, type Limits } from "../limits.ts";
-import { LEAGUE_CAP_BNB } from "../prompt/constants.ts";
 import { readJson, writeJsonAtomic } from "../store.ts";
 import { normalizeIntent, type IntentRequest, type PositionRow, type Snapshot } from "../strategy.ts";
 import { ScriptSandbox } from "./sandbox.ts";
@@ -61,9 +60,9 @@ export function scriptCheckPassed(home: string, sha256: string): boolean {
   }
 }
 
-/** The limits a planned agent gets by default: the defaults, with the league's capital cap. */
+/** The limits a planned agent gets by default (L3's default is the league's cap on capital at work). */
 function checkLimits(): Limits {
-  const limits = resolveLimits({ budgetBnb: LEAGUE_CAP_BNB });
+  const limits = resolveLimits({});
   if (!limits.ok) throw new Error(limits.errors.join("; "));
   return limits.limits;
 }
@@ -81,11 +80,11 @@ export async function checkScript(source: string, options: { file?: string; seed
     { id: "meta", label: "meta validates: a tick of 15–3600 s, known events", pass: true },
     { id: "calls", label: "no call throws or overruns (onTick 1 s, onEvent 250 ms)", pass: true },
     { id: "normalize", label: "every request normalizes as the runtime's would", pass: true },
-    { id: "size", label: `every buy is at least ${MIN_TRADE_BNB} BNB and at most L1 (${limits.maxTradeBnb} BNB)`, pass: true },
+    { id: "size", label: `every buy is at least ${MIN_TRADE_BNB} BNB`, pass: true },
     { id: "feast", label: "every buy names a Feast coin of the stub world (L15)", pass: true },
     { id: "held", label: "every sale names a coin the stub book holds", pass: true },
     { id: "launch", label: "at most one launch", pass: true },
-    { id: "guard", label: "the real guard, with the stub book, refuses nothing (L2, L4, L5 and the rest)", pass: true },
+    { id: "guard", label: "the real guard, with the stub book, refuses nothing (L3, L5 and the rest)", pass: true },
     // A script that never trades in the stub world passes nothing the warm-up would have tested: it keeps its warm-up.
     { id: "trades", label: "it trades in the stub world: at least one buy and one sale, each approved", pass: true },
   ];
@@ -135,7 +134,6 @@ export async function checkScript(source: string, options: { file?: string; seed
     const feastSet = new Set(world.coins.map((c) => c.toLowerCase()));
     let book: Book = emptyBook();
     let balanceWei = bnbToWei(world.balanceBnb);
-    let spentWei = 0n;
     let state: Record<string, unknown> = {};
 
     run: for (const [index, frame] of world.frames.entries()) {
@@ -185,10 +183,6 @@ export async function checkScript(source: string, options: { file?: string; seed
               fail("size", `a buy of ${intent.bnb} BNB is under the smallest trade, ${MIN_TRADE_BNB} BNB`, at);
               continue;
             }
-            if (bnbToWei(intent.bnb!) > bnbToWei(limits.maxTradeBnb)) {
-              fail("size", `a buy of ${intent.bnb} BNB is over L1 (${limits.maxTradeBnb} BNB)`, at);
-              continue;
-            }
             if (!coin || !feastSet.has(coin)) {
               fail("feast", `${intent.coin} is not a Feast coin of the stub world`, at);
               continue;
@@ -214,8 +208,7 @@ export async function checkScript(source: string, options: { file?: string; seed
             stopped: false,
             coinIsFeast: intent.kind === "launch" || (coin !== undefined && feastSet.has(coin)),
             book: bookView(book, intent.coin, frame.now),
-            walletSpentWei: spentWei,
-            claimFundsWei: 0n,
+            othersAtWorkWei: 0n,
             warmup: null,
           });
           if (!verdict.ok) {
@@ -229,7 +222,6 @@ export async function checkScript(source: string, options: { file?: string; seed
             const sizeWei = verdict.sizeWei!;
             book = recordBuy(book, { coin: intent.coin!, symbol: frame.coins.find((c) => c.coin.toLowerCase() === coin)?.symbol ?? "?", quote: world.feast, coinsOut: bnbToWei(weiToBnb(sizeWei) / price), bnbInWei: sizeWei, gasWei: 0n, at: frame.now, fundedBy: "wallet", ownLaunch: false, source: "script" });
             balanceWei -= sizeWei;
-            spentWei += sizeWei;
             stats.buys += 1;
           } else if (intent.kind === "sell") {
             const held = positionOf(book, intent.coin!)!;
@@ -258,7 +250,7 @@ export function checkLines(report: CheckReport, path: string, audit: string | nu
   const s = report.stats;
   return [
     `FL script check: ${report.file ?? "the script"} (sha256 ${sha})`,
-    `The stub world: ${report.world.snapshots} snapshots, ${report.world.coins} coins, ${report.world.balanceBnb} BNB, the default limits with the 0.15 BNB cap.`,
+    `The stub world: ${report.world.snapshots} snapshots, ${report.world.coins} coins, ${report.world.balanceBnb} BNB, the default limits with the 0.15 BNB cap on BNB at work.`,
     ...report.checks.map((c) => `  ${c.pass ? "ok" : "NO"} ${c.id}: ${c.label}${c.pass ? "" : ` — ${c.detail ?? ""}${c.snapshot !== undefined ? ` (snapshot ${c.snapshot})` : ""}${c.request ? `: ${clean(c.request, 200)}` : ""}`}`),
     `${report.verdict.toUpperCase()}: ${s.ticks} ticks, ${s.events} events, ${s.requests} requests (${s.buys} buys, ${s.sells} sales, ${s.launches} launches), ${s.refusals} refused by the guard`,
     `Report: ${path}`,

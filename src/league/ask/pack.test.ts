@@ -45,7 +45,8 @@ const pic = (c: Address, symbol: string, over: Partial<CoinPicture> = {}): CoinP
   ...over,
 });
 
-const headroom = (over: Partial<Headroom> = {}): Headroom => ({ maxTradeBnb: 0.02, minTradeBnb: 0.001, spent24hBnb: 0.01, leftTodayBnb: 0.09, leftSeasonBnb: 0.12, exposureBnb: 0.006, leftExposureBnb: 0.094, openPositions: 1, maxOpenPositions: 5, trades1h: 2, maxTradesPerHour: 12, realizedLoss24hBnb: 0, leftLoss24hBnb: 0.05, drawdownBnb: 0, maxDrawdownBnb: 0.1, cooldowns: [], ...over });
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+const headroom = (over: Partial<Headroom> = {}): Headroom => ({ minTradeBnb: 0.001, capBnb: 0.15, atWorkBnb: 0.006, roomToBuyBnb: 0.144, exposureBnb: 0.006, openPositions: 1, maxOpenPositions: 5, realizedLoss24hBnb: 0, leftLoss24hBnb: 0.05, drawdownBnb: 0, maxDrawdownBnb: 0.1, cooldowns: [], ...over });
 
 const position = (c: Address): PositionOut => ({ coin: c, symbol: { untrusted: true, text: "HELD" }, coins: 1000, costBnb: 0.006, markBnb: 0.0066, pnlBnb: 0.0006, openedAt: new Date(NOW - 20 * 60_000).toISOString(), armed: true, pnlPct: 10, ageMinutes: 20, peakPnlPct: 12, exitImpactPct: 1.5 });
 
@@ -87,7 +88,9 @@ describe("the pack", () => {
       "[feast-app src/lib/league/score.ts ELIMINATION, DROP_SHARE 0.2 (40ebae81)]",
       "today's floor: 1 trades and 0.006 BNB of volume so far (needs 3 and 0.02 BNB; buys and sells of any Feast coin count, your own coin left out): NOT met yet.",
       "wallet: 0.05 BNB, 0.003 BNB of it the gas reserve, 0.047 BNB spendable.",
-      "headroom: a buy now at most 0.02 BNB",
+      // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+      "headroom: a buy now at most 0.047 BNB; room to buy now 0.144 BNB (at work 0.006 of 0.15 BNB; a sale frees room)",
+      "at most 0.15 BNB at work in open positions at any time (their cost, every agent on this wallet; a sale frees room; no limit on how often you trade)",
       "the league today (in BNB): rank 12 of 30 alive",
       "tonight's cutoff: 5 of 25 over the floor may be dropped",
       "- c1 | 1000 | 0.006 | 0.0066 | +10.0% | +12.0% | 20 min | 1.5%",
@@ -127,11 +130,14 @@ describe("the pack", () => {
     expect(text).not.toContain("RULES` and");
   });
 
-  it("the positions get the first ids; the cap is the least of L1, the day, the season, the exposure and the spendable balance", () => {
+  it("the positions get the first ids; the cap is the least of the room to buy now and the spendable balance", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
     const p = buildPack(input());
     expect([...p.ids.entries()].map(([id, v]) => [id, v.coin, v.held])).toEqual([["c1", B, true], ["c2", A, false], ["c3", EVIL, false]]);
-    expect(p.maxBuyBnb).toBe(0.02);
-    expect(maxBuyBnb({ headroom: headroom({ leftTodayBnb: 0.004 }), wallet: { balanceBnb: 1, gasReserveBnb: 0.003, spendableBnb: 0.997 } })).toBe(0.004);
+    expect(p.maxBuyBnb).toBe(0.047);
+    expect(maxBuyBnb({ headroom: headroom({ roomToBuyBnb: 0.004 }), wallet: { balanceBnb: 1, gasReserveBnb: 0.003, spendableBnb: 0.997 } })).toBe(0.004);
+    expect(maxBuyBnb({ headroom: headroom(), wallet: { balanceBnb: 1, gasReserveBnb: 0.003, spendableBnb: 0.997 } })).toBe(0.144);
+    expect(p.text).not.toMatch(/trades this hour|left today|left this season|one trade at most/);
     expect(maxBuyBnb({ headroom: headroom(), wallet: null })).toBe(0);
   });
 
@@ -156,7 +162,8 @@ describe("the answer, checked strictly", () => {
 
   it("refuses an unknown coin, an over-limit amount, a sale without a position, a bad fraction, an unknown action, not an object", () => {
     expect(validateAnswer({ action: "buy", coin: "c9", amountBnb: 0.006 }, pack)).toEqual({ ok: false, why: "coin c9 is not an id in this pack" });
-    expect(validateAnswer({ action: "buy", coin: "c2", amountBnb: 0.05 }, pack)).toEqual({ ok: false, why: "amountBnb 0.05 is above the 0.02 BNB a buy may be now (the hard limits and the balance)" });
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(validateAnswer({ action: "buy", coin: "c2", amountBnb: 0.05 }, pack)).toEqual({ ok: false, why: "amountBnb 0.05 is above the 0.047 BNB a buy may be now (the hard limits and the balance)" });
     expect(validateAnswer({ action: "buy", coin: "c2", amountBnb: 0.0001 }, pack)).toEqual({ ok: false, why: "amountBnb 0.0001 is below 0.001 BNB" });
     expect(validateAnswer({ action: "sell", coin: "c2", fraction: 1 }, pack)).toEqual({ ok: false, why: "a sale of c2, which the agent does not hold" });
     expect(validateAnswer({ action: "sell", coin: "c1", fraction: 1.5 }, pack)).toEqual({ ok: false, why: "fraction must be above 0 and at most 1" });

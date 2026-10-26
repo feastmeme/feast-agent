@@ -4,16 +4,17 @@
  */
 
 /**
- * The league's capital cap: what this wallet may put in, in all, across every
- * agent (the owner's ruling, 2026-10-24: every on-chain amount is in BNB, and the
- * cap is 0.15 BNB). It is not a limit of `limits.ts`: L3's default (0.25) and its
- * ceiling (10) stay, and the cap only tightens the `budgetBnb` of an agent the
- * user plans. L3's ledger is wallet-wide: every agent on this wallet counts.
+ * The league's cap (the owner's rulings: 2026-10-24, every on-chain amount is in
+ * BNB and the cap is 0.15 BNB; league-v5.1.4, the cap is capital at work): the cost of
+ * the open positions of every agent on this wallet, at any moment, is at most
+ * 0.15 BNB, and a sale frees that position's cost. It is L3's default and its
+ * ceiling in `limits.ts`: an agent may set its own cap lower, never higher. There
+ * is no limit on how often an agent trades.
  */
 export const LEAGUE_CAP_BNB = 0.15;
 
-/** What `plan` and `set` say to a budget above the cap. */
-export const CAP_REFUSAL = `the league caps capital at ${LEAGUE_CAP_BNB} BNB`;
+/** What `plan` and `set` say to a cap above the league's. */
+export const CAP_REFUSAL = `the league caps capital at work at ${LEAGUE_CAP_BNB} BNB in open positions (a sale frees room)`;
 
 /**
  * How long the user's own agent may go without a trade before an autopilot preset trades, by default (task 975, the

@@ -1,8 +1,10 @@
 import type { Address } from "viem";
 import { describe, expect, it } from "vitest";
 
-import { bookView, emptyBook, markArmed, parseBook, recordBuy, recordClaim, recordFailure, recordSell, serializeBook, withEquity } from "./book.ts";
+import { bookView, emptyBook, markArmed, parseBook, pruned, recordBuy, recordClaim, recordFailure, recordSell, serializeBook, withEquity } from "./book.ts";
 import { bnbToWei } from "./limits.ts";
+
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
 
 const COIN: Address = "0x00000000000000000000000000000000c0ffee01";
 const QUOTE: Address = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
@@ -17,14 +19,17 @@ describe("the book", () => {
   it("a buy opens a position and counts toward every window", () => {
     const book = buy();
     const view = bookView(book, COIN, T + 1);
-    expect(view).toMatchObject({ openPositions: 1, hasPosition: true, exposureWei: wei(0.01), spent24hWei: wei(0.01), trades1h: 1, lastEntryAt: T });
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(view).toMatchObject({ openPositions: 1, hasPosition: true, exposureWei: wei(0.01), spent24hWei: wei(0.01), lastEntryAt: T });
+    expect(view).not.toHaveProperty("trades1h");
     expect(book.lifetimeSpentWei).toBe(wei(0.01));
     expect(book.gasWei).toBe(10n);
   });
 
   it("windows forget what has aged out", () => {
     const book = buy();
-    expect(bookView(book, COIN, T + HOUR).trades1h).toBe(0);
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(pruned(book, T + HOUR).trades).toEqual([]);
     expect(bookView(book, COIN, T + 24 * HOUR).spent24hWei).toBe(0n);
     // The position itself stays open.
     expect(bookView(book, COIN, T + 24 * HOUR).openPositions).toBe(1);

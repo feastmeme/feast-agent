@@ -76,33 +76,41 @@ describe("prompt mode: the track", () => {
   });
 });
 
-describe("the capital cap: 0.15 BNB, the league's boundary, with limits.ts unchanged", () => {
-  it("L3's own default and ceiling stay; a plan of any track gets 0.15", () => {
-    expect(DEFAULT_LIMITS.budgetBnb).toBe(0.25);
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+describe("the league's cap: 0.15 BNB at work in open positions, L3's default and ceiling", () => {
+  it("L3's default and ceiling are the cap; a plan of any track gets 0.15", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(DEFAULT_LIMITS.maxAtWorkBnb).toBe(0.15);
     expect(LEAGUE_CAP_BNB).toBe(0.15);
-    expect(planned({ name: "demo", promptPath: promptFile() }).limits.budgetBnb).toBe(0.15);
-    expect(planned({ name: "dca1", preset: "dca" }).limits.budgetBnb).toBe(0.15);
+    expect(planned({ name: "demo", promptPath: promptFile() }).limits.maxAtWorkBnb).toBe(0.15);
+    expect(planned({ name: "dca1", preset: "dca" }).limits.maxAtWorkBnb).toBe(0.15);
     const script = new URL("../../../examples/scripts/round-trip.mjs", import.meta.url).pathname;
-    expect(planned({ name: "s", scriptPath: script }).limits.budgetBnb).toBe(0.15);
+    expect(planned({ name: "s", scriptPath: script }).limits.maxAtWorkBnb).toBe(0.15);
   });
 
-  it("a tighter budget is kept; one above the cap is refused at plan and at set, with the cap's line", () => {
-    expect(planned({ name: "demo", promptPath: promptFile(), limits: { budgetBnb: 0.1 } }).limits.budgetBnb).toBe(0.1);
-    const over = planAgent({ name: "demo", promptPath: promptFile(), limits: { budgetBnb: 0.2 } });
+  it("a tighter cap is kept; one above the league's is refused at plan and at set, with the cap's line", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(planned({ name: "demo", promptPath: promptFile(), limits: { maxAtWorkBnb: 0.1 } }).limits.maxAtWorkBnb).toBe(0.1);
+    const over = planAgent({ name: "demo", promptPath: promptFile(), limits: { maxAtWorkBnb: 0.2 } });
     expect(over).toEqual({ ok: false, errors: [CAP_REFUSAL] });
-    expect(CAP_REFUSAL).toBe("the league caps capital at 0.15 BNB");
+    expect(CAP_REFUSAL).toBe("the league caps capital at work at 0.15 BNB in open positions (a sale frees room)");
     const agent = confirmAgent(planned({ name: "dca1", preset: "dca" }));
-    expect(applyChange(agent, { limits: { budgetBnb: 0.2 } }, { byReview: false })).toEqual({ ok: false, errors: [CAP_REFUSAL] });
-    expect(applyChange(agent, { limits: { budgetBnb: "0.16" } }, { byReview: false })).toEqual({ ok: false, errors: [CAP_REFUSAL] });
-    const tighter = applyChange(agent, { limits: { budgetBnb: 0.12 } }, { byReview: false });
-    expect(tighter.ok && tighter.agent.limits.budgetBnb).toBe(0.12);
+    expect(applyChange(agent, { limits: { maxAtWorkBnb: 0.2 } }, { byReview: false })).toEqual({ ok: false, errors: [CAP_REFUSAL] });
+    expect(applyChange(agent, { limits: { maxAtWorkBnb: "0.16" } }, { byReview: false })).toEqual({ ok: false, errors: [CAP_REFUSAL] });
+    const tighter = applyChange(agent, { limits: { maxAtWorkBnb: 0.12 } }, { byReview: false });
+    expect(tighter.ok && tighter.agent.limits.maxAtWorkBnb).toBe(0.12);
+    // The old budget's name is refused with what became of it, never read as a cap.
+    const old = planAgent({ name: "demo", promptPath: promptFile(), limits: { budgetBnb: 0.1 } });
+    expect(old.ok).toBe(false);
+    if (!old.ok) expect(old.errors.join(" ")).toMatch(/now L3 maxAtWorkBnb/);
   });
 
   it("a prompt agent without an autopilot takes no parameters and no tick at set", () => {
     const agent = confirmAgent(planned({ name: "demo", promptPath: promptFile() }));
     expect(applyChange(agent, { params: { buyBnb: 0.01 } }, { byReview: false }).ok).toBe(false);
     expect(applyChange(agent, { tickSeconds: 30 }, { byReview: false }).ok).toBe(false);
-    expect(applyChange(agent, { limits: { maxTradeBnb: 0.01 } }, { byReview: false }).ok).toBe(true);
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(applyChange(agent, { limits: { maxAtWorkBnb: 0.1 } }, { byReview: false }).ok).toBe(true);
   });
 });
 
@@ -115,7 +123,8 @@ describe("the card of a prompt agent", () => {
     expect(card).toContain("  > Line one red\n  > Line two\n  > Line three");
     expect(card).not.toContain("Line four");
     expect(card).not.toMatch(/[\u001b‮]/);
-    expect(card).toContain("Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts.");
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    expect(card).toContain("League cap: at most 0.15 BNB at work in open positions at any time, wallet-wide (every agent on this wallet counts); a sale frees room; no limit on how often you trade.");
     expect(card).toContain("Autopilot backup: off (--no-autopilot).");
     expect(card).toContain("the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call");
     expect(card).not.toMatch(/Cadence: a tick every/);
@@ -126,7 +135,11 @@ describe("the card of a prompt agent", () => {
   });
 
   it("every card of the user's own agents names the cap", () => {
-    expect(renderCard(planned({ name: "dca1", preset: "dca" }))).toContain("Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts.");
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    const card = renderCard(planned({ name: "dca1", preset: "dca" }));
+    expect(card).toContain("League cap: at most 0.15 BNB at work in open positions at any time, wallet-wide (every agent on this wallet counts); a sale frees room; no limit on how often you trade.");
+    expect(card).toContain("Worst case: at most 0.15 BNB at work in open positions at any time;");
+    expect(card).not.toMatch(/trades an hour|BNB of buys in any 24 h|BNB in all/);
   });
 });
 
