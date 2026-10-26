@@ -27,6 +27,14 @@ describe("a launch's picture on the request (task 961)", () => {
     }
   });
 
+  it("league-v5.1.4: a script written before still reads the retired limits, as the cap that replaced them", () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    const snapshot = { now: 1, balanceBnb: 1, limits: { ...DEFAULT_LIMITS, maxAtWorkBnb: 0.1 }, warmup: null, coins: [], positions: [], trades: [], holders: {}, launchesByCreator: {}, feast: FEAST, launched: null } as unknown as Snapshot;
+    const { api } = makeApi(snapshot, { params: {}, state: {}, source: "script", ttlMs: 1_000, log: () => {} });
+    expect(api.read.limits()).toMatchObject({ maxAtWorkBnb: 0.1, maxTradeBnb: 0.1, maxDailySpendBnb: 0.1, budgetBnb: 0.1, maxExposureBnb: 0.1, maxTradesPerHour: 60 });
+    expect(Math.min(0.005, (api.read.limits() as unknown as { maxTradeBnb: number }).maxTradeBnb)).toBe(0.005);
+  });
+
   it("a script's api.launch cannot pass one through", () => {
     const snapshot = { now: 1, balanceBnb: 1, limits: DEFAULT_LIMITS, warmup: null, coins: [], positions: [], trades: [], holders: {}, launchesByCreator: {}, feast: FEAST, launched: null } as unknown as Snapshot;
     const { api, intents } = makeApi(snapshot, { params: {}, state: {}, source: "script", ttlMs: 1_000, log: () => {} });

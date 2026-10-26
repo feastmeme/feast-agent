@@ -86,6 +86,16 @@ export const RETIRED_LIMITS: Readonly<Record<string, string>> = {
   maxExposureBnb: `L4 is now L3 maxAtWorkBnb: at most ${LEAGUE_CAP_BNB} BNB at work in open positions, and a sale frees room`,
 };
 
+/**
+ * A script written for an earlier runtime may still read the retired keys from `api.read.limits()`: each is given as
+ * the cap that replaced it (and 60 for the old trades-per-hour ceiling), so its arithmetic still yields a size. Figures
+ * to read only: nothing enforces them, and the guard checks the cap.
+ */
+export function legacyLimitAliases(limits: Pick<Limits, "maxAtWorkBnb">): Record<"maxTradeBnb" | "maxDailySpendBnb" | "budgetBnb" | "maxExposureBnb" | "maxTradesPerHour", number> {
+  const cap = limits.maxAtWorkBnb;
+  return { maxTradeBnb: cap, maxDailySpendBnb: cap, budgetBnb: cap, maxExposureBnb: cap, maxTradesPerHour: 60 };
+}
+
 /** The old default of L4 (open exposure): a stored 0.1 was never the user's own choice, so it does not tighten the cap. */
 const OLD_EXPOSURE_DEFAULT = 0.1;
 
@@ -93,18 +103,25 @@ const OLD_EXPOSURE_DEFAULT = 0.1;
  * Limits as an earlier runtime stored them, in today's shape: L1, L2 and L12 dropped; the old budget (L3) and
  * exposure (L4) folded into the at-work cap, never above LEAGUE_CAP_BNB and never looser than a lower value the user
  * chose; L8 kept under its new ceiling. Limits already in today's shape come back as they are, in LIMIT_SPECS' order.
+ * `confirmed`, the envelope the user said yes to (as stored): a stored exposure of 0.1 is the old default only when
+ * the envelope's is 0.1 too (else a review tightened it, and it stays), and the cap never comes out looser than the
+ * envelope's own, folded the same way.
  */
-export function migrateLimits<T>(stored: T): T {
+export function migrateLimits<T>(stored: T, confirmed?: unknown): T {
   if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return stored;
   const given = stored as Record<string, unknown>;
   if (!Object.keys(RETIRED_LIMITS).some((key) => key in given)) return stored;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+  const envelope = confirmed !== null && typeof confirmed === "object" && !Array.isArray(confirmed) ? (confirmed as Record<string, unknown>) : null;
   const merged: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(given)) if (!(key in RETIRED_LIMITS)) merged[key] = value;
   if (!("maxAtWorkBnb" in merged)) {
     const exposure = num(given.maxExposureBnb);
-    const tighter = [LEAGUE_CAP_BNB, num(given.budgetBnb), exposure === OLD_EXPOSURE_DEFAULT ? null : exposure].filter((v): v is number => v !== null);
-    merged.maxAtWorkBnb = Math.min(...tighter);
+    const confirmedExposure = envelope ? num(envelope.maxExposureBnb) : null;
+    const oldDefault = exposure === OLD_EXPOSURE_DEFAULT && (confirmedExposure === null || confirmedExposure === OLD_EXPOSURE_DEFAULT);
+    const tighter = [LEAGUE_CAP_BNB, num(given.budgetBnb), oldDefault ? null : exposure].filter((v): v is number => v !== null);
+    const envelopeCap = envelope ? num((migrateLimits(envelope) as Record<string, unknown>).maxAtWorkBnb) : null;
+    merged.maxAtWorkBnb = Math.min(...tighter, ...(envelopeCap !== null ? [envelopeCap] : []));
   }
   const drawdown = num(merged.maxDrawdownBnb);
   if (drawdown !== null && drawdown > LEAGUE_CAP_BNB) merged.maxDrawdownBnb = LEAGUE_CAP_BNB;

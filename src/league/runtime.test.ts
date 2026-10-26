@@ -153,6 +153,8 @@ describe("a sent transaction whose receipt is late", () => {
     await first;
     const paused = state()!;
     expect(paused.unresolved).toHaveLength(1);
+    // Task 1020: the note line is settled when the buy is sent, so the late fill's note still says who asked.
+    expect(paused.unresolved[0]!.why).toBe("the dca preset");
     expect(pauseReason(paused)).toMatch(/not known yet/);
     expect(paused.paused).toBeNull();
     expect(Object.keys(paused.positions)).toHaveLength(0);
@@ -172,6 +174,8 @@ describe("a sent transaction whose receipt is late", () => {
     expect(book.unresolved).toEqual([]);
     expect(readLedger(home).spentWei).toBe(2n * 10n ** 15n);
     expect(calls.filter((c) => c === "execute")).toHaveLength(1);
+    const { readNotes } = await import("./notes/queue.ts");
+    expect(readNotes(home, "late").map((n) => n.text)).toEqual(["bought FEAST for 0.002 BNB: the dca preset"]);
   });
 });
 

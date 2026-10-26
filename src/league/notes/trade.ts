@@ -14,8 +14,8 @@ export const KEEPER_WHY = "keeper: meeting today's activity floor";
 /** The hard stop-loss's (L6) line. */
 export const STOP_LOSS_WHY = "the hard stop-loss (L6)";
 
-/** Hex runs from four digits up, with a 6+4 shortening's tail: addresses, hashes and their short forms. */
-const HEX = /0x[0-9a-f]{4,}(?:…[0-9a-f]{2,})?/gi;
+/** Hex runs from four digits up, with a 6+4 shortening's tail: addresses, hashes and their short forms; and bare runs of 16 and more. */
+const HEX = /0x[0-9a-f]{4,}(?:…[0-9a-f]{2,})?|\b[0-9a-f]{16,}\b/gi;
 /** Terminal escapes, control characters and the invisible or direction-changing ones. */
 const ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
 const UNSEEN = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/gu;
@@ -27,17 +27,20 @@ function clean(value: string, max: number): string {
   return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : flat;
 }
 
+/** Escapes and invisible characters out first, so none can split a hex run; then the hex runs; then the length. */
+const scrub = (raw: string, max: number) => clean(clean(raw, 4_000).replace(HEX, ""), max);
+
 /** A why as the note carries it: cleaned to one line, hex runs taken out, at most WHY_MAX characters; null when nothing is left. */
 export function cleanWhy(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  const text = clean(raw.replace(HEX, ""), WHY_MAX);
+  const text = scrub(raw, WHY_MAX);
   return text.length > 0 ? text : null;
 }
 
 const size = (bnb: number) => (Number.isFinite(bnb) && bnb > 0 ? String(Number(bnb.toFixed(6))) : "0");
 
 export function tradeNoteText(trade: { side: "buy" | "sell"; symbol: string | null; bnb: number; why: string | null }): string {
-  const coin = clean((trade.symbol ?? "").replace(HEX, ""), 24) || "a coin";
+  const coin = scrub(trade.symbol ?? "", 24) || "a coin";
   const head = `${trade.side === "buy" ? "bought" : "sold"} ${coin} for ${size(trade.bnb)} BNB`;
   const why = cleanWhy(trade.why);
   return why ? `${head}: ${why}` : head;

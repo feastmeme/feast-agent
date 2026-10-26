@@ -2,7 +2,7 @@ import { isAbsolute } from "node:path";
 import { getAddress, isAddress, type Address } from "viem";
 
 import type { Intent } from "./guard.ts";
-import type { Limits } from "./limits.ts";
+import { legacyLimitAliases, type Limits } from "./limits.ts";
 import type { DayCount } from "./prompt/floor.ts";
 import { cleanWhy } from "./notes/trade.ts";
 
@@ -218,7 +218,8 @@ export function makeApi(
     read: {
       now: () => snapshot.now,
       balance: () => snapshot.balanceBnb,
-      limits: () => ({ ...snapshot.limits }),
+      // League-v5.1.4: the retired keys as read-only figures, so a script written before still sizes its buys.
+      limits: () => ({ ...legacyLimitAliases(snapshot.limits), ...snapshot.limits }),
       warmup: () => (snapshot.warmup ? { ...snapshot.warmup } : null),
       coins: ({ sort = "volume", limit = 50 } = {}) => {
         const rows = [...snapshot.coins];

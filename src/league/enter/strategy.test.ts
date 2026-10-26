@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { confirmAgent, loadAgent, planAgent, saveAgent } from "../agent.ts";
+import { prepareStart } from "../start.ts";
 
 import { DEFAULT_STRATEGY_TITLE, PERSONAS, PERSONA_TEXT, defaultPersonaOf, defaultStrategy, defaultStrategyVariants, personaOf } from "./strategy.ts";
 
@@ -51,5 +57,31 @@ describe("the default's six styles", () => {
     });
     expect(defaultPersonaOf(defaultStrategy("maplegrin", "zh", "hunter"), "maplegrin")).toBe("hunter");
     expect(defaultPersonaOf(`${variants[0]} `, "maplegrin")).toBeNull();
+  });
+});
+
+describe("the style stays with the copied text", () => {
+  let dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+  });
+
+  it("a re-plan with the same prompt keeps it; another prompt, or the copy edited, drops it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "feast-league-1020-persona-"));
+    dirs.push(dir);
+    const home = join(dir, "home");
+    const path = join(dir, "strategy.md");
+    writeFileSync(path, defaultStrategy("maplegrin", "en"));
+    const planned = planAgent({ name: "maplegrin", promptPath: path, preset: "steady" });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, { ...confirmAgent(planned.agent), persona: personaOf("maplegrin") });
+    // Same prompt, another autopilot idle: a new card, the style kept.
+    prepareStart(home, "maplegrin", { plan: { name: "maplegrin", promptPath: path, preset: "steady", idleMinutes: 45 }, yes: false, confirm: true });
+    expect(loadAgent(home, "maplegrin")?.persona).toBe(personaOf("maplegrin"));
+    // The copy edited: the style no longer names the text.
+    writeFileSync(path, "Mine now: only what moves.\n");
+    prepareStart(home, "maplegrin", { plan: { name: "maplegrin", promptPath: path, preset: "steady", idleMinutes: 45 }, yes: false, confirm: true });
+    expect(loadAgent(home, "maplegrin")?.persona ?? null).toBeNull();
   });
 });

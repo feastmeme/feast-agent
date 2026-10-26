@@ -80,7 +80,9 @@ export function prepareStart(
       // The season gate stays with the agent through a new card: a restart before the start still waits.
       const league = options.league !== undefined ? options.league : agent?.league;
       const manual = options.manual !== undefined ? options.manual : (agent?.manual ?? undefined);
-      const persona = options.persona !== undefined ? options.persona : (agent?.persona ?? undefined);
+      // The default's style names the copied text: a new prompt (another file, or the copy edited) drops it.
+      const samePrompt = agent?.prompt?.sha256 !== undefined && agent.prompt.sha256 === planned.agent.prompt?.sha256;
+      const persona = options.persona !== undefined ? options.persona : samePrompt ? (agent?.persona ?? undefined) : undefined;
       agent = { ...planned.agent, ...(league !== undefined ? { league } : {}), ...(manual ? { manual: true } : {}), ...(persona ? { persona } : {}) };
       saveAgent(home, agent);
       replanned = true;

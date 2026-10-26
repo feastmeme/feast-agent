@@ -369,7 +369,7 @@ function reviewLoosens(next: Record<string, unknown>, confirmed: Record<string, 
 export function loadAgent(home: string, name: string): AgentConfig | null {
   const agent = readJson<AgentConfig>(agentPaths(home, name).agent);
   if (!agent) return null;
-  return { ...agent, limits: migrateLimits(agent.limits), confirmed: agent.confirmed ? { ...agent.confirmed, limits: migrateLimits(agent.confirmed.limits) } : agent.confirmed };
+  return { ...agent, limits: migrateLimits(agent.limits, agent.confirmed?.limits), confirmed: agent.confirmed ? { ...agent.confirmed, limits: migrateLimits(agent.confirmed.limits) } : agent.confirmed };
 }
 
 export function saveAgent(home: string, agent: AgentConfig): void {

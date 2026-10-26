@@ -608,7 +608,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (item.fundedBy === "wallet" && bnbIn > 0n) addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: item.txHash ?? "unknown" });
       log("buy.filled", { id: item.intentId, txHash: item.txHash, late: true, coin: item.coin, coinsOut, bnbInWei: bnbIn, payerIsWallet: item.txHash !== null });
       notify("trade", `a late outcome: bought ${item.symbol} for ${weiToBnb(bnbIn)} BNB (${item.txHash ?? "read from the balance"})`);
-      tradeNote({ side: "buy", symbol: item.symbol, bnbWei: bnbIn, why: tradeWhy({ source: item.source, why: item.why ?? null }, agent!) });
+      tradeNote({ side: "buy", symbol: item.symbol, bnbWei: bnbIn, why: item.why !== undefined ? item.why : tradeWhy({ source: item.source }, agent!) });
       enqueue([{ id: `arm-${clock()}`, kind: "arm", coin: item.coin, reason: "arm the exit", source: "runtime", createdAt: clock() }]);
     };
     const bookLateSell = (item: (typeof book.unresolved)[number], coinsIn: bigint, bnbOut: bigint, gasWei: bigint) => {
@@ -616,7 +616,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       log("sell.filled", { id: item.intentId, txHash: item.txHash, late: true, coin: item.coin, coinsIn, bnbOutWei: bnbOut, estimated: item.txHash === null });
       notify("trade", `a late outcome: sold ${item.symbol} (${item.txHash ?? "read from the balance; the BNB out is the floor it was sent with"})`);
       // A sale read only from the balance has no known BNB out: no note says a size it cannot vouch for.
-      if (item.txHash !== null) tradeNote({ side: "sell", symbol: item.symbol, bnbWei: bnbOut, why: tradeWhy({ source: item.source, why: item.why ?? null }, agent!) });
+      if (item.txHash !== null) tradeNote({ side: "sell", symbol: item.symbol, bnbWei: bnbOut, why: item.why !== undefined ? item.why : tradeWhy({ source: item.source }, agent!) });
     };
     /** Keep a transaction whose outcome is not known. It never touches the L14 pause; `pauseReason` reads both. */
     const unresolvedSend = (
@@ -644,7 +644,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             sizeWei: what.sizeWei ?? 0n,
             balanceBefore: what.balanceBefore ?? null,
             minCoins: what.minCoins ?? 0n,
-            ...(intent.why ? { why: intent.why } : {}),
+            why: tradeWhy(intent, agent!),
           },
         ],
       };
@@ -683,7 +683,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         minCoins: what.minCoins ?? 0n,
         sending: true,
         run: runToken,
-        ...(intent.why ? { why: intent.why } : {}),
+        // The trade's note line, settled now: a late outcome still says who asked for it and why.
+        why: tradeWhy(intent, agent!),
       };
       book = { ...book, unresolved: [...book.unresolved, record] };
       save();

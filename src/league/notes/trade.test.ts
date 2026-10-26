@@ -53,6 +53,8 @@ describe("the note's text", () => {
     expect(cleanWhy("   ")).toBeNull();
     expect(cleanWhy(42)).toBeNull();
     expect(tradeNoteText({ side: "sell", symbol: null, bnb: 0.002, why: null })).toBe("sold a coin for 0.002 BNB");
+    // An escape cannot split a hex run past the scrub; a bare hash (no 0x) goes too.
+    expect(tradeNoteText({ side: "buy", symbol: "0x\u001b[mdeadbeefcafe1234", bnb: 0.01, why: `see ${"cd".repeat(32)} done` })).toBe("bought a coin for 0.01 BNB: see done");
   });
 
   it("the why by source: the AI's or the host's own, the keeper's line, a preset's, the hard stop-loss's; a script none", () => {

@@ -37,7 +37,7 @@ export function onEvent(api, event) {             // optional: on the events lis
 | --- | --- |
 | `api.read.now()` | the time, epoch ms |
 | `api.read.balance()` | BNB the wallet can spend, above the gas reserve |
-| `api.read.limits()` | the hard limits in force (L3, L5–L11, L13, L14) |
+| `api.read.limits()` | the hard limits in force (L3, L5–L11, L13, L14); a script written before league-v5.1.4 still reads `maxTradeBnb`, `maxDailySpendBnb`, `budgetBnb` and `maxExposureBnb` (each the cap, `maxAtWorkBnb`) and `maxTradesPerHour` (60): figures only, nothing enforces them |
 | `api.read.warmup()` | `{ active, remaining, sizeBnb }` or null |
 | `api.read.coins({ sort, limit })` | coins: `sort` is `"new"`, `"holders"` or `"volume"`; each `{ coin, symbol, quote, creator, launchedAt, ageSeconds, holders, volume24hBnb, trades24h, priceBnb, hasMetadata }` |
 | `api.read.coin(addressOrSymbol)` | one coin, or null (`"FEAST"` works) |

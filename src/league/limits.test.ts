@@ -204,6 +204,20 @@ describe("limits an earlier runtime stored (migrateLimits)", () => {
     expect(migrated({ ...old, maxDrawdownBnb: 0.2 }).maxDrawdownBnb).toBe(0.15);
   });
 
+  it("a stored exposure of 0.1 a review tightened (the envelope's is not 0.1) stays; never looser than the envelope", () => {
+    const stored = { ...old, maxExposureBnb: 0.1 };
+    const envelope = { ...old, maxExposureBnb: 0.12 };
+    const now = migrateLimits(stored as unknown as Limits, envelope);
+    const yes = migrated(envelope);
+    expect(now.maxAtWorkBnb).toBe(0.1);
+    expect(yes.maxAtWorkBnb).toBe(0.12);
+    expect(loosenedBeyond(now, yes)).toEqual([]);
+    // The old default on both sides is the old default: the cap is the league's.
+    expect(migrateLimits(old as unknown as Limits, old).maxAtWorkBnb).toBe(0.15);
+    // A stored cap can never come out looser than the envelope's.
+    expect(migrateLimits({ ...old, budgetBnb: 0.15, maxExposureBnb: 0.1 } as unknown as Limits, { ...old, budgetBnb: 0.05 }).maxAtWorkBnb).toBe(0.05);
+  });
+
   it("limits already in today's shape come back as they are", () => {
     expect(migrateLimits(DEFAULT_LIMITS)).toBe(DEFAULT_LIMITS);
     expect(migrateLimits(null)).toBeNull();

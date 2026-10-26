@@ -85,7 +85,7 @@ export type Unresolved = {
   sending?: boolean;
   /** Which run wrote it (a token of that run's own): the run itself never takes its own send in flight for a leftover. */
   run?: string;
-  /** Task 1020: the trade's public why, for its note when the outcome comes late. */
+  /** Task 1020: the trade's note line as settled when it was sent (`tradeWhy`), for its note when the outcome comes late. */
   why?: string | null;
 };
 
