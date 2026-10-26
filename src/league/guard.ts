@@ -33,6 +33,8 @@ export type Intent = {
   /** A buyback paid with claimed creator fees, not the wallet's BNB. Its cost is at work like any other (L3). */
   fundedBy?: "wallet" | "claim";
   reason: string;
+  /** Task 1020: the player's AI's one line on why (an answer's `why`, `--why`): the trade's public note says it. */
+  why?: string;
   source: "preset" | "script" | "manual" | "runtime";
   createdAt: number;
   /** A buy signal goes stale: past this it is dropped, never traded late. */

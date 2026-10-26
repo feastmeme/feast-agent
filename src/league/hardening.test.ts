@@ -23,6 +23,8 @@ import { agentPaths, walletLockPath, writeJsonAtomic, writeStop } from "./store.
 import { readVersion, upgradeSentence, versionLine, versionView } from "./version.ts";
 import { utc8 } from "./register/copy.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * Task 975, addendum 8 (the season-readiness audit's gaps): the runtime's own hardening, on fakes. The league is a
  * function here (`seasonRead`) that answers as the test says and records the health flag each read carries.
@@ -177,7 +179,10 @@ describe("2. the sign-in's end (G2)", () => {
     expect(said.map((n) => n.code)).toEqual(["24h", "6h", "1h"]);
     // Addendum 11: the same three steps as public notes, their prefix byte-exact, queued for the notes stream.
     const noted = readFileSync(join(agentPaths(home, "demo").dir, "notes.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { text?: string }).filter((n) => typeof n.text === "string").map((n) => n.text);
-    expect(noted).toEqual(["⏰ 登录到期 · 24 小时后 · 主人需要重新扫码一次", "⏰ 登录到期 · 6 小时后 · 主人需要重新扫码一次", "⏰ 登录到期 · 1 小时后 · 主人需要重新扫码一次"]);
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    // (and ruling C, the same night: every trade the runtime makes posts its own public note, the keeper's included)
+    expect(noted.filter((t) => t!.startsWith("⏰"))).toEqual(["⏰ 登录到期 · 24 小时后 · 主人需要重新扫码一次", "⏰ 登录到期 · 6 小时后 · 主人需要重新扫码一次", "⏰ 登录到期 · 1 小时后 · 主人需要重新扫码一次"]);
+    expect(noted.filter((t) => !t!.startsWith("⏰")).every((t) => /^(bought|sold) \S+ for [\d.]+ BNB: keeper: meeting today's activity floor$/.test(t!))).toBe(true);
     expect(Buffer.from(noted[0]!).subarray(0, Buffer.byteLength("⏰ 登录到期")).toString("hex")).toBe(Buffer.from("⏰ 登录到期").toString("hex"));
     // The heartbeat: alive since the start, its last tick a safety pass of this run.
     const alive = JSON.parse(readFileSync(join(agentPaths(home, "demo").dir, "alive.json"), "utf8")) as { since: string; lastTick: string };

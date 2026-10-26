@@ -10,6 +10,8 @@ import { comparePosition, decodeCursor, EventStream } from "./events.ts";
 import { BOB, C1, C3, CAROL, launchRow, META_HASH, tradeRow, WBNB } from "./fakes.ts";
 import { parseSnapshot, type FeastSnapshot } from "./snapshot.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 const T0 = Date.parse("2026-10-28T13:00:00Z");
 
 const snap = (o: { block: number; events?: unknown[]; fromCursor?: string; cursor?: string }): FeastSnapshot =>

@@ -8,6 +8,8 @@ import { RULES } from "../data/standing.ts";
 import { DEFAULT_LIMITS } from "../limits.ts";
 import { buildPack, maxBuyBnb, PACK_MAX_CHARS, parseAnswerText, validateAnswer, type PackInput } from "./pack.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * Task 975, addenda 4 and 5: the pack the player's AI sees, and the strict check of its answer. Hand-built, made-up
  * addresses; one coin's symbol is an attempted instruction, and must stay inside an UNTRUSTED fence.

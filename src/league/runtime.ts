@@ -13,6 +13,7 @@ import { BawError, type Signer } from "./baw.ts";
 import { bookView, clearPause, emptyBook, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
+import { activeWaits } from "./doors.ts";
 import { autopilotLine } from "./enter/copy.ts";
 import { Executor } from "./executor.ts";
 import { backstopExits } from "./exits.ts";
@@ -24,6 +25,7 @@ import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type
 import { Market } from "./market.ts";
 import { checkNote, flushNotes, notesPath, readNotes } from "./notes/queue.ts";
 import { liveToken } from "./notes/session.ts";
+import { tradeNoteText, tradeWhy } from "./notes/trade.ts";
 import { presetStrategy } from "./presets/logic.ts";
 import { PRESETS } from "./presets/specs.ts";
 import { LEAGUE_CAP_BNB, SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
@@ -241,6 +243,19 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       appendJsonl(notesPath(deps.home, deps.name), { id: randomUUID(), ts: new Date(clock()).toISOString(), text: checked.text, tx: null, model: modelHint(), sent: false });
       log("note.queued", { by: "runtime", why });
       notesDue = true;
+    };
+    /**
+     * Task 1020 (the owner's ruling C): one public note for every trade this runtime makes and confirms, whoever asked
+     * for it, through the same filter as every note. While feast.meme has the notes door waiting (429) it is dropped,
+     * never queued; and nothing about it can fail or hold up the trade: any error is logged and the loop goes on.
+     */
+    const tradeNote = (trade: { side: "buy" | "sell"; symbol: string | null; bnbWei: bigint; why: string | null }) => {
+      try {
+        if (activeWaits(deps.home, deps.name, clock()).some((w) => w.door === "notes")) return log("note.dropped", { by: "trade", why: "the notes door is waiting (rate-limited)" });
+        publicNote(tradeNoteText({ side: trade.side, symbol: trade.symbol, bnb: weiToBnb(trade.bnbWei), why: trade.why }), `${trade.side} note`);
+      } catch (error) {
+        log("note.failed", { by: "trade", reason: errorLine(error) });
+      }
     };
     const sessionSay = (reading: { connected: boolean; view: SessionView | null }) => {
       const step = sessionStep(session, reading, clock());
@@ -593,12 +608,15 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (item.fundedBy === "wallet" && bnbIn > 0n) addToLedger(deps.home, { at: clock(), agent: deps.name, wei: bnbIn, tx: item.txHash ?? "unknown" });
       log("buy.filled", { id: item.intentId, txHash: item.txHash, late: true, coin: item.coin, coinsOut, bnbInWei: bnbIn, payerIsWallet: item.txHash !== null });
       notify("trade", `a late outcome: bought ${item.symbol} for ${weiToBnb(bnbIn)} BNB (${item.txHash ?? "read from the balance"})`);
+      tradeNote({ side: "buy", symbol: item.symbol, bnbWei: bnbIn, why: tradeWhy({ source: item.source, why: item.why ?? null }, agent!) });
       enqueue([{ id: `arm-${clock()}`, kind: "arm", coin: item.coin, reason: "arm the exit", source: "runtime", createdAt: clock() }]);
     };
     const bookLateSell = (item: (typeof book.unresolved)[number], coinsIn: bigint, bnbOut: bigint, gasWei: bigint) => {
       book = recordSell(book, { coin: item.coin, coinsIn, bnbOutWei: bnbOut, gasWei, at: clock() });
       log("sell.filled", { id: item.intentId, txHash: item.txHash, late: true, coin: item.coin, coinsIn, bnbOutWei: bnbOut, estimated: item.txHash === null });
       notify("trade", `a late outcome: sold ${item.symbol} (${item.txHash ?? "read from the balance; the BNB out is the floor it was sent with"})`);
+      // A sale read only from the balance has no known BNB out: no note says a size it cannot vouch for.
+      if (item.txHash !== null) tradeNote({ side: "sell", symbol: item.symbol, bnbWei: bnbOut, why: tradeWhy({ source: item.source, why: item.why ?? null }, agent!) });
     };
     /** Keep a transaction whose outcome is not known. It never touches the L14 pause; `pauseReason` reads both. */
     const unresolvedSend = (
@@ -626,6 +644,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             sizeWei: what.sizeWei ?? 0n,
             balanceBefore: what.balanceBefore ?? null,
             minCoins: what.minCoins ?? 0n,
+            ...(intent.why ? { why: intent.why } : {}),
           },
         ],
       };
@@ -664,6 +683,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         minCoins: what.minCoins ?? 0n,
         sending: true,
         run: runToken,
+        ...(intent.why ? { why: intent.why } : {}),
       };
       book = { ...book, unresolved: [...book.unresolved, record] };
       save();
@@ -795,6 +815,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         log("buy.filled", { id: approved.id, txHash: sent.txHash, coin, coinsOut: fills.coinsOut, bnbInWei: bnbIn, feeQuote: fills.fee, gasWei: sent.gasWei, payerIsWallet: true });
         notify("trade", `bought ${prepared.value.info.symbol} for ${weiToBnb(bnbIn)} BNB (${sent.txHash})`, { txHash: sent.txHash });
         save();
+        tradeNote({ side: "buy", symbol: prepared.value.info.symbol, bnbWei: bnbIn, why: tradeWhy(approved, agent!) });
         if (!positionOf(book, coin)?.armed && book.launched?.coin.toLowerCase() !== coin.toLowerCase()) {
           enqueue([{ id: `arm-${clock()}`, kind: "arm", coin, reason: "arm the exit: approve Permit2 and its allowance, so a sale is one transaction", source: "runtime", createdAt: clock() }]);
         }
@@ -830,7 +851,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         settle(approved, { outcome: "filled", kind: "sell", coin, symbol: prepared.value.info.symbol, bnb: weiToBnb(fills.bnbOutWei), txHash: sent.txHash });
         log("sell.filled", { id: approved.id, txHash: sent.txHash, coin, coinsIn: fills.coinsIn, bnbOutWei: fills.bnbOutWei, gasWei: sent.gasWei, payerIsWallet: true });
         notify("trade", `sold ${prepared.value.info.symbol} for ${weiToBnb(fills.bnbOutWei)} BNB (${sent.txHash})`, { txHash: sent.txHash });
-        return save();
+        save();
+        return tradeNote({ side: "sell", symbol: prepared.value.info.symbol, bnbWei: fills.bnbOutWei, why: tradeWhy(approved, agent!) });
       }
 
       if (approved.kind === "arm") {
@@ -987,6 +1009,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         report(next.id);
       }
       save();
+      // Task 1020: with no loop to flush it later (manual mode), the trade's own note goes out now: bounded, never thrown.
+      if (notesDue) {
+        notesDue = false;
+        await flushNotes(deps.home, deps.name, wallet, { site: deps.site ?? siteFromEnv(), fetch: deps.fetch ?? fetch, now: clock, max: 5, timeoutMs: 3_000, log }).catch(() => undefined);
+      }
       return { exit: "finished", reason: "the manual request ran" };
     }
 
@@ -1233,7 +1260,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         log("ask", { pack: pack.digest, action: d.action, coin: d.coin, amountBnb: d.amountBnb, fraction: d.fraction, result });
       };
       if (d.action === "hold") return finish("hold");
-      const request: IntentRequest = d.action === "buy" ? { kind: "buy", coin: d.coin, bnb: d.amountBnb, reason: `ask: ${d.reason}` } : { kind: "sell", coin: d.coin, fraction: d.fraction, reason: `ask: ${d.reason}` };
+      const request: IntentRequest = d.action === "buy" ? { kind: "buy", coin: d.coin, bnb: d.amountBnb, reason: `ask: ${d.reason}`, why: d.why } : { kind: "sell", coin: d.coin, fraction: d.fraction, reason: `ask: ${d.reason}`, why: d.why };
       const normal = normalizeIntent(request, { snapshot: { feast, now: clock(), limits: agent!.limits }, source: "manual", slippagePct: Math.min(3, agent!.limits.maxSlippagePct), ttlMs: 120_000 });
       if ("error" in normal) return finish(`invalid: ${normal.error}`);
       askIds.add(normal.intent.id);

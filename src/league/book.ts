@@ -85,6 +85,8 @@ export type Unresolved = {
   sending?: boolean;
   /** Which run wrote it (a token of that run's own): the run itself never takes its own send in flight for a leftover. */
   run?: string;
+  /** Task 1020: the trade's public why, for its note when the outcome comes late. */
+  why?: string | null;
 };
 
 const DAY = 24 * 60 * 60 * 1_000;

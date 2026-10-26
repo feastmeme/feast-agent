@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { agentPaths, appendJsonl, writeJsonAtomic } from "../store.ts";
 import { dayCount, dayLine, dayView, leftOut, nextDinner } from "./floor.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * The day's count (task 975): dinner to dinner (21:00 UTC+8 = 13:00 UTC), every buy and every sale one trade, their
  * BNB the volume, the agent's own coin left out and FEAST counted (addendum 7: as the settlement engine counts it),
@@ -50,7 +52,8 @@ describe("dayCount", () => {
     const t = DINNER - 5 * 60 * MIN;
     log(h, t, "intent.queued", { kind: "buy", coin: C1, bnb: 0.006 });
     log(h, t + 1, "buy.filled", { coin: C1, bnbInWei: WEI(0.006) });
-    log(h, t + 2, "intent.refused", { kind: "buy", limit: "L12" });
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+    log(h, t + 2, "intent.refused", { kind: "buy", limit: "L3" });
     log(h, t + 3, "intent.failed", { kind: "sell", stage: "prepare" });
     log(h, t + 4, "buy.filled", { coin: OWN, bnbInWei: WEI(0.01) });
     log(h, t + 5, "buy.filled", { coin: FEAST, bnbInWei: WEI(0.01) });

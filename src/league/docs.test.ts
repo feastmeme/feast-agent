@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { RUNTIME_RELEASE } from "./headers.ts";
 import { PRESET_IDS } from "./presets/specs.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * The docs task 963 adds or changes, held to what the runtime does: prompt
  * mode first in the skill, the example prompts, the release pin, and no tick

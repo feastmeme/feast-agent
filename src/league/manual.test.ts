@@ -9,12 +9,15 @@ import { renderCard } from "./card.ts";
 import { FakeFeed, INDEXER, seeded, SITE } from "./feed/fakes.ts";
 import { checkHost, hostDetailHint, hostHeaders, modelHint } from "./headers.ts";
 import { MANUAL_BEAT_MS, manualBeat } from "./manual.ts";
+import { readNotes } from "./notes/queue.ts";
 import { saveSession } from "./notes/session.ts";
 import { FEAST, fakeClock, tradeWorld } from "./prompt/fakes.ts";
 import { leagueWire } from "./register/fakes.ts";
 import { runAgent } from "./runtime.ts";
 import { askChoice, prepareStart, shapeOf } from "./start.ts";
 import { agentPaths } from "./store.ts";
+
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
 
 /**
  * Task 975, run 21: manual mode (the owner's ruling of 2026-10-25, for Binance AI Pro's sandbox, where a background
@@ -74,7 +77,7 @@ describe("manual commands with no loop: the one-shot, under the loop's own rules
     const w = tradeWorld({ now: c.now });
     const feed = league(c, () => leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: new Date(T0 + 3 * HOUR).toISOString() } }));
     const base = { home, name: "maplegrin", signer: w.signer, chain: w.chain, fetch: feed.fetch, site: SITE, indexer: INDEXER, now: c.now, sleep: c.sleep, out: () => {} };
-    const bought = await runAgent({ ...base, random: seeded(2), only: [{ kind: "buy", coin: FEAST, bnb: 0.006, reason: "manual buy" }], onlyIds: ["m-buy"] });
+    const bought = await runAgent({ ...base, random: seeded(2), only: [{ kind: "buy", coin: FEAST, bnb: 0.006, reason: "manual buy", why: "FEAST holds while the pairs dip" }], onlyIds: ["m-buy"] });
     expect(bought).toEqual({ exit: "finished", reason: "the manual request ran" });
     expect(outcomes(home).find((o) => o.requestId === "m-buy")).toMatchObject({ outcome: "filled", kind: "buy", txHash: expect.stringMatching(/^0x[0-9a-f]{64}$/) });
     const book = JSON.parse(readFileSync(agentPaths(home, "maplegrin").state, "utf8")) as { positions: Record<string, unknown> };
@@ -86,16 +89,20 @@ describe("manual commands with no loop: the one-shot, under the loop's own rules
     // Nothing runs between the commands: no loop event, no autopilot, no ask.
     const events = readFileSync(agentPaths(home, "maplegrin").log, "utf8");
     expect(events).not.toMatch(/"event":"(autopilot\.|ask\.|started")/);
+    // Task 1020 (ruling C): each one-shot trade posts its own public note, the why given, or none.
+    expect(readNotes(home, "maplegrin").map((n) => n.text.replace(/for [\d.]+ BNB/, "for <size> BNB"))).toEqual(["bought FEAST for <size> BNB: FEAST holds while the pairs dip", "sold FEAST for <size> BNB"]);
   });
 
-  it("the hard limits hold: a buy over L1 (one trade's size) is refused, nothing executed", async () => {
+  it("the hard limits hold: a buy over the cap (L3, 0.15 BNB at work) is refused, nothing executed", async () => {
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
     const { home } = manualAgent();
     const c = fakeClock(T0);
     const w = tradeWorld({ now: c.now });
     const feed = league(c, () => leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: null } }));
     const out = await runAgent({ home, name: "maplegrin", signer: w.signer, chain: w.chain, fetch: feed.fetch, site: SITE, indexer: INDEXER, now: c.now, sleep: c.sleep, random: seeded(4), only: [{ kind: "buy", coin: FEAST, bnb: 0.2, reason: "manual buy" }], onlyIds: ["m-big"], out: () => {} });
     const said = out.exit === "refused" ? out.reason : JSON.stringify(outcomes(home).find((o) => o.requestId === "m-big"));
-    expect(said).toMatch(/refused|L1|size/i);
+    expect(said).toMatch(/L3/);
+    expect(said).toMatch(/0\.15 BNB cap/);
     expect(w.calls.filter((call) => call === "execute")).toEqual([]);
   });
 

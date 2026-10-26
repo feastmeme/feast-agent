@@ -22,6 +22,8 @@ import { AVATAR_PNG, FakeEnterSite, fakeEnterChain, fakeOneShot, INDEXER, keptRo
 import { enter, entryAgent, keepReferrerRead, keptReferrer, readEntry, referrerStatus, type EnterDeps, type EnterInput } from "./flow.ts";
 import { PERSONA_TEXT, defaultStrategy, personaOf } from "./strategy.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * `FL enter` (task 968): one command enters the league and runs the player's AI. One card and one yes sign the
  * site's Register message once, open the notes session, and start the agent waiting for the season; `--meme`

@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { confirmAgent, planAgent, saveAgent } from "../agent.ts";
 import { splitHelp } from "../support.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /** Run 22: the help line every refusal, error and status ends with, kept apart from the output the tests read. */
 const helpOff = (stdout: string, stderr: string) => {
   const out = splitHelp(stdout);

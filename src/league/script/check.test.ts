@@ -130,7 +130,8 @@ describe("graduation: a passing check and a passed audit finish the warm-up for 
     writeFileSync(file, source);
     if (options.audit !== false) {
       auditFile(home, file);
-      recordModelVerdict(home, file, "pass", "read against the checklist: no wallet, no network, sizes inside L1");
+      // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+      recordModelVerdict(home, file, "pass", "read against the checklist: no wallet, no network, sizes inside the cap");
     }
     if (options.check !== false) writeCheckReport(home, await checkScript(source, { file }));
     const planned = planAgent({ name: "busy", scriptPath: file });

@@ -18,6 +18,8 @@ import { tradeWorld } from "./prompt/fakes.ts";
 import { LeagueSite } from "./register/site.ts";
 import { appendJsonl, writeFileAtomic } from "./store.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /**
  * Task 975, the owner's ruling B: every request to feast.meme carries `x-feast-host` (which AI hosts the agent) and
  * `x-feast-runtime` (the release); the indexer, the chain and any other origin never see them.

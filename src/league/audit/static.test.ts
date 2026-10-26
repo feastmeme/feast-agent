@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { AUDIT_RULES, auditSource, sha256Of, type RuleId } from "./static.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /** A well-formed script around a body: only the body varies between cases. */
 const script = (body: string, head = "") => `${head}
 export const meta = { name: "t", tickSeconds: 60 };

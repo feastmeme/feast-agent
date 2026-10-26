@@ -4,6 +4,7 @@ import { getAddress, isAddress, type Address } from "viem";
 import type { Intent } from "./guard.ts";
 import type { Limits } from "./limits.ts";
 import type { DayCount } from "./prompt/floor.ts";
+import { cleanWhy } from "./notes/trade.ts";
 
 /**
  * The one interface every strategy has — the six presets and any user script
@@ -74,8 +75,8 @@ export type StrategyEvent =
 
 /** What a strategy may ask for. Anything else on the request is ignored. */
 export type IntentRequest =
-  | { kind: "buy"; coin: unknown; bnb: unknown; reason?: unknown }
-  | { kind: "sell"; coin: unknown; fraction?: unknown; reason?: unknown }
+  | { kind: "buy"; coin: unknown; bnb: unknown; reason?: unknown; why?: unknown }
+  | { kind: "sell"; coin: unknown; fraction?: unknown; reason?: unknown; why?: unknown }
   | { kind: "launch"; name: unknown; symbol: unknown; quote?: unknown; description?: unknown; burn?: unknown; referrer?: unknown; reason?: unknown; image?: unknown };
 
 export type Meta = { name: string; tickSeconds: number; events: ("coin.created" | "trade" | "price.move")[]; watch: string[] };
@@ -155,18 +156,20 @@ export function normalizeIntent(
   const now = ctx.snapshot.now;
   const reason = typeof request.reason === "string" && request.reason.trim() ? request.reason.trim().slice(0, 200) : request.kind;
   const base = { reason, source: ctx.source, createdAt: now, slippagePct: ctx.slippagePct };
+  // Task 1020: the public why of a buy or a sale, cleaned once here (never an address or a hash).
+  const why = request.kind === "buy" || request.kind === "sell" ? cleanWhy(request.why) : null;
   if (request.kind === "buy") {
     const coin = resolveCoin(ctx.snapshot, request.coin);
     if (!coin) return { error: "buy: coin must be an address or FEAST" };
     if (typeof request.bnb !== "number" || !Number.isFinite(request.bnb)) return { error: "buy: bnb must be a number" };
-    return { intent: { id: nextId("buy", now), kind: "buy", coin, bnb: request.bnb, expiresAt: now + ctx.ttlMs, ...base } };
+    return { intent: { id: nextId("buy", now), kind: "buy", coin, bnb: request.bnb, expiresAt: now + ctx.ttlMs, ...base, ...(why ? { why } : {}) } };
   }
   if (request.kind === "sell") {
     const coin = resolveCoin(ctx.snapshot, request.coin);
     if (!coin) return { error: "sell: coin must be an address or FEAST" };
     const fraction = request.fraction === undefined ? 1 : request.fraction;
     if (typeof fraction !== "number" || !Number.isFinite(fraction)) return { error: "sell: fraction must be a number" };
-    return { intent: { id: nextId("sell", now), kind: "sell", coin, fraction, ...base } };
+    return { intent: { id: nextId("sell", now), kind: "sell", coin, fraction, ...base, ...(why ? { why } : {}) } };
   }
   if (request.kind === "launch") {
     if (typeof request.name !== "string" || typeof request.symbol !== "string") return { error: "launch: name and symbol are text" };

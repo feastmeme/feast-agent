@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_STRATEGY_TITLE, PERSONAS, PERSONA_TEXT, defaultPersonaOf, defaultStrategy, defaultStrategyVariants, personaOf } from "./strategy.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 /** Task 1020: the season-1 default strategy v1.1 and its six styles. Made-up Agent IDs. */
 
 describe("the default's six styles", () => {

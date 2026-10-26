@@ -9,6 +9,8 @@ import { DEFAULT_LIMITS } from "../limits.ts";
 import { CAP_REFUSAL, DEFAULT_IDLE_MINUTES, LEAGUE_CAP_BNB, SAFETY_PASS_SECONDS } from "./constants.ts";
 import { autopilotGate, promptChanged } from "./host.ts";
 
+// owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
+
 let dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });

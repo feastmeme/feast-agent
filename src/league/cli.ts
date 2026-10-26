@@ -137,8 +137,10 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   variable --ask-key-env names, or stored once with FL ask-key <name>)
   model <name> <model|default>    change the model the agent's AI is asked with (default: the host's own default)
   ask-key <name>                  read the endpoint's key on stdin and keep it for the agent (mode 0600; never shown)
-  answer <name> '<json>'          a host with no headless CLI answers the last FL ask <name> --print by hand (within 10 min):
-                                  the same check as an asked AI's, then the trade through FL buy's or FL sell's road
+  answer <name> '<json>' [--why "<one line>"]
+                                  a host with no headless CLI answers the last FL ask <name> --print by hand (within 10 min):
+                                  the same check as an asked AI's, then the trade through FL buy's or FL sell's road; the
+                                  answer's why (or --why) becomes the trade's public note
   every <name> <minutes>          change how often the agent is asked
   ask <name> [--print] [--json]   one ask now, into the running agent; --print: the exact pack it would send, nothing sent
   quote --coin <0x…|FEAST> --bnb <n> [--sell] [--fraction f] [--json]
@@ -153,10 +155,11 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   one reason, at most 280 characters, and the AI that wrote it (default: the host's hint,
                                   else other): kept here, sent to feast.meme with the season's notes session
   note --login                    open the season's notes session: one signed message (no gas), its token kept here
-  buy <name> <coin|FEAST> <bnb> [--no-wait]
+  buy <name> <coin|FEAST> <bnb> [--why "<one line>"] [--no-wait]
                                   one guarded buy, through the agent's limits; into a running agent it waits up to 90 s
-                                  for the outcome (filled: exit 0; refused: exit 2)
-  sell <name> <coin|FEAST> <fraction|all> [--no-wait]
+                                  for the outcome (filled: exit 0; refused: exit 2). Every filled trade posts one public
+                                  note, "bought <coin> for <size> BNB: <why>" (at most 140 characters of why; none: no colon part)
+  sell <name> <coin|FEAST> <fraction|all> [--why "<one line>"] [--no-wait]
   enter --name <id>.ai [--prompt <strategy.md>] [--meme "<concept>"] [--image <path>] [--no-start] [--yes] [--lang en|zh] [--json]
         [--coin-name "<…feed>" --symbol T --description "…"] [--autopilot <preset> | --no-autopilot] [--idle-minutes N]
         [--agent <name>] [--host <claude|codex|grok|other|gemini|cursor|opencode|openai|binance>] [--manual] [--no-jitter] [--no-daemon]
@@ -298,6 +301,7 @@ async function main(argv: string[]): Promise<number> {
       yes: { type: "boolean", default: false },
       review: { type: "boolean", default: false },
       detach: { type: "boolean", default: false },
+      why: { type: "string" },
       foreground: { type: "boolean", default: false },
       all: { type: "boolean", default: false },
       wait: { type: "string" },
@@ -851,8 +855,8 @@ async function main(argv: string[]): Promise<number> {
       const amount = need(args[2], command === "buy" ? "an amount of BNB" : "a fraction (0–1) or all");
       const request =
         command === "buy"
-          ? { kind: "buy" as const, coin, bnb: Number(amount), reason: "manual buy" }
-          : { kind: "sell" as const, coin, fraction: amount === "all" ? 1 : Number(amount), reason: "manual sale" };
+          ? { kind: "buy" as const, coin, bnb: Number(amount), reason: "manual buy", ...(values.why !== undefined ? { why: values.why } : {}) }
+          : { kind: "sell" as const, coin, fraction: amount === "all" ? 1 : Number(amount), reason: "manual sale", ...(values.why !== undefined ? { why: values.why } : {}) };
       return manualTrade(home, name, agent, request, json, values["no-wait"] === true);
     }
     case "answer": {
@@ -879,7 +883,9 @@ async function main(argv: string[]): Promise<number> {
         print(json, { ok: true, action: "hold", pack: printed.digest }, () => `hold: nothing traded (pack ${printed.digest})`);
         return 0;
       }
-      const request = d.action === "buy" ? { kind: "buy" as const, coin: d.coin!, bnb: d.amountBnb!, reason: `answer: ${d.reason}` } : { kind: "sell" as const, coin: d.coin!, fraction: d.fraction!, reason: `answer: ${d.reason}` };
+      // Task 1020: --why, else the answer's own why, becomes the trade's public note.
+      const why = values.why ?? d.why;
+      const request = d.action === "buy" ? { kind: "buy" as const, coin: d.coin!, bnb: d.amountBnb!, reason: `answer: ${d.reason}`, why } : { kind: "sell" as const, coin: d.coin!, fraction: d.fraction!, reason: `answer: ${d.reason}`, why };
       return manualTrade(home, name, agent, request, json, values["no-wait"] === true);
     }
     case "data": {
