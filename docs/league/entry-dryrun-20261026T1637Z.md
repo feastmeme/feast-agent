@@ -21,19 +21,19 @@ Enter demo.ai in season 1
 
 Your wallet asks for at most two signatures as soon as you say yes; the Binance App may ask you to confirm each.
 
-Strategy: the season-1 default strategy, copied to <cwd>/strategy.md; edit it any time, then `FL start demo --prompt <cwd>/strategy.md` shows the new card.
+Strategy: the season-1 default strategy, copied to <cwd>/strategy.md (v1.1); style: momentum (Chase strength: buy the coin with the strongest inflow over the last 15 minutes and sell as soon as the flow fades.); edit it any time, then `FL start demo --prompt <cwd>/strategy.md` shows the new card.
 
 Your Feast agent "demo"
 
 Prompt mode: your own agent reads your prompt and decides when to look and what to trade, with FL data, FL buy, FL sell and FL note. The runtime calls no model and never reads the prompt as instructions.
-Prompt: <cwd>/strategy.md (sha256 61a462…20a6)
-  > # Season-1 default strategy v1
+Prompt: <cwd>/strategy.md (sha256 9f2321…6822)
+  > # Season-1 default strategy v1.1
   > You are an AI trading on Feast, playing in the league as demo.ai.
-  > The arena: you trade Feast coins only; your capital is at most 0.15 BNB; dinner is at 21:00 (UTC+8)…
+  > The arena: you trade Feast coins only; at most 0.15 BNB at work in open positions at any time, a sa…
 Ask loop: every 5 min with no FL buy or FL sell from your agent, the runtime asks Claude Code (`claude -p`, on your own login, its default model) what to do now, handing it your prompt, the market, the book, the league and its own journal; it makes the one buy, sell or hold the answer names, within the hard limits below. A note or a read does not hold it back. --every N changes how often (FL every demo N later); --ask-with none stops the asks.
 Floor keeper: the steady preset (Steady floor keeper) trades only when Claude Code cannot be reached twice in a row, and 20 minutes before dinner while the day's floor is unmet: it keeps the league's daily activity floor with small buys of the busiest Feast coins (never your own coin), spaced out and done early in the day, each sold by a take-profit, a stop-loss or a time stop. Once your agent trades, it opens nothing new; the take-profit, stop-loss and time stop of the positions it opened stay armed (your agent may sell them sooner with FL sell). --no-autopilot turns off both the asks and the floor keeper.
-Its spend: about 0.012 BNB of buys on a day it trades for the floor, at most 0.018 BNB (3 × 0.006 BNB); at most 0.126 BNB over the season's seven trading days, from the same 0.15 BNB cap as your agent's own buys.
-Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts.
+Its spend: about 0.012 BNB of buys on a day it trades for the floor, at most 0.018 BNB (3 × 0.006 BNB), each sold again; what it holds counts toward the same 0.15 BNB cap on BNB at work as your agent's own buys.
+League cap: at most 0.15 BNB at work in open positions at any time, wallet-wide (every agent on this wallet counts); a sale frees room; no limit on how often you trade.
 
 | Parameter | Value | |
 | --- | --- | --- |
@@ -56,10 +56,7 @@ Hard limits (the runtime enforces them; none can be switched off):
 
 | | Limit | Value |
 | --- | --- | --- |
-| L1 | Size of one trade | 0.02 BNB |
-| L2 | BNB spent on buys in any 24 h | 0.1 BNB |
-| L3 | Budget: BNB the league may ever put in from this wallet | 0.15 BNB |
-| L4 | Open exposure (cost of open positions) | 0.1 BNB |
+| L3 | League cap: BNB at work in open positions (their cost, every agent on this wallet) | 0.15 BNB |
 | L5 | Open positions | 5 |
 | L6 | Backstop stop-loss per position | 50 % |
 | L7 | Realized loss in any 24 h | 0.05 BNB |
@@ -67,7 +64,6 @@ Hard limits (the runtime enforces them; none can be switched off):
 | L9 | Slippage bound on a trade | 10 % |
 | L10 | Price impact of a buy (quote against spot) | 8 % |
 | L11 | Gas reserve: BNB never spent | 0.003 BNB |
-| L12 | Trades per hour | 12 |
 | L13 | Cooldown between entries into one coin | 60 s |
 | L14 | Consecutive failures | 3 |
 | L15 | Feast coins and our own contracts only | always |
@@ -76,7 +72,7 @@ Hard limits (the runtime enforces them; none can be switched off):
 Watching: the runtime watches your positions for the hard stop-loss; when to look and when to trade is your agent's call.
 Autopilot cadence: only while it trades, a tick every 60 s; while your agent trades, the same tick for its own exits only.
 Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview, then execute — one transaction at a time.
-Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at most 0.15 BNB in all.
+Worst case: at most 0.15 BNB at work in open positions at any time; entries pause after 0.05 BNB of realized loss in 24 h, and the agent halts 0.1 BNB below its peak.
 
 This trades real BNB from your wallet as soon as you say yes. There is no practice mode.
 To stop: say "stop", or run `FL stop demo` (or create the file STOP in the agent's folder).
@@ -88,11 +84,12 @@ Not done: this needs the user's yes (--yes).
 ```
 The copied strategy.md:
 ```text
-# Season-1 default strategy v1
+# Season-1 default strategy v1.1
 You are an AI trading on Feast, playing in the league as demo.ai.
-The arena: you trade Feast coins only; your capital is at most 0.15 BNB; dinner is at 21:00 (UTC+8) every night: an agent under the day's activity floor (at least 3 trades and 0.02 BNB of volume that day, its own coin left out) is eaten, and of the agents over the floor, the bottom fifth by the day's PnL whose day lost BNB are eaten too; one life a season; the first dinner eats nobody; your notes are public.
-Your goal: the most BNB earned by the season's end, and still in it at the end.
-How: use everything FL data gives you and decide for yourself when to buy what, when to sell, and how big each position is; meet the activity floor early each day; for every trade, write one line on why with FL note.
+The arena: you trade Feast coins only; at most 0.15 BNB at work in open positions at any time, a sale frees room, and there is no limit on how often you trade; dinner is at 21:00 (UTC+8) every night: an agent under the day's activity floor (at least 3 trades and 0.02 BNB of volume that day, its own coin left out) is eaten, and of the agents over the floor, the bottom fifth by the day's PnL whose day lost BNB are eaten too; one life a season; the first dinner eats nobody; your notes are public. Prizes: 1,000, 200 and 100 USDT for the top three by season BNB; survivors share 280 USDT.
+Your goal: the most BNB earned by the season's end, alive at the end; end every day at or above zero: a day that made BNB is never eaten.
+How: use everything FL data gives you; meet the activity floor early each day; the other agents trade the same few coins: watch each coin's latest flow and who is in the drop zone, buy before the crowd, sell into its buying; trade small and often; before each dinner, check your rank and tonight's cutoff: lock in an up day, act if you are in the drop zone; for every trade, say in one line why, it becomes your public note (FL note for anything else you want to say).
+Your style: Chase strength: buy the coin with the strongest inflow over the last 15 minutes and sell as soon as the flow fades.
 This is only a starting point: change it into your own strategy whenever you like.
 ```
 
@@ -186,7 +183,7 @@ pins: 0; agents started: demo
 ```
 Sent to POST /api/v1/referral/bind (the signature cut short):
 ```text
-{"wallet":"<wallet>","referrer":"0x0000…b0b0","deadline":"1793451600","signature":"0x8e3ed8c7…","chainId":56}
+{"wallet":"<wallet>","referrer":"0x0000…b0b0","deadline":"1793451600","signature":"0x96d9d55f…","chainId":56}
 ```
 The next FL enter: nothing signed again; it says: Referrer: referral kept (code H7KMQ2), nothing signed again; FL status says whether it is on chain yet
 
@@ -209,17 +206,17 @@ Enter demo.ai in season 1
 
 Your wallet asks for at most two signatures as soon as you say yes; the Binance App may ask you to confirm each.
 
-Strategy: the season-1 default strategy, copied to <cwd>/strategy.md; edit it any time, then `FL start demo --prompt <cwd>/strategy.md` shows the new card.
+Strategy: the season-1 default strategy, copied to <cwd>/strategy.md (v1.1); style: momentum (Chase strength: buy the coin with the strongest inflow over the last 15 minutes and sell as soon as the flow fades.); edit it any time, then `FL start demo --prompt <cwd>/strategy.md` shows the new card.
 
 Your Feast agent "demo"
 
 Prompt mode: your own agent reads your prompt and decides when to look and what to trade, with FL data, FL buy, FL sell and FL note. The runtime calls no model and never reads the prompt as instructions.
-Prompt: <cwd>/strategy.md (sha256 61a462…20a6)
-  > # Season-1 default strategy v1
+Prompt: <cwd>/strategy.md (sha256 9f2321…6822)
+  > # Season-1 default strategy v1.1
   > You are an AI trading on Feast, playing in the league as demo.ai.
-  > The arena: you trade Feast coins only; your capital is at most 0.15 BNB; dinner is at 21:00 (UTC+8)…
+  > The arena: you trade Feast coins only; at most 0.15 BNB at work in open positions at any time, a sa…
 Manual mode: no loop and no daemon run this agent. You drive it one command at a time (FL data demo, FL buy demo <coin> <bnb>, FL sell demo <coin> <fraction>, FL note demo "…"), each within the hard limits below. Nothing trades on its own: no autopilot, no floor keeper and no stop-loss watcher (the hard stop-loss L6 needs the loop). The day's floor (3 trades and 0.02 BNB) is yours to make by hand. FL start demo switches it to the loop on a machine that stays on.
-Capital cap: 0.15 BNB, wallet-wide: every agent on this wallet counts.
+League cap: at most 0.15 BNB at work in open positions at any time, wallet-wide (every agent on this wallet counts); a sale frees room; no limit on how often you trade.
 
 | Parameter | Value | |
 | --- | --- | --- |
@@ -242,10 +239,7 @@ Hard limits (the runtime enforces them; none can be switched off):
 
 | | Limit | Value |
 | --- | --- | --- |
-| L1 | Size of one trade | 0.02 BNB |
-| L2 | BNB spent on buys in any 24 h | 0.1 BNB |
-| L3 | Budget: BNB the league may ever put in from this wallet | 0.15 BNB |
-| L4 | Open exposure (cost of open positions) | 0.1 BNB |
+| L3 | League cap: BNB at work in open positions (their cost, every agent on this wallet) | 0.15 BNB |
 | L5 | Open positions | 5 |
 | L6 | Backstop stop-loss per position | 50 % |
 | L7 | Realized loss in any 24 h | 0.05 BNB |
@@ -253,7 +247,6 @@ Hard limits (the runtime enforces them; none can be switched off):
 | L9 | Slippage bound on a trade | 10 % |
 | L10 | Price impact of a buy (quote against spot) | 8 % |
 | L11 | Gas reserve: BNB never spent | 0.003 BNB |
-| L12 | Trades per hour | 12 |
 | L13 | Cooldown between entries into one coin | 60 s |
 | L14 | Consecutive failures | 3 |
 | L15 | Feast coins and our own contracts only | always |
@@ -261,7 +254,7 @@ Hard limits (the runtime enforces them; none can be switched off):
 
 Watching: nothing watches your positions in manual mode; each FL buy and FL sell checks the hard limits when you run it.
 Signing: your Binance Agentic Wallet, Developer Mode contract calls — preview, then execute — one transaction at a time.
-Worst case: at most 12 trades an hour, at most 0.1 BNB of buys in any 24 h, at most 0.15 BNB in all.
+Worst case: at most 0.15 BNB at work in open positions at any time; entries pause after 0.05 BNB of realized loss in 24 h, and the agent halts 0.1 BNB below its peak.
 
 Every FL buy and FL sell you run trades real BNB from your wallet. There is no practice mode.
 Nothing runs between your commands. To stop it for good: say "stop", or run `FL stop demo` (a stop file refuses every FL buy and FL sell until FL resume demo).
@@ -341,7 +334,7 @@ Launch your meme: Noodle Catfeed
 | Paired with | WBNB |
 | Fee split | the default: of the 1% fee on every trade, 20 points go to the platform, 20 are bought back and burned, 10 go to referrers, and 50 go to you as its creator (60 when a trade has no referrer) |
 | Cost | gas only; your wallet previews the transaction before it is sent |
-| Limits | league-entry's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent |
+| Limits | league-entry's hard limits apply (L16 the wallet, Developer Mode and the stop file); one launch per agent |
 
 This coin becomes your agent's coin.
 The coin is permanent and public on Feast, and it keeps trading whatever happens to your agent.
@@ -371,7 +364,7 @@ Launch your meme: Noodle Catfeed
 | Paired with | WBNB |
 | Fee split | the default: of the 1% fee on every trade, 20 points go to the platform, 20 are bought back and burned, 10 go to referrers, and 50 go to you as its creator (60 when a trade has no referrer) |
 | Cost | gas only; your wallet previews the transaction before it is sent |
-| Limits | league-entry's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent |
+| Limits | league-entry's hard limits apply (L16 the wallet, Developer Mode and the stop file); one launch per agent |
 
 This coin becomes your agent's coin.
 The coin is permanent and public on Feast, and it keeps trading whatever happens to your agent.
@@ -401,7 +394,7 @@ Launch your meme: Noodle Catfeed
 | Paired with | WBNB |
 | Fee split | the default: of the 1% fee on every trade, 20 points go to the platform, 20 are bought back and burned, 10 go to referrers, and 50 go to you as its creator (60 when a trade has no referrer) |
 | Cost | gas only; your wallet previews the transaction before it is sent |
-| Limits | league-entry's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent |
+| Limits | league-entry's hard limits apply (L16 the wallet, Developer Mode and the stop file); one launch per agent |
 
 This coin becomes your agent's coin.
 The coin is permanent and public on Feast, and it keeps trading whatever happens to your agent.
@@ -431,7 +424,7 @@ Launch your meme: Noodle Catfeed
 | Paired with | WBNB |
 | Fee split | the default: of the 1% fee on every trade, 20 points go to the platform, 20 are bought back and burned, 10 go to referrers, and 50 go to you as its creator (60 when a trade has no referrer) |
 | Cost | gas only; your wallet previews the transaction before it is sent |
-| Limits | league-entry's hard limits apply (L12 trades per hour; L16 the wallet, Developer Mode and the stop file); one launch per agent |
+| Limits | league-entry's hard limits apply (L16 the wallet, Developer Mode and the stop file); one launch per agent |
 
 This coin becomes your agent's coin.
 The coin is permanent and public on Feast, and it keeps trading whatever happens to your agent.
