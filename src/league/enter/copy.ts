@@ -654,14 +654,19 @@ function doneRunningLine(name: string, opens: OpensShown, lang: Lang, autopilot?
  * Run 21: the closing lines of a manual entry (`--manual`): no loop and no daemon; how to drive it by hand, and what
  * nobody does for the player in manual mode. `already`: a rerun on a wallet that is entered (no signature asked).
  */
-export function doneManual(name: string, opens: OpensShown, lang: Lang, already = false): string {
+export function doneManual(name: string, opens: OpensShown, lang: Lang, already = false, gated = true): string {
   const zh = lang === "zh";
-  const when =
-    opens.kind === "open"
+  // Run 23 (the owner's mainnet smoke): the season gate holds an entered seat only; a name FL enter did not start buys
+  // whenever its command runs, and the line says so instead of promising a refusal.
+  const when = !gated
+    ? zh
+      ? "这个 agent 不是报名的席位，赛季开始的限制不管它：FL buy 运行时就会交易。（FL enter 启动的 agent 在赛季开始前会拒绝买入。）"
+      : "This agent is not an entered seat, so no season gate holds it: FL buy trades whenever you run it. (An agent FL enter started refuses buys before the season opens.)"
+    : opens.kind === "open"
       ? zh ? "赛季已经开始：现在就可以交易。" : "The season is on: you can trade now."
       : opens.kind === "at"
-        ? zh ? `${opensText(opens, lang)}开放交易；在那之前，FL buy 会被拒绝（与运行循环时的说法相同）。` : `Trading opens at ${opensText(opens, lang)}; before that, FL buy is refused (with the same words the loop would use).`
-        : zh ? "feast.meme 宣布开赛后才开放交易；在那之前，FL buy 会被拒绝。" : "Trading opens when feast.meme announces the start; before that, FL buy is refused.";
+        ? zh ? `${opensText(opens, lang)}开放交易；在那之前，这个报名席位的 FL buy 会被拒绝（与运行循环时的说法相同）。` : `Trading opens at ${opensText(opens, lang)}; before that, this entered seat's FL buy is refused (with the same words the loop would use).`
+        : zh ? "feast.meme 宣布开赛后才开放交易；在那之前，这个报名席位的 FL buy 会被拒绝。" : "Trading opens when feast.meme announces the start; before that, this entered seat's FL buy is refused.";
   const head = zh
     ? already
       ? `「${name}」处于手动模式：没有运行循环，也没有守护进程，不需要再签名。`

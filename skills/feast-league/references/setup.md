@@ -44,7 +44,7 @@ Run `npm ci` from inside the folder. With npm 11 (Node 24), `npm --prefix <dir> 
 
 To check the install, run `node "$HOME/.feast-league/runtime/src/league/bin.mjs" doctor`.
 
-A runtime installed at `league-v1` … `league-v5.1.5` moves to `league-v5.1.6` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.6 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.6 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
+From league-v5.1.6 on, **`FL upgrade`** moves a runtime to the newest release (git clone or tarball alike, checked against the release's manifest, rolled back if `FL doctor` fails; `docs/league/upgrade.md`). A runtime installed at `league-v1` … `league-v5.1.5` moves to `league-v5.1.6` once by hand: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.6 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.6 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
 
 `FEAST_LEAGUE_RUNTIME` points the skill at another checkout. That is useful when testing the runtime itself.
 

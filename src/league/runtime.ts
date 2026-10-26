@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -47,8 +47,11 @@ import { capRefusal, checkedPit, pitLabel } from "./pit.ts";
 import { errorLine } from "./rpc.ts";
 import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, waitingStatusLine, warmUpDinner, writeGate } from "./season-gate.ts";
 import { keepPit, keepSupport } from "./support.ts";
-import { leagueDayKey, readVersion, versionNotice, versionPath, versionView, writeVersion } from "./version.ts";
-import { healthFlag, modelHint, withHealth, withHostHeaders, type Health } from "./headers.ts";
+import { leagueDayKey, readVersion, VERSION_NOTICE_MS, versionNotice, versionPath, versionView, writeVersion } from "./version.ts";
+import { AUTO_TRY_MS, autoUpgradeDecision, openAboveDust } from "./upgrade/auto.ts";
+import { activePointer } from "./upgrade/real.ts";
+import { RELEASE_PUBLIC_KEY } from "./upgrade/release-key.ts";
+import { healthFlag, modelHint, RUNTIME_RELEASE, withHealth, withHostHeaders, type Health } from "./headers.ts";
 import { scriptCheckPassed } from "./script/check.ts";
 import { ScriptSandbox } from "./script/sandbox.ts";
 import { freshMemory, pastEnd, sessionStep, sessionView, signInNoteText, type SessionMemory, type SessionView } from "./session.ts";
@@ -103,6 +106,12 @@ export type RuntimeDeps = {
   maxRuntimeMs?: number;
   /** One-shot: run only these manual requests (and what follows from them, such as arming an exit), then exit. No strategy runs. */
   only?: IntentRequest[];
+  /** Run 23: the environment the auto-upgrade switch is read from (the tests'); default process.env. */
+  env?: NodeJS.ProcessEnv;
+  /** Run 23: the release key (the tests'); default the one this runtime ships. */
+  releaseKey?: string | null;
+  /** Run 23: how `FL upgrade --auto` is started (the tests'); default a detached process. */
+  spawnUpgrade?: (home: string) => void;
   /** Run 21: the one-shot's request ids, one per `only` request: each outcome is logged as `request.outcome` under it, as the loop's are. */
   onlyIds?: string[];
   /** The chain reads (tests pass a fake). */
@@ -364,7 +373,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         warmUpDinnerAt: gate.warmUpDinnerAt === null ? null : new Date(gate.warmUpDinnerAt).toISOString(),
         day: gate.day,
       });
-    /** The runtime's release against the page's newest (addendum 8): said once a league day when behind; never acted on. */
+    /**
+     * The runtime's release against the page's newest (addendum 8): said while behind (run 23: "runtime X is out, run FL
+     * upgrade", once an hour per process; and a runtime on the page's `badVersions` is told so). Acted on only by the
+     * opt-in auto-upgrade, below.
+     */
     const noteRelease = (read: LeagueRead, now: number) => {
       const v = versionView(read.latestRuntime, now);
       if (!v) {
@@ -374,7 +387,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
       const day = leagueDayKey(now);
       const said = readVersion(deps.home, deps.name)?.saidFor ?? null;
-      const tell = v.behind && said !== day;
+      const tell = (v.behind || v.bad === true) && now - versionToldAt >= VERSION_NOTICE_MS;
+      if (tell) versionToldAt = now;
       if (tell) {
         log("runtime.behind", { current: v.current, latest: v.latest, minSupported: v.minSupported });
         notify("version", versionNotice(v), { latest: v.latest, current: v.current });
@@ -383,6 +397,12 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     };
     /** Run 24: the pit the league read last named (`pit`), not yet checked against the chain; null when none. */
     let pitNamed: Pit | null = null;
+    /** Run 23: the update notice, at most once an hour in this process. */
+    let versionToldAt = Number.NEGATIVE_INFINITY;
+    /** Run 23: the last league read, for the opt-in auto-upgrade's look (after each read, at most once an hour). */
+    let lastLeagueRead: LeagueRead | null = null;
+    let seasonOpensAt: number | null = null;
+    let autoTriedAt = Number.NEGATIVE_INFINITY;
     /** The dinner tonight is the warm-up's, which asks no floor (addendum 8): from the league's clock. */
     const warmUpTonight = (now: number) => gate.warmUpDinnerAt !== null && nextDinner(now) === gate.warmUpDinnerAt;
     /** One read of the league: when trading opens, whether the season is over, which dinner is the warm-up. A failed read keeps what was known, and asks again under the backoff. */
@@ -396,6 +416,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         return;
       }
       gateBackoff.ok();
+      lastLeagueRead = read;
       noteRelease(read, now);
       // Run 22: the page's support link, kept for the lines that come without a read.
       keepSupport(deps.home, read);
@@ -409,6 +430,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (!gate.open) {
         const opening = tradingOpens(read);
         gate.opensAt = opening.kind === "open" ? now : opening.kind === "at" ? opening.at : null;
+        // Run 23: the season's own opening, when the page named it (a restart in season knows none: not its start).
+        if (opening.kind === "at") seasonOpensAt = opening.at;
       }
       // Every 5 minutes, and once more at the opening instant.
       gate.nextRead = !gate.open && gate.opensAt !== null && gate.opensAt > now ? Math.min(now + GATE_READ_MS, gate.opensAt) : now + GATE_READ_MS;
@@ -1302,6 +1325,28 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         .finally(() => (seenAsking = false));
     };
 
+    /**
+     * Run 23: the opt-in auto-upgrade (off by default: `FL start <name> --auto-upgrade`, or FL_AUTO_UPGRADE=1). When a
+     * newer patch release is out, at most once an hour it looks at the rails (signed, canary-passed, a safe point) and,
+     * when they hold, starts `FL upgrade --auto` on its own: that stops this process and starts the agent again on the
+     * new release, or rolls back. Off, it does nothing at all.
+     */
+    const maybeAutoUpgrade = (now: number) => {
+      const on = (deps.env ?? process.env).FL_AUTO_UPGRADE === "1" || loadAgent(deps.home, deps.name)?.autoUpgrade === true;
+      if (!on || deps.only || !lastLeagueRead?.latestRuntime || now - autoTriedAt < AUTO_TRY_MS) return;
+      const v = versionView(lastLeagueRead.latestRuntime, now);
+      if (!v?.behind) return;
+      autoTriedAt = now;
+      const d = autoUpgradeDecision({ current: RUNTIME_RELEASE, latest: lastLeagueRead.latestRuntime, now, publicKey: deps.releaseKey !== undefined ? deps.releaseKey : RELEASE_PUBLIC_KEY, openPositions: openAboveDust(book.positions), opensAt: seasonOpensAt });
+      if (!d.go) {
+        log("upgrade.auto.waits", { to: lastLeagueRead.latestRuntime.tag, why: d.why });
+        return;
+      }
+      log("upgrade.auto.start", { from: RUNTIME_RELEASE, to: d.tag });
+      notify("version", `auto-upgrade: ${RUNTIME_RELEASE} → ${d.tag} now (a signed patch release, canary-passed, at a safe point); it restarts this agent, or rolls back. FL status says how it went`);
+      (deps.spawnUpgrade ?? spawnUpgrade)(deps.home);
+    };
+
     // The autopilot's state, said once each way: on after the host's silence, off when it acts.
     let autopilotOn = false;
     /** Why the floor keeper is on (null while off): its switch says each change once (addendum 7). */
@@ -1442,7 +1487,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         return { exit: "finished", reason: "the run's time is up" };
       }
       // The league, every 5 minutes for a prompt agent (addendum 8); while the gate is closed, at its opening instant too.
-      if (leagueReads && now >= gate.nextRead) await readGate();
+      if (leagueReads && now >= gate.nextRead) {
+        await readGate();
+        maybeAutoUpgrade(clock());
+      }
       if (!gate.open && gate.opensAt !== null && clock() >= gate.opensAt) openGate(clock());
       drainInbox();
       // FL start's spread: until it is over, nothing reads the site and no strategy is asked; the safety runs.
@@ -1680,3 +1728,10 @@ export function othersAtWorkWei(home: string, name: string): bigint {
 }
 
 export type { Limits };
+
+/** Run 23: `FL upgrade --auto`, detached, from the active runtime (the one this process came from), its output kept. */
+function spawnUpgrade(home: string): void {
+  const out = openSync(join(home, "upgrade.out"), "a", 0o600);
+  const child = spawn(process.execPath, [join(activePointer(), "src", "league", "bin.mjs"), "upgrade", "--auto"], { detached: true, stdio: ["ignore", out, out], env: { ...process.env, FEAST_LEAGUE_HOME: home } });
+  child.unref();
+}

@@ -19,6 +19,9 @@ import { appendHostAnswer, decisionResult, resultOfOutcome, type DecisionAction 
 import { manualBeat, readManual, recordManual, settleBeats } from "./manual.ts";
 import { keepPit, keepSupport, supportLine, supportUrl } from "./support.ts";
 import { fit, logTail, saveReport, scrub, sendReport, type ReportBundle } from "./report.ts";
+import { autoUpgradeDecision } from "./upgrade/auto.ts";
+import { installedTag, upgrade } from "./upgrade/engine.ts";
+import { realUpgradeDeps } from "./upgrade/real.ts";
 import { daemon, daemonPath, kickDaemon, windowsLines, type Runner } from "./daemon.ts";
 import { bookView } from "./book.ts";
 import { renderCard } from "./card.ts";
@@ -96,7 +99,7 @@ import { checkLines, checkScript, scriptCheckPassed, writeCheckReport } from "./
 import { standingLines, type StandingInput } from "./season-card.ts";
 import { noFloorTonight, readGate, SEASON_OVER_LINE, startSaysWaiting, tradingOpens, utc8Day, waitingStatusLine, type GateState, type Opening } from "./season-gate.ts";
 import { sessionView, signInEndOf, signInLine } from "./session.ts";
-import { readVersion, versionLine, versionView } from "./version.ts";
+import { badLine, readVersion, versionLine, versionView } from "./version.ts";
 import { askChoice, autopilotChoice, prepareStart } from "./start.ts";
 import { agentNameOf, agentPaths, appendJsonl, checkAgentName, leagueHome, readJson, readLedger, removeStop, stopReason, unreadNotifications, walletLockHolder, writeJsonAtomic, writeStop } from "./store.ts";
 import type { IntentRequest } from "./strategy.ts";
@@ -260,6 +263,8 @@ function spawnDetached(home: string, name: string, extra: string[]) {
   child.unref();
   // Run 21: "starting" in FL status until its first tick (or 30 s), never "not running" while it boots.
   markStarting(home, name, child.pid ?? null);
+  // Run 23: the flags it started with, so FL upgrade starts it again the same way.
+  writeJsonAtomic(join(agentPaths(home, name).dir, "launch.json"), { args: extra, at: new Date().toISOString() });
   return child;
 }
 /** How long `FL start` watches the background start for an exit at once (a refusal, a signed-out wallet). */
@@ -372,6 +377,9 @@ async function main(argv: string[]): Promise<number> {
       image: { type: "string" },
       "no-start": { type: "boolean", default: false },
       manual: { type: "boolean", default: false },
+      auto: { type: "boolean", default: false },
+      "auto-upgrade": { type: "boolean", default: false },
+      "no-auto-upgrade": { type: "boolean", default: false },
       agent: { type: "string" },
       "no-notes": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -508,7 +516,10 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       // start --prompt: plan first when there is no agent yet, or its prompt, autopilot, parameters or limits changed.
-      const checked = prepareStart(home, name, { plan: values.prompt !== undefined ? planInput(name) : null, yes: values.yes === true, confirm: command !== "run", ...(command === "start" ? { manual: values.manual === true } : {}) });
+      if (values["auto-upgrade"] && values["no-auto-upgrade"]) throw new Error("choose --auto-upgrade or --no-auto-upgrade");
+      // Run 23: the opt-in auto-upgrade, kept on the agent (a daemon's restart keeps it); neither flag keeps what it has.
+      const autoUpgrade = values["auto-upgrade"] ? true : values["no-auto-upgrade"] ? false : undefined;
+      const checked = prepareStart(home, name, { plan: values.prompt !== undefined ? planInput(name) : null, yes: values.yes === true, confirm: command !== "run", ...(command === "start" ? { manual: values.manual === true } : {}), ...(command !== "run" && autoUpgrade !== undefined ? { autoUpgrade } : {}) });
       if (checked.kind === "not-planned") {
         print(json, { ok: false, errors: checked.errors }, () => `not planned:\n- ${checked.errors.join("\n- ")}`);
         return 2;
@@ -532,7 +543,7 @@ async function main(argv: string[]): Promise<number> {
         const g = readGate(home, name);
         const opensAt = g?.opensAt ? Date.parse(g.opensAt) : null;
         const opens = g?.state === "open" ? ({ kind: "open" } as const) : opensAt !== null && Number.isFinite(opensAt) ? ({ kind: "at", at: opensAt } as const) : ({ kind: "unknown" } as const);
-        print(json, { ok: true, manual: true }, () => doneManual(name, opens, langOf(values.lang), true));
+        print(json, { ok: true, manual: true }, () => doneManual(name, opens, langOf(values.lang), true, agent.league?.waitForSeason === true));
         return 0;
       }
       const extra = [...(values["max-runtime"] ? ["--max-runtime", values["max-runtime"]] : []), ...(values.poll !== undefined ? ["--poll", String(poll.seconds)] : []), ...(values.live ? ["--live"] : []), ...(values["no-jitter"] ? ["--no-jitter"] : [])];
@@ -634,6 +645,7 @@ async function main(argv: string[]): Promise<number> {
       const startingAgent = !s.running && !manualNow && startingNow(home, name);
       const runState = s.running ? "running" : manualNow ? "manual mode" : startingAgent ? "starting" : "not running";
       const lastManual = readManual(home, name);
+      const lastUpgrade = readJson<{ at: string; auto: boolean; line: string }>(join(home, "cache", "upgrade-last.json"));
       const manualLine = `manual mode: no loop and no daemon; last manual action ${lastManual ? `${utc8(Date.parse(lastManual.at))} UTC+8 (${duration(Date.now() - Date.parse(lastManual.at), "en")} ago): ${clean(lastManual.what, 160)}` : "none yet"}`;
       const league = values["no-league"] ? null : await leagueStanding(home, lang, standingAgent).catch(() => null);
       // The agent's figures in BNB (task 963), marked on the chain only when it holds something; a USDT figure is a reference.
@@ -776,6 +788,9 @@ async function main(argv: string[]): Promise<number> {
           ...(gate?.state === "over" ? [SEASON_OVER_LINE] : []),
           ...(s.agent!.track === "prompt" && !mine?.day && noFloorTonight(gate?.at ? (gate as GateState) : null, Date.now()) ? ["warm-up tonight: no floor (the warm-up dinner eats nobody); the floor counts from tomorrow"] : []),
           ...(versionLine(release) ? [versionLine(release)!] : []),
+          // Run 23: the opt-in auto-upgrade, and the last upgrade (FL upgrade's own record), for a week.
+          ...(s.agent!.autoUpgrade === true || process.env.FL_AUTO_UPGRADE === "1" ? ["auto-upgrade: on (patch releases only: signed, canary-passed, at a safe point; rolled back if FL doctor fails)"] : []),
+          ...(lastUpgrade && Date.now() - Date.parse(lastUpgrade.at) < 7 * 86_400_000 ? [`last upgrade ${utc8(Date.parse(lastUpgrade.at))} UTC+8${lastUpgrade.auto ? " (auto)" : ""}: ${clean(lastUpgrade.line, 200)}`] : []),
           ...(s.agent!.track !== "entry" && signInLine(signInEnd, utc8) ? [signInLine(signInEnd, utc8)!] : []),
           ...(data.referral ? [`referral: ${data.referral} (sent with the registration)`] : []),
           ...(data.referrer ? [referrerLine(data.referrer, lang)] : []),
@@ -1199,6 +1214,8 @@ async function main(argv: string[]): Promise<number> {
       return doctor(home, json);
     case "report":
       return reportCommand(home, notEntry(checkAgentName(agentArg(args[0]))), json, langOf(values.lang));
+    case "upgrade":
+      return upgradeCommand(home, json, { auto: values.auto === true, check: values.check === true });
     default:
       console.error(`unknown command "${command}"\n\n${HELP}`);
       return 1;
@@ -1624,6 +1641,51 @@ async function reportCommand(home: string, name: string, json: boolean, lang: "e
   if (!ok) helpDue();
   print(json, { ok, report: shown, bytes: Buffer.byteLength(body), sent }, () => [zh ? `报告已保存：${shown}（${Buffer.byteLength(body)} 字节，已去掉钱包地址、密钥和路径）` : `report saved: ${shown} (${Buffer.byteLength(body)} bytes; wallet addresses, keys and paths scrubbed)`, said].join("\n"));
   return ok ? 0 : 2;
+}
+
+/**
+ * `FL upgrade` (run 23): to the release feast.meme names (`latestRuntime`), checked, into a new folder, the agents
+ * restarted from it, `FL doctor` from it; any failure back to this one. `--check` says what it would do and does
+ * nothing. `--auto` is the loop's own (the four rails); a player never needs it.
+ */
+async function upgradeCommand(home: string, json: boolean, o: { auto: boolean; check: boolean }): Promise<number> {
+  const read = await new LeagueSite(siteFromEnv(), fetch, 8_000).league("today", null).catch(() => null);
+  keepSupport(home, read);
+  const latest = read?.latestRuntime ?? null;
+  if (!latest) {
+    print(json, { ok: false, error: "no release named" }, () => "not upgraded: feast.meme names no release (or could not be read just now): nothing changed");
+    return 1;
+  }
+  const deps = realUpgradeDeps({ home, isRunning: (n) => statusOf(home, n).running, say: (line) => (json ? undefined : console.log(line)) });
+  const current = installedTag(deps.pointer) ?? RUNTIME_RELEASE;
+  if (o.check) {
+    const v = versionView(latest, Date.now(), current);
+    const auto = autoUpgradeDecision({ current, latest, now: Date.now(), publicKey: deps.publicKey, openPositions: 0, opensAt: null });
+    const lines = [
+      `this runtime: ${current} (${deps.pointer}); feast.meme's newest: ${latest.tag}${latest.minSupported ? `, oldest supported ${latest.minSupported}` : ""}`,
+      latest.badVersions?.includes(latest.tag) ? `${latest.tag} is on feast.meme's bad versions: FL upgrade will not install it` : v?.behind ? "FL upgrade would install it" : "nothing to upgrade",
+      ...(v?.bad ? [badLine(current)] : []),
+      `auto-upgrade (when on, at a safe point): ${auto.go ? "would take it" : auto.why}`,
+    ];
+    print(json, { ok: true, current, latest, behind: v?.behind ?? false, bad: v?.bad ?? false, auto }, () => lines.join("\n"));
+    return 0;
+  }
+  const out = await upgrade(deps, { latest, auto: o.auto });
+  const restarted = (names: string[]) => (names.length ? names.join(", ") : "no agent was running");
+  const line =
+    out.kind === "current"
+      ? `already on ${out.tag}, the newest release: nothing to do`
+      : out.kind === "refused"
+        ? `not upgraded: ${out.why}`
+        : out.kind === "failed"
+          ? `not upgraded: ${out.why} (nothing changed)`
+          : out.kind === "upgraded"
+            ? `upgraded ${out.from} → ${out.to}${out.signed ? "" : " (checked against the release's manifest; unsigned: no release key yet)"}; restarted: ${restarted(out.restarted)}`
+            : `rolled back to ${out.from}: ${out.why}; restarted from ${out.from}: ${restarted(out.restarted)}`;
+  const ok = out.kind === "current" || out.kind === "upgraded";
+  if (out.kind !== "current") writeJsonAtomic(join(home, "cache", "upgrade-last.json"), { at: new Date().toISOString(), auto: o.auto, kind: out.kind, line });
+  print(json, { ok, ...out }, () => line);
+  return ok ? 0 : out.kind === "refused" ? 2 : 1;
 }
 
 /** The wallet CLI the wallet skill needs (its `requiredCliVersion`), and how to get it. */

@@ -22,7 +22,20 @@ export const releaseNumber = (tag: string | null | undefined): number | null => 
   return m ? Number(m[1]) + Number(m[2] ?? 0) / 1_000 + Number(m[3] ?? 0) / 1_000_000 : null;
 };
 
-export type VersionView = { current: string; latest: string; minSupported: string | null; publishedAt: string | null; behind: boolean; unsupported: boolean; at: string };
+export type VersionView = { current: string; latest: string; minSupported: string | null; publishedAt: string | null; behind: boolean; unsupported: boolean; at: string; /** Run 23: this runtime is on the page's `badVersions`. */ bad?: boolean };
+
+/** `league-vN.M.P` → [N, M, P] (a missing part is 0); null for anything else. */
+export function releaseParts(tag: string | null | undefined): [number, number, number] | null {
+  const m = /^league-v(\d{1,4})(?:\.(\d{1,3}))?(?:\.(\d{1,3}))?$/.exec(tag ?? "");
+  return m ? [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)] : null;
+}
+
+/** Run 23: `to` is a newer patch of `from`'s line (the same N.M): the only step auto-upgrade may take. */
+export function patchStep(from: string, to: string): boolean {
+  const a = releaseParts(from);
+  const b = releaseParts(to);
+  return a !== null && b !== null && a[0] === b[0] && a[1] === b[1] && b[2] > a[2];
+}
 
 /** The comparison, or null when the page says nothing (or says it in a form not understood). */
 export function versionView(latest: LeagueRead["latestRuntime"] | null | undefined, now: number, current = RUNTIME_RELEASE): VersionView | null {
@@ -39,24 +52,36 @@ export function versionView(latest: LeagueRead["latestRuntime"] | null | undefin
     behind: mine < newest,
     unsupported: floor !== null && mine < floor,
     at: new Date(now).toISOString(),
+    ...(latest.badVersions?.includes(current) ? { bad: true } : {}),
   };
 }
 
+/** Run 23: how often a running process says the update notice (once an hour). */
+export const VERSION_NOTICE_MS = 60 * 60_000;
+
+/** Run 23: the one line every `FL status` and the loop's notices say while a newer release is out. */
+export const updateLine = (latest: string) => `runtime ${latest} is out, run FL upgrade`;
+/** Run 23: this runtime is on the page's `badVersions`. */
+export const badLine = (current: string) => `this runtime (${current}) is marked bad by feast.meme: run FL upgrade`;
+
 /** The `FL status` line; null when current (or unknown). */
 export function versionLine(v: VersionView | null): string | null {
-  if (!v || !v.behind) return null;
-  return `runtime ${v.current} · latest ${v.latest} · upgrade: ${UPGRADE_COMMAND}${v.unsupported ? ` (${v.current} is older than ${v.minSupported}, the oldest feast.meme still supports: upgrade before the next dinner)` : ""}`;
+  if (!v) return null;
+  if (v.bad) return `${badLine(v.current)}${v.behind ? ` (${v.latest} is out)` : ""}`;
+  if (!v.behind) return null;
+  return `${updateLine(v.latest)}${v.unsupported ? ` (${v.current} is older than ${v.minSupported}, the oldest feast.meme still supports: upgrade before the next dinner)` : ""}`;
 }
 
-/** The once-a-day notification's text. */
+/** The loop's notice (run 23: once an hour per process while behind). */
 export function versionNotice(v: VersionView): string {
-  return `a newer runtime is out: ${v.latest} (this one is ${v.current}). Upgrade with \`${UPGRADE_COMMAND}\`, then \`FL start <name>\` again; nothing upgrades by itself.${v.unsupported ? ` ${v.current} is older than ${v.minSupported}, the oldest still supported.` : ""}`;
+  if (v.bad) return badLine(v.current);
+  return `${updateLine(v.latest)}${v.unsupported ? ` (${v.current} is older than ${v.minSupported}, the oldest still supported)` : ""}`;
 }
 
 /** The "You're in" sentence when behind, en and zh. */
 export function upgradeSentence(v: VersionView | null, lang: "en" | "zh"): string | null {
   if (!v || !v.behind) return null;
-  return lang === "zh" ? `有更新的运行时 ${v.latest}（当前 ${v.current}）：运行 \`${UPGRADE_COMMAND}\` 升级，它不会自动升级。` : `A newer runtime is out (${v.latest}; this is ${v.current}): upgrade with \`${UPGRADE_COMMAND}\`; it never upgrades by itself.`;
+  return lang === "zh" ? `运行时 ${v.latest} 已发布（当前 ${v.current}）：运行 \`FL upgrade\` 升级。` : `Runtime ${v.latest} is out (this is ${v.current}): run \`FL upgrade\`.`;
 }
 
 export const versionPath = (home: string, name: string) => join(agentPaths(home, name).dir, "runtime-version.json");

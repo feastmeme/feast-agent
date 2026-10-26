@@ -80,8 +80,9 @@ describe("the skill, the setup, the release notes", () => {
     const setup = read("skills/feast-league/references/setup.md");
     expect(setup).toContain("--branch league-v5");
     expect(setup).not.toContain("--branch league-v4");
-    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
-    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.5` moves to `league-v5.1.6` the same way");
+    // Run 26: FL upgrade first ships in league-v5.1.6 (league-v5.1.5 is the pit's release).
+    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.5` moves to `league-v5.1.6` once by hand");
+    expect(setup).toContain("From league-v5.1.6 on, **`FL upgrade`** moves a runtime to the newest release");
     expect(setup).toContain("If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it.");
   });
 
@@ -348,6 +349,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
   it("a Grok host is told to pass --host grok; What it sends names the two headers", () => {
     expect(section9).toContain("passes `--host grok`");
     // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
+    // Run 26: the release this build is.
     expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.6`)");
     expect(skill).toMatch(/Every request `FL` makes to feast\.meme carries two headers: `x-feast-host`/);
   });
@@ -357,7 +359,8 @@ describe("the autopilot backup and the two headers (task 975)", () => {
     expect(log.indexOf("## league-v5")).toBeLessThan(log.indexOf("## league-v4"));
     const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
     for (const word of ["steady", "--no-autopilot", "30 minutes", "x-feast-host", "x-feast-runtime"]) expect(v5, word).toContain(word);
-    expect(/^## (league-v\d+(?:\.\d+){0,2})$/m.exec(log)![1]).toBe(RUNTIME_RELEASE);
+    // Run 26: the newest heading may say it is not tagged yet ("## league-v5.1.6 (unreleased)").
+    expect(/^## (league-v\d+(?:\.\d+){0,2})(?: \(unreleased\))?$/m.exec(log)![1]).toBe(RUNTIME_RELEASE);
   });
 
   it("the description stays within 1024 characters and names the steady backup and six presets", () => {
@@ -520,8 +523,8 @@ describe("task 975, addendum 8: ready for the season", () => {
 
   it("SKILL says the release line, the sign-in's date and warning, the season's end, the warm-up, the daemon and the health flag", () => {
     for (const piece of [
-      '"runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent"',
-      "It never upgrades by itself.",
+      '"runtime <tag> is out, run FL upgrade"',
+      "The runtime upgrades itself only if the player turned on the opt-in auto-upgrade",
       '"wallet sign-in ends at <date> UTC+8: re-scan before then or the agent stops trading"',
       '"WALLET SIGN-IN EXPIRES IN N H: the agent will stop; tell the player to run FL login."',
       "at 24 h, at 6 h, at 1 h and when it ends",
@@ -705,6 +708,7 @@ describe("task 975, run 21: league-v5.1.3, manual mode for Binance AI Pro", () =
       expect(text).toContain("tar xzf node.tar.gz --strip-components=1");
       expect(text).toContain("export PATH=~/node22/bin:$PATH");
       // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
+      // Run 26: the release this build is.
       expect(text).toContain("https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.6");
       expect(text).toContain("npm ci --omit=dev");
       expect(text).toMatch(/chown/);
@@ -762,5 +766,29 @@ describe("task 975, run 22: FL report, the support line, the Monday start in the
     expect(skill).toContain("### When the player hits a problem");
     expect(skill).toContain("run **`FL report <name>`**");
     expect(skill).toContain("Never write a date of your own into a card or a reply");
+  });
+});
+
+describe("task 975, run 23: FL upgrade, the notices, the opt-in auto-upgrade (league-v5.1.6)", () => {
+  // Run 26: league-v5.1.4 went out without it and league-v5.1.5 is the pit's: FL upgrade rides league-v5.1.6.
+  const log = read("docs/CHANGELOG.md");
+  const v514 = log.slice(log.indexOf("## league-v5.1.6 (unreleased)\n"), log.indexOf("## Unreleased\n"));
+  const notes = read("docs/league/release-v5.1.6.md");
+  const up = read("docs/league/upgrade.md");
+  it("the release notes say auto-upgrade is off by default this season, and that S2 may turn it on after a signature and a week of logs", () => {
+    expect(notes).toContain("**Auto-upgrade is opt-in, and off by default this season.**");
+    expect(notes).toContain("Season 2 may turn it on by default, after a signed release and a week of logs.");
+    expect(notes).toContain("A patch on `league-v5.1.5`. `minSupported` stays `league-v4`");
+    for (const w of ["`FL upgrade`", "**off by default this season**", "(a)", "(b)", "(c)", "(d)", "`badVersions`", "Emergencies still raise `minSupported`", "`minSupported` stays `league-v4`"]) expect(v514, w).toContain(w);
+  });
+  it("upgrade.md: the four rails, emergencies through minSupported, the pointer's shape, the key kept outside the repository, the agent.md sentence", () => {
+    for (const w of ["**(a) Signed.**", "**(b) Canary-passed.**", "**(c) A safe point.**", "**(d) FL doctor passes after the upgrade.**", "**Emergencies do not come this way.**", '"autoUpgradeFrom"', '"badVersions"', "It never enters a repository", "node tools/release-sign.mjs keygen --out", "When FL status or a notice says an update is out, run `FL upgrade`"]) expect(up, w).toContain(w);
+    expect(read("src/league/upgrade/release-key.ts")).toContain("export const RELEASE_PUBLIC_KEY: string | null = null;");
+    expect(read(".gitignore")).toMatch(/^\*\.key$/m);
+  });
+  it("SKILL: FL upgrade with the player's yes; the auto-upgrade never turned on without it", () => {
+    const skill = read("skills/feast-league/SKILL.md");
+    expect(skill).toContain("with their yes run **`FL upgrade`**, then `FL status`");
+    expect(skill).toContain("Never turn it on without the player's yes.");
   });
 });

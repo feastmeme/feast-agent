@@ -72,6 +72,11 @@ export type AgentConfig = {
    * copied text says, and `FL status` shows it.
    */
   persona?: PersonaKey | null;
+  /**
+   * Run 23: the opt-in auto-upgrade (`FL start <name> --auto-upgrade`; off by default this season): patch releases only,
+   * signed, canary-passed, at a safe point, rolled back if `FL doctor` fails. Not part of the card's shape.
+   */
+  autoUpgrade?: boolean | null;
 };
 
 export type PlanInput = {

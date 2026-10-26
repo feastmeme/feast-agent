@@ -401,8 +401,8 @@ describe("run 22: FL report through the binary", () => {
     expect(st(path!).mode & 0o777).toBe(0o600);
     const bundle = JSON.parse(readFileSync(path!, "utf8")) as Record<string, unknown> & { logTail: Record<string, unknown>[] };
     expect(Object.keys(bundle).sort()).toEqual(["agent", "agentId", "at", "doctor", "host", "logTail", "runtime", "status"]);
-    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
-    expect(bundle).toMatchObject({ agent: "demo", runtime: "league-v5.1.6" });
+    const { RUNTIME_RELEASE } = await import("./headers.ts");
+    expect(bundle).toMatchObject({ agent: "demo", runtime: RUNTIME_RELEASE });
     expect(Array.isArray(bundle.doctor)).toBe(true);
     expect(bundle.status).toMatchObject({ manual: false });
     expect(bundle.logTail.at(-1)).toEqual({ event: "buy.filled", wallet: "0x0000…a11c", txHash: "0xcdcd…cdcd" });

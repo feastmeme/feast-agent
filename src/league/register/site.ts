@@ -165,7 +165,11 @@ export type LeagueRead = {
    * Task 975, addendum 8 (the site's lane): the newest runtime release and the oldest still supported; undefined when
    * the page does not say (then nothing is said of it). Tags are `league-vN`; anything else is dropped.
    */
-  latestRuntime?: { tag: string; publishedAt: number | null; minSupported: string | null };
+  /**
+   * Run 23: `autoUpgradeFrom`, the instant the site marks the release canary-passed (opt-in auto-upgrade waits 60
+   * minutes past it); `badVersions`, releases nobody may upgrade to (and a runtime on one is told so). Absent: none.
+   */
+  latestRuntime?: { tag: string; publishedAt: number | null; minSupported: string | null; autoUpgradeFrom?: number | null; badVersions?: string[] };
   /** Run 22: where a player gets help (`support.url`), as the page gives it; undefined when it does not. */
   support?: { url: string };
   /**
@@ -325,13 +329,23 @@ export function supportOf(raw: unknown): { url: string } | null {
 }
 
 const RELEASE_TAG = /^league-v\d{1,4}(\.\d{1,3}){0,2}$/;
-/** `latestRuntime: { tag, publishedAt, minSupported }`, checked: a tag that is not `league-vN` is no answer. */
+/**
+ * `latestRuntime: { tag, publishedAt, minSupported, autoUpgradeFrom?, badVersions? }`, checked: a tag that is not
+ * `league-vN` is no answer; a bad version that is not one is dropped. The two run-23 fields only when the page sends
+ * them, so an older page reads exactly as before.
+ */
 export function latestRuntimeOf(raw: unknown): LeagueRead["latestRuntime"] | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.tag !== "string" || !RELEASE_TAG.test(r.tag)) return null;
   const at = typeof r.publishedAt === "string" ? Date.parse(r.publishedAt) : Number.NaN;
-  return { tag: r.tag, publishedAt: Number.isFinite(at) ? at : null, minSupported: typeof r.minSupported === "string" && RELEASE_TAG.test(r.minSupported) ? r.minSupported : null };
+  const out: NonNullable<LeagueRead["latestRuntime"]> = { tag: r.tag, publishedAt: Number.isFinite(at) ? at : null, minSupported: typeof r.minSupported === "string" && RELEASE_TAG.test(r.minSupported) ? r.minSupported : null };
+  if ("autoUpgradeFrom" in r) {
+    const from = typeof r.autoUpgradeFrom === "string" ? Date.parse(r.autoUpgradeFrom) : Number.NaN;
+    out.autoUpgradeFrom = Number.isFinite(from) ? from : null;
+  }
+  if (Array.isArray(r.badVersions)) out.badVersions = r.badVersions.filter((t): t is string => typeof t === "string" && RELEASE_TAG.test(t)).slice(0, 50);
+  return out;
 }
 
 // --- the league entry's reads (task 960's routes, for `FL enter`) ---------------------------

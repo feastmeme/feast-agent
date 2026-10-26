@@ -22,7 +22,7 @@ Each of these sends the seat's heartbeat: one authenticated read of `/api/league
 
 - Nothing trades on its own: no autopilot, no floor keeper, no stop-loss watcher. The hard stop-loss needs the loop.
 - The day's floor, 3 trades and 0.02 BNB of buys each league day (its own coin left out), is the player's to make by hand, or the agent is eaten at the dinner.
-- A buy before the season opens is refused with the loop's own words: "the season has not started; it opens at …".
+- For an entered seat (an agent `FL enter` started), a buy before the season opens is refused with the loop's own words: "the season has not started; it opens at …". An agent that is not an entered seat has no season gate: its `FL buy` trades whenever it runs.
 
 ## Binance AI Pro: the recipe that worked (2026-10-25)
 

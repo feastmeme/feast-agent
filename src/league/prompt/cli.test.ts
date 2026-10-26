@@ -385,7 +385,7 @@ describe("task 975, addenda 4 and 5: the ask loop, FL every, FL ask and FL quote
     writeJsonAtomic(join(dir, "season.json"), { state: "over", opensAt: null, at: new Date().toISOString() });
     const human = await run(["status", "demo", "--no-league"], env);
     const { utc8 } = await import("../register/copy.ts");
-    expect(human.stdout).toContain("runtime league-v5 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent");
+    expect(human.stdout).toContain("runtime league-v6 is out, run FL upgrade");
     expect(human.stdout).toContain(`wallet sign-in ends at ${utc8(end)} UTC+8: re-scan before then or the agent stops trading (FL login says how); once it ends nothing trades, not the floor keeper and not a stop-loss`);
     expect(human.stdout).toContain("season over: nothing trades on its own but the hard stop-loss, and no buy is taken; FL sell still sells what is left");
     const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as Record<string, unknown>;

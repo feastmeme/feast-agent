@@ -69,6 +69,8 @@ export function prepareStart(
     manual?: boolean;
     /** Task 1020: the default strategy's style `FL enter` copied; undefined keeps what the agent has. Never part of its card's shape. */
     persona?: AgentConfig["persona"];
+    /** Run 23: the opt-in auto-upgrade on (true) or off (false); undefined keeps it. Never part of its card's shape. */
+    autoUpgrade?: boolean;
     now?: Date;
   },
 ): StartCheck {
@@ -109,6 +111,11 @@ export function prepareStart(
   if (options.persona !== undefined && (agent.persona ?? null) !== options.persona) {
     const { persona: _was, ...rest } = agent;
     agent = options.persona ? { ...rest, persona: options.persona } : rest;
+    saveAgent(home, agent);
+  }
+  if (options.autoUpgrade !== undefined && (agent.autoUpgrade === true) !== options.autoUpgrade) {
+    const { autoUpgrade: _was, ...rest } = agent;
+    agent = options.autoUpgrade ? { ...rest, autoUpgrade: true } : rest;
     saveAgent(home, agent);
   }
   if (options.manual !== undefined && (agent.manual === true) !== options.manual) {
