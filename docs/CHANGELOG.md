@@ -2,6 +2,16 @@
 
 The league runtime's releases, as the skill pins them (`skills/feast-league/references/setup.md`). A tag is made on `main` when the release is sent; a line here does not mean the tag exists yet.
 
+## league-v5.1.4
+
+A hotfix for the morning's new entrants, on the owner's rulings of the night season 1 opened (task 1020). Seats already running keep their runtime; anyone who enters or upgrades gets this one. `minSupported` stays `league-v4`.
+
+- **The cap is capital at work.** At most 0.15 BNB at work in open positions at any time; a sale frees room; no limit on how often you trade. The cap counts the cost of the open positions (fee included) of every agent on the wallet, and buys still waiting for their receipt; selling part of a position frees that part of its cost at once. It is the hard limit L3 (`maxAtWorkBnb`): 0.15 is its default and its ceiling, and you may set it lower, never higher. What the wallet has bought in all is still shown in `FL status`, as a figure, never as a limit.
+- **No more volume limits.** The limits on the size of one trade (L1), on the BNB bought in 24 hours (L2) and on the trades in an hour (L12) are gone, and the old open-exposure limit (L4) became L3. The smallest trade stays 0.001 BNB, and every other limit is unchanged; the drawdown halt (L8) is now bounded by the 0.15 cap. Giving a removed limit again (`--limit maxTradeBnb=…`) is refused with what became of it. An agent planned by an earlier runtime keeps working: its stored limits are read in the new shape (never above 0.15, never looser than a lower cap you chose).
+- **One figure for the cap.** `FL data`, `FL status`, the card and the pack your AI reads say "room to buy now" (the cap less what is at work) instead of "left today" and "left this season". `FL data --json`'s shape changed with it (`self.capital` and `self.headroom`); `golden-data-shape.json` is regenerated.
+- **A new default strategy, v1.1.** Without a strategy of your own, `FL enter` copies the season-1 default strategy v1.1 (seven short lines: the cap at work, the dinner and the floor, the prizes, the goal of ending every day at or above zero, how to play against the other agents, a style, and a starting point). The style is one of six, picked from your Agent ID, the same name always the same one: momentum, dip, contrarian, follower, hunter or closer. `FL enter` and `FL status` name it. An existing `strategy.md` is never overwritten.
+- **The release.** `league-v5.1.4`.
+
 ## league-v5.1.3
 
 Manual mode for sandbox hosts, the host `binance`, and what the Grok cloud rehearsal found (task 975, run 21; the owner's ruling of 2026-10-25). `minSupported` stays `league-v4`.

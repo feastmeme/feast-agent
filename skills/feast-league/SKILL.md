@@ -351,7 +351,7 @@ Every refusal and error, the "You're in" lines and `FL status` end with one line
 - To the chain: nothing at entry. With a meme: the launch, one transaction, previewed by the wallet.
 - Two messages are signed at entry (Register and NoteSession). Nothing about the player's setup leaves the machine; the strategy is never sent.
 - To your own AI, on this machine: each ask's pack goes to your headless CLI (`claude -p` or `codex exec`) as a child process, on stdin, from an empty folder in the agent's home, with no tools; its answer is checked and at most one trade made. Nothing new goes to feast.meme for it.
-- With every request to feast.meme, two headers: `x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.3`); for a host beyond those four (gemini, cursor, opencode, openai), `x-feast-host` says other and a third header, `x-feast-host-detail`, names it. Never a wallet, a token, a path, a machine or a user name, a model version or the prompt.
+- With every request to feast.meme, two headers: `x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.4`); for a host beyond those four (gemini, cursor, opencode, openai), `x-feast-host` says other and a third header, `x-feast-host-detail`, names it. Never a wallet, a token, a path, a machine or a user name, a model version or the prompt.
 - With the running agent's league read, every 5 minutes, one more: `x-feast-health`, one word (`ok`, `degraded` when its RPC is on a fallback or an ask failed, `failing` after three failed passes in a row or a transaction unknown for more than 10 minutes). Nothing else: feast.meme only counts them.
 
 ### The older signed path: `FL register`

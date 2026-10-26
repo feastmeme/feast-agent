@@ -36,7 +36,7 @@ Every on-chain amount is in BNB, and the league's cap is at most 0.15 BNB at wor
 The agent's runtime is this repository, installed at a pinned release into the user's home folder, where the user can read every line that will trade for them:
 
 ```bash
-git clone --depth 1 --branch league-v5.1.3 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
+git clone --depth 1 --branch league-v5.1.4 https://github.com/feastmeme/feast-agent "$HOME/.feast-league/runtime"
 (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)
 ```
 
@@ -44,7 +44,7 @@ Run `npm ci` from inside the folder. With npm 11 (Node 24), `npm --prefix <dir> 
 
 To check the install, run `node "$HOME/.feast-league/runtime/src/league/bin.mjs" doctor`.
 
-A runtime installed at `league-v1` … `league-v5.1.2` moves to `league-v5.1.3` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.3 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.3 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
+A runtime installed at `league-v1` … `league-v5.1.3` moves to `league-v5.1.4` the same way: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin tag league-v5.1.4 && git -C "$HOME/.feast-league/runtime" checkout league-v5.1.4 && (cd "$HOME/.feast-league/runtime" && npm ci --omit=dev)` (before `league-v4` there is no prompt mode; before `league-v5`, no autopilot backup by default). If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it. The example prompts are in the checkout, under `docs/prompts/`.
 
 `FEAST_LEAGUE_RUNTIME` points the skill at another checkout. That is useful when testing the runtime itself.
 
@@ -69,7 +69,7 @@ Binance AI Pro runs commands in a sandbox that keeps files but not processes: a 
 2. **The runtime**, the same way (no git): the release's tar.gz from GitHub's codeload, then `npm ci`:
 
    ```bash
-   export PATH=~/node22/bin:$PATH && mkdir -p ~/.feast-league/runtime && cd ~/.feast-league/runtime && node -e "fetch('https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.3').then(r => r.arrayBuffer()).then(b => require('fs').writeFileSync('runtime.tar.gz', Buffer.from(b)))" && tar xzf runtime.tar.gz --strip-components=1 && rm runtime.tar.gz && npm ci --omit=dev
+   export PATH=~/node22/bin:$PATH && mkdir -p ~/.feast-league/runtime && cd ~/.feast-league/runtime && node -e "fetch('https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.4').then(r => r.arrayBuffer()).then(b => require('fs').writeFileSync('runtime.tar.gz', Buffer.from(b)))" && tar xzf runtime.tar.gz --strip-components=1 && rm runtime.tar.gz && npm ci --omit=dev
    ```
 3. **The wallet.** `baw` (1.12.1 there, at `/usr/local/bin`) signs in through AI Pro's own sign-in panel, not `baw auth signin`; its session lasts 364 days. `baw wallet status --json` must say `CONNECTED`, and `FL doctor` must pass.
 4. **Enter in manual mode:** `FL enter --name <id>.ai --manual --host binance` (add `--lang zh` for Chinese). The same card and the same signatures as any entry (a wallet that already has a seat signs the notes session only), then no loop starts and no daemon is installed.

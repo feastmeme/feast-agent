@@ -76,7 +76,8 @@ describe("the skill, the setup, the release notes", () => {
     const setup = read("skills/feast-league/references/setup.md");
     expect(setup).toContain("--branch league-v5");
     expect(setup).not.toContain("--branch league-v4");
-    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.2` moves to `league-v5.1.3` the same way");
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
+    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.3` moves to `league-v5.1.4` the same way");
     expect(setup).toContain("If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it.");
   });
 
@@ -338,7 +339,8 @@ describe("the autopilot backup and the two headers (task 975)", () => {
 
   it("a Grok host is told to pass --host grok; What it sends names the two headers", () => {
     expect(section9).toContain("passes `--host grok`");
-    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.3`)");
+    // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
+    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.4`)");
     expect(skill).toMatch(/Every request `FL` makes to feast\.meme carries two headers: `x-feast-host`/);
   });
 
@@ -694,7 +696,8 @@ describe("task 975, run 21: league-v5.1.3, manual mode for Binance AI Pro", () =
       expect(text).toContain("fetch('https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.gz')");
       expect(text).toContain("tar xzf node.tar.gz --strip-components=1");
       expect(text).toContain("export PATH=~/node22/bin:$PATH");
-      expect(text).toContain("https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.3");
+      // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
+      expect(text).toContain("https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.4");
       expect(text).toContain("npm ci --omit=dev");
       expect(text).toMatch(/chown/);
     }
