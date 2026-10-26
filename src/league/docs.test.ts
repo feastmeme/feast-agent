@@ -223,21 +223,25 @@ describe("the season-1 default strategy (task 968)", () => {
   const BANNED_ZH = [/保证/, /收益/, /稳赚/, /稳赢/, /必赚/, /无风险/, /抽奖/];
   const BANNED_EN = [/guarantee/i, /profit is/i, /risk-free/i, /sure win/i, /\byield/i, /lottery/i];
 
-  it("both files exist, titled, in six short lines: who, the arena, the goal, how, a starting point", () => {
-    expect(zh.split("\n")[0]).toBe("# 第一季默认策略 v1（Season-1 default strategy v1）");
-    expect(en.split("\n")[0]).toBe("# Season-1 default strategy v1");
-    for (const text of [zh, en]) expect(text.trimEnd().split("\n")).toHaveLength(6);
-    const [, whoZh, arenaZh, goalZh, howZh, endZh] = zh.trimEnd().split("\n");
-    expect(whoZh).toBe("你是一个在 Feast 上交易的 AI，代表 <id>.ai 参加联赛。");
-    for (const fact of ["只能交易 Feast 上的币", "0.15 BNB", "21:00", "≥3 笔", "≥0.02 BNB", "不算自己的币", "会被吃掉", "当天亏钱且盈亏垫底的两成", "一季一条命", "第一顿不吃人", "公开"]) expect(arenaZh, fact).toContain(fact);
-    expect(goalZh).toBe("目标：赛季结束时赚到的 BNB 最多，并且活到最后。");
-    for (const word of ["FL data", "活动门槛", "FL note"]) expect(howZh, word).toContain(word);
-    expect(endZh).toBe("这只是起点，随时改成你自己的策略。");
-    const [, whoEn, arenaEn, goalEn, howEn, endEn] = en.trimEnd().split("\n");
-    expect(whoEn).toContain("<id>.ai");
-    for (const fact of ["Feast coins only", "0.15 BNB", "21:00 (UTC+8)", "at least 3 trades", "0.02 BNB", "own coin left out", "bottom fifth by the day's PnL whose day lost", "one life a season", "the first dinner eats nobody", "notes are public"]) expect(arenaEn, fact).toContain(fact);
+  it("both files exist, titled, in seven short lines: who, the arena, the goal, how, the style, a starting point (v1.1)", () => {
+    // Task 1020: the default strategy v1.1 (the owner's ruling): the cap at work, the prizes, PvP, a style.
+    expect(zh.split("\n")[0]).toBe("# 第一季默认策略 v1.1");
+    expect(en.split("\n")[0]).toBe("# Season-1 default strategy v1.1");
+    for (const text of [zh, en]) expect(text.trimEnd().split("\n")).toHaveLength(7);
+    const [, whoZh, arenaZh, goalZh, howZh, styleZh, endZh] = zh.trimEnd().split("\n");
+    expect(whoZh).toBe("你是一个在 Feast 上交易的 AI，以 <id>.ai 的身份参加联赛。");
+    for (const fact of ["只交易 Feast 上的币", "任一时刻在场仓位成本最多 0.15 BNB，卖出即释放额度，交易次数不限", "21:00", "至少 3 笔", "0.02 BNB 成交量", "自己发的币不算", "被吃", "最后五分之一、且当日亏了 BNB 的也被吃", "一季一条命", "第一顿不吃人", "公开", "1,000、200、100 USDT", "幸存者平分 280 USDT"]) expect(arenaZh, fact).toContain(fact);
+    expect(goalZh).toBe("目标：赛季结束时赚到最多的 BNB，并且活到最后；每天收在不亏：当天赚了 BNB 的 agent 永远不会被吃。");
+    for (const word of ["FL data", "活跃门槛", "FL note", "淘汰区"]) expect(howZh, word).toContain(word);
+    expect(styleZh).toBe("你的风格：<persona>");
+    expect(endZh).toBe("这只是起点：随时改成你自己的策略。");
+    const [, whoEn, arenaEn, goalEn, howEn, styleEn, endEn] = en.trimEnd().split("\n");
+    expect(whoEn).toBe("You are an AI trading on Feast, playing in the league as <id>.ai.");
+    for (const fact of ["Feast coins only", "at most 0.15 BNB at work in open positions at any time, a sale frees room, and there is no limit on how often you trade", "21:00 (UTC+8)", "at least 3 trades", "0.02 BNB", "own coin left out", "bottom fifth by the day's PnL whose day lost", "one life a season", "the first dinner eats nobody", "notes are public", "Prizes: 1,000, 200 and 100 USDT for the top three by season BNB; survivors share 280 USDT."]) expect(arenaEn, fact).toContain(fact);
+    expect(goalEn).toBe("Your goal: the most BNB earned by the season's end, alive at the end; end every day at or above zero: a day that made BNB is never eaten.");
     expect(goalEn).toMatch(/^Your goal: the most BNB/);
-    for (const word of ["FL data", "activity floor early", "FL note"]) expect(howEn, word).toContain(word);
+    for (const word of ["FL data", "activity floor early", "FL note", "drop zone"]) expect(howEn, word).toContain(word);
+    expect(styleEn).toBe("Your style: <persona>");
     expect(endEn).toMatch(/starting point/);
   });
 

@@ -31,7 +31,7 @@ import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.t
 import * as copy from "./copy.ts";
 import { composeMeme, hostPicture, type Meme } from "./meme.ts";
 import { parseRef } from "./ref.ts";
-import { ensureStrategy } from "./strategy.ts";
+import { ensureStrategy, type PersonaKey } from "./strategy.ts";
 
 /**
  * `FL enter --name <id>.ai [--prompt strategy.md] [--meme "<concept>" …] [--no-start]` (tasks 961, 963, 968): one
@@ -299,17 +299,20 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     const name = agentName!;
     let strategy: copy.StrategyShown;
     let promptPath: string;
+    // Task 1020: the default's style, only when the default is used (copied now, or a copy left as it was).
+    let persona: PersonaKey | null = null;
     if (input.prompt !== undefined) {
       promptPath = input.prompt;
       strategy = { kind: "given", path: input.prompt };
     } else {
       const file = ensureStrategy(deps.cwd ?? process.cwd(), given, lang);
-      if (file.copied) log("enter.strategy", { copied: "season-1 default" });
+      if (file.copied) log("enter.strategy", { copied: "season-1 default v1.1", persona: file.persona });
       promptPath = file.path;
-      strategy = { kind: file.copied ? "default" : "existing", path: file.path };
+      persona = file.persona;
+      strategy = file.copied ? { kind: "default", path: file.path, persona: file.persona } : { kind: "existing", path: file.path, persona: file.persona };
     }
     const planInput: PlanInput = { name, promptPath, preset: choice.preset, idleMinutes: input.idleMinutes, ...(asked.ask ? { ask: asked.ask } : {}), params: {}, limits: {} };
-    const checked = prepareStart(deps.home, name, { plan: planInput, yes: false, confirm: true, now: new Date(now()), ...(manual ? { manual: true } : {}) });
+    const checked = prepareStart(deps.home, name, { plan: planInput, yes: false, confirm: true, now: new Date(now()), persona, ...(manual ? { manual: true } : {}) });
     if (checked.kind === "not-planned") return end(2, false, "plan", copy.notPlanned(checked.errors, lang), { errors: checked.errors });
     if (checked.kind === "running") return end(2, false, "running", copy.runningOtherCard(name, lang), { agent: name });
     if (checked.kind === "refused") return end(2, false, "start", copy.startRefused(checked.why, lang), { agent: name });

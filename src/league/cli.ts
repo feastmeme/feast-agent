@@ -690,6 +690,8 @@ async function main(argv: string[]): Promise<number> {
         state: runState,
         manual: s.agent.manual === true,
         lastManual,
+        // Task 1020: the style of the season-1 default strategy v1.1 FL enter copied, or null.
+        persona: s.agent.persona ?? null,
       };
       const gate = data.season;
       const seasonOverNow = gate?.state === "over";
@@ -705,6 +707,7 @@ async function main(argv: string[]): Promise<number> {
             ...(mine.prompt
               ? [
                   `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: FL start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
+                  ...(data.persona ? [`style: ${data.persona} (the season-1 default strategy v1.1, as FL enter copied it)`] : []),
                   // Addendum 10: after the season, nothing about asking or the floor keeper: the season-over line says it all.
                   ...(seasonOverNow
                     ? []

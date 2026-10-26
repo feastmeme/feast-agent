@@ -20,7 +20,7 @@ import { ENTRY_AGENT } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { AVATAR_PNG, FakeEnterSite, fakeEnterChain, fakeOneShot, INDEXER, keptRow, SITE, type FakeChainOptions, type FakeShotOptions, type FakeSiteOptions } from "./fakes.ts";
 import { enter, entryAgent, keepReferrerRead, keptReferrer, readEntry, referrerStatus, type EnterDeps, type EnterInput } from "./flow.ts";
-import { defaultStrategy } from "./strategy.ts";
+import { PERSONA_TEXT, defaultStrategy, personaOf } from "./strategy.ts";
 
 /**
  * `FL enter` (task 968): one command enters the league and runs the player's AI. One card and one yes sign the
@@ -457,7 +457,32 @@ describe("FL enter: the agent's name, the strategy, the start", () => {
     expect(loadAgent(w.home, ID)?.prompt?.path).toBe(path);
     const zh = world();
     await zh.run({ lang: "zh" });
-    expect(readFileSync(join(zh.cwd, "strategy.md"), "utf8")).toContain("代表 maplegrin.ai 参加联赛");
+    // Task 1020: v1.1's who line.
+    expect(readFileSync(join(zh.cwd, "strategy.md"), "utf8")).toContain("以 maplegrin.ai 的身份参加联赛");
+  });
+
+  it("task 1020: the default gets the Agent ID's style, stored on the agent and said in the entry's output", async () => {
+    const w = world();
+    const out = await w.run();
+    const persona = personaOf(ID);
+    const text = readFileSync(join(w.cwd, "strategy.md"), "utf8");
+    expect(text).toContain(`Your style: ${PERSONA_TEXT[persona].en}`);
+    expect(text).not.toContain("<persona>");
+    expect(loadAgent(w.home, ID)?.persona).toBe(persona);
+    expect(out.text).toContain(`; style: ${persona} (${PERSONA_TEXT[persona].en})`);
+    const zh = world();
+    const zhOut = await zh.run({ lang: "zh" });
+    expect(readFileSync(join(zh.cwd, "strategy.md"), "utf8")).toContain(`你的风格：${PERSONA_TEXT[persona].zh}`);
+    expect(zhOut.text).toContain(`风格：${persona}（${PERSONA_TEXT[persona].zh}）`);
+    // A copy left as it was keeps its style on a rerun; the player's own file has none.
+    const again = world();
+    writeFileSync(join(again.cwd, "strategy.md"), defaultStrategy(ID, "en"));
+    await again.run();
+    expect(loadAgent(again.home, ID)?.persona).toBe(persona);
+    const own = world();
+    writeFileSync(join(own.cwd, "strategy.md"), "Mine: buy only what moves.\n");
+    await own.run();
+    expect(loadAgent(own.home, ID)?.persona ?? null).toBeNull();
   });
 
   it("an existing strategy.md is used as it is, never overwritten", async () => {

@@ -224,6 +224,20 @@ describe("task 975: FL status shows the day's count", () => {
   }, 60_000);
 });
 
+describe("task 1020: FL status names the default strategy's style", () => {
+  it("the persona FL enter stored is in --json and on its own line; none for the player's own prompt", async () => {
+    const { env, prompt, home } = setup();
+    const planned = planAgent({ name: "demo", promptPath: prompt, preset: "steady" });
+    if (!planned.ok) throw new Error(planned.errors.join("; "));
+    saveAgent(home, { ...confirmAgent(planned.agent), persona: "hunter" });
+    const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as Record<string, unknown>;
+    expect(data.persona).toBe("hunter");
+    expect((await run(["status", "demo", "--no-league"], env)).stdout).toContain("style: hunter (the season-1 default strategy v1.1, as FL enter copied it)");
+    saveAgent(home, confirmAgent(planned.agent));
+    expect((await run(["status", "demo", "--no-league"], env)).stdout).not.toContain("style:");
+  }, 60_000);
+});
+
 describe("task 975, addendum 2: FL status in season, and FL doctor's indexer", () => {
   it("once the season is open, FL status ends by telling the host to trade now (no league block needed)", async () => {
     const { env, prompt, home } = setup();

@@ -2,6 +2,7 @@ import { short, utc8, type Lang } from "../register/copy.ts";
 import { LEAGUE_CHAIN_ID, LEAGUE_DOMAIN, shownName, ZERO_ADDRESS } from "../register/message.ts";
 import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES } from "../prompt/constants.ts";
 import { utc8Day } from "../season-gate.ts";
+import { PERSONA_TEXT, type PersonaKey } from "./strategy.ts";
 
 /**
  * Every word `FL enter` shows a person, in English and Chinese (task 961). The
@@ -303,15 +304,17 @@ export function tradeNowLine(autopilot: AutopilotShown, promptFile: string, lang
     : `The season is on. Decide and trade now by ${promptFile}; with no autopilot backup, nothing trades while you are quiet but the hard stop-loss.`;
 }
 
-export type StrategyShown = { kind: "default"; path: string } | { kind: "existing"; path: string } | { kind: "given"; path: string };
+/** `persona` (task 1020): the default's style, when the strategy is the season-1 default v1.1 (copied now, or a copy left as it was). */
+export type StrategyShown = { kind: "default"; path: string; persona?: PersonaKey | null } | { kind: "existing"; path: string; persona?: PersonaKey | null } | { kind: "given"; path: string };
 
 export function strategyLine(view: StrategyShown, name: string, lang: Lang): string {
   const zh = lang === "zh";
+  const style = view.kind !== "given" && view.persona ? (zh ? `；风格：${view.persona}（${PERSONA_TEXT[view.persona].zh}）` : `; style: ${view.persona} (${PERSONA_TEXT[view.persona].en})`) : "";
   if (view.kind === "default")
     return zh
-      ? `策略：第一季默认策略，已复制到 ${view.path}；随时可以改，改完运行 \`FL start ${name} --prompt ${view.path}\` 会给出新卡片。`
-      : `Strategy: the season-1 default strategy, copied to ${view.path}; edit it any time, then \`FL start ${name} --prompt ${view.path}\` shows the new card.`;
-  if (view.kind === "existing") return zh ? `策略：你的 strategy.md（已有的，没有改动）：${view.path}` : `Strategy: your strategy.md (existing, left as it is): ${view.path}`;
+      ? `策略：第一季默认策略 v1.1，已复制到 ${view.path}${style}；随时可以改，改完运行 \`FL start ${name} --prompt ${view.path}\` 会给出新卡片。`
+      : `Strategy: the season-1 default strategy, copied to ${view.path} (v1.1)${style}; edit it any time, then \`FL start ${name} --prompt ${view.path}\` shows the new card.`;
+  if (view.kind === "existing") return zh ? `策略：你的 strategy.md（已有的，没有改动）：${view.path}${style}` : `Strategy: your strategy.md (existing, left as it is): ${view.path}${style}`;
   return zh ? `策略：你的 ${view.path}` : `Strategy: your ${view.path}`;
 }
 

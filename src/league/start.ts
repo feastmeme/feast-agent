@@ -65,6 +65,8 @@ export function prepareStart(
     league?: AgentConfig["league"];
     /** Run 21: manual mode on (true) or off (false); undefined keeps what the agent has. Never part of its card's shape. */
     manual?: boolean;
+    /** Task 1020: the default strategy's style `FL enter` copied; undefined keeps what the agent has. Never part of its card's shape. */
+    persona?: AgentConfig["persona"];
     now?: Date;
   },
 ): StartCheck {
@@ -78,7 +80,8 @@ export function prepareStart(
       // The season gate stays with the agent through a new card: a restart before the start still waits.
       const league = options.league !== undefined ? options.league : agent?.league;
       const manual = options.manual !== undefined ? options.manual : (agent?.manual ?? undefined);
-      agent = { ...planned.agent, ...(league !== undefined ? { league } : {}), ...(manual ? { manual: true } : {}) };
+      const persona = options.persona !== undefined ? options.persona : (agent?.persona ?? undefined);
+      agent = { ...planned.agent, ...(league !== undefined ? { league } : {}), ...(manual ? { manual: true } : {}), ...(persona ? { persona } : {}) };
       saveAgent(home, agent);
       replanned = true;
     }
@@ -86,6 +89,11 @@ export function prepareStart(
   if (!agent) return { kind: "no-agent" };
   if (options.league !== undefined && JSON.stringify(agent.league ?? null) !== JSON.stringify(options.league)) {
     agent = { ...agent, league: options.league };
+    saveAgent(home, agent);
+  }
+  if (options.persona !== undefined && (agent.persona ?? null) !== options.persona) {
+    const { persona: _was, ...rest } = agent;
+    agent = options.persona ? { ...rest, persona: options.persona } : rest;
     saveAgent(home, agent);
   }
   if (options.manual !== undefined && (agent.manual === true) !== options.manual) {

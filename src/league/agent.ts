@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { auditSource, sha256Of, type StaticAudit } from "./audit/static.ts";
+import type { PersonaKey } from "./enter/strategy.ts";
 import { DEFAULT_LIMITS, loosenedBeyond, migrateLimits, resolveLimits, type Limits } from "./limits.ts";
 import { PRESETS, resolveParams, type PresetId } from "./presets/specs.ts";
 import { CAP_REFUSAL, DEFAULT_IDLE_MINUTES, IDLE_MINUTES_MAX, IDLE_MINUTES_MIN, LEAGUE_CAP_BNB, SAFETY_PASS_SECONDS } from "./prompt/constants.ts";
@@ -65,6 +66,12 @@ export type AgentConfig = {
    * of the card's shape: `FL start <name>` switches it to the loop with the plan it was confirmed with.
    */
   manual?: boolean | null;
+  /**
+   * Task 1020 (league-v5.1.4): the style of the season-1 default strategy v1.1 `FL enter` copied for this agent
+   * (`enter/strategy.ts` PERSONAS), kept next to its prompt. Not part of the card's shape: it only names what the
+   * copied text says, and `FL status` shows it.
+   */
+  persona?: PersonaKey | null;
 };
 
 export type PlanInput = {
