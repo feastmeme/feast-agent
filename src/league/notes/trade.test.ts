@@ -13,7 +13,8 @@ import { leagueWire } from "../register/fakes.ts";
 import { runAgent } from "../runtime.ts";
 import { agentPaths, writeJsonAtomic } from "../store.ts";
 import { readNotes } from "./queue.ts";
-import { KEEPER_WHY, STOP_LOSS_WHY, WHY_MAX, cleanWhy, tradeNoteText, tradeWhy } from "./trade.ts";
+import { readHoldLine } from "./hold.ts";
+import { HOLD_LINE_EVERY_MS, KEEPER_WHY, STOP_LOSS_WHY, WHY_MAX, cleanWhy, holdLineDue, holdNoteText, tradeNoteText, tradeWhy } from "./trade.ts";
 
 // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
 
@@ -177,3 +178,60 @@ describe("a public note for every trade the runtime makes", () => {
     expect(readNotesLog(t.home)).toContain('"event":"note.dropped"');
   }, 60_000);
 });
+
+describe("run 26: a hold's public line", () => {
+  it("holdLineDue: a line, cleaned; never the same as the last, never under 30 minutes after it", () => {
+    expect(HOLD_LINE_EVERY_MS).toBe(30 * MIN);
+    expect(holdLineDue(null, "  the pit is quiet\n", T0)).toBe("the pit is quiet");
+    expect(holdLineDue(null, null, T0)).toBeNull();
+    expect(holdLineDue(null, "0x1234567890abcdef", T0)).toBeNull();
+    const last = { text: "the pit is quiet", at: T0 };
+    expect(holdLineDue(last, "the pit is quiet", T0 + 60 * MIN)).toBeNull();
+    expect(holdLineDue(last, "something else", T0 + 29 * MIN)).toBeNull();
+    expect(holdLineDue(last, "something else", T0 + 30 * MIN)).toBe("something else");
+    expect(holdNoteText("x")).toBe("held: x");
+  });
+
+  it("the asked AI's holds: its why is published as held: <why>, when it changes and 30 minutes after the last", async () => {
+    const { home } = setup({ ask: true });
+    const c = fakeClock(T0);
+    const { feed, w } = world(c);
+    recordHostAction(home, "demo", "buy", T0);
+    const asked: number[] = [];
+    await run(home, c, feed, w, T0 + 70 * MIN, async () => {
+      asked.push(c.now());
+      return answer({ reason: "r", why: asked.length <= 2 ? "the pit is quiet, waiting for a wave" : "the pit woke up, next round I go in" });
+    });
+    expect(asked.length).toBeGreaterThanOrEqual(4);
+    // The floor keeper's own trades (if any) say their own line; the holds' lines are these two, the second one the
+    // first ask with a new line at least 30 minutes after the first was published.
+    const held = readNotes(home, "demo").filter((n) => n.text.startsWith("held: "));
+    expect(held.map((n) => n.text)).toEqual(["held: the pit is quiet, waiting for a wave", "held: the pit woke up, next round I go in"]);
+    const first = Date.parse(held[0]!.ts);
+    const second = Date.parse(held[1]!.ts);
+    expect(first).toBe(asked[0]);
+    expect(second - first).toBeGreaterThanOrEqual(30 * MIN);
+    expect(asked.filter((t) => t > first + 30 * MIN && t < second)).toEqual([]);
+    expect(readHoldLine(home, "demo")).toEqual({ text: "the pit woke up, next round I go in", at: second });
+  }, 60_000);
+
+  it("a hold with no why publishes nothing; a waiting notes door drops the line and keeps no last one", async () => {
+    const { home } = setup({ ask: true });
+    const c = fakeClock(T0);
+    const { feed, w } = world(c);
+    recordHostAction(home, "demo", "buy", T0);
+    await run(home, c, feed, w, T0 + 12 * MIN, hold);
+    expect(noteTexts(home)).toEqual([]);
+
+    const t = setup({ ask: true });
+    const c2 = fakeClock(T0);
+    const w2 = world(c2);
+    recordHostAction(t.home, "demo", "buy", T0);
+    writeJsonAtomic(join(agentPaths(t.home, "demo").dir, "doors.json"), { notes: { until: T0 + 60 * MIN, at: T0, status: 429 } });
+    await run(t.home, c2, w2.feed, w2.w, T0 + 12 * MIN, async () => answer({ why: "waiting" }));
+    expect(noteTexts(t.home)).toEqual([]);
+    expect(readHoldLine(t.home, "demo")).toBeNull();
+    expect(readNotesLog(t.home)).toContain('"by":"hold"');
+  }, 60_000);
+});
+

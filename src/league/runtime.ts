@@ -26,6 +26,7 @@ import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type
 import { Market } from "./market.ts";
 import { checkNote, flushNotes, notesPath, readNotes } from "./notes/queue.ts";
 import { liveToken } from "./notes/session.ts";
+import { publishHoldLine } from "./notes/hold.ts";
 import { tradeNoteText, tradeWhy } from "./notes/trade.ts";
 import { presetStrategy } from "./presets/logic.ts";
 import { PRESETS } from "./presets/specs.ts";
@@ -239,12 +240,17 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     let signedOut = false;
     /** A note queued by the runtime itself (the sign-in's, addendum 11): the next pass flushes the notes at once. */
     let notesDue = false;
-    const publicNote = (text: string, why: string) => {
+    /** True when the note was queued. */
+    const publicNote = (text: string, why: string): boolean => {
       const checked = checkNote(text, wallet);
-      if (!checked.ok) return log("note.skipped", { why, problem: checked.reason });
+      if (!checked.ok) {
+        log("note.skipped", { why, problem: checked.reason });
+        return false;
+      }
       appendJsonl(notesPath(deps.home, deps.name), { id: randomUUID(), ts: new Date(clock()).toISOString(), text: checked.text, tx: null, model: modelHint(), sent: false });
       log("note.queued", { by: "runtime", why });
       notesDue = true;
+      return true;
     };
     /**
      * Task 1020 (the owner's ruling C): one public note for every trade this runtime makes and confirms, whoever asked
@@ -257,6 +263,19 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         publicNote(tradeNoteText({ side: trade.side, symbol: trade.symbol, bnb: weiToBnb(trade.bnbWei), why: trade.why }), `${trade.side} note`);
       } catch (error) {
         log("note.failed", { by: "trade", reason: errorLine(error) });
+      }
+    };
+    /**
+     * Run 26: a hold's public line ("held: <why>"), by the same road and with the same door as a trade's note, when it
+     * differs from the seat's last and 30 minutes have passed since (`notes/hold.ts`). Never fails the round.
+     */
+    const holdNote = async (why: string | null) => {
+      try {
+        if (!why) return;
+        if (activeWaits(deps.home, deps.name, clock()).some((w) => w.door === "notes")) return log("note.dropped", { by: "hold", why: "the notes door is waiting (rate-limited)" });
+        await publishHoldLine(deps.home, deps.name, why, clock(), (text) => publicNote(text, "hold note"));
+      } catch (error) {
+        log("note.failed", { by: "hold", reason: errorLine(error) });
       }
     };
     /** Task 1018: the floor keeper's switch as every decision row says it (set below, with the switch itself). */
@@ -1349,7 +1368,10 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         journal(row({ ...decided, result }));
         log("ask", { pack: pack.digest, action: d.action, coin: d.coin, amountBnb: d.amountBnb, fraction: d.fraction, result });
       };
-      if (d.action === "hold") return finish("hold");
+      if (d.action === "hold") {
+        await holdNote(d.why);
+        return finish("hold");
+      }
       const request: IntentRequest = d.action === "buy" ? { kind: "buy", coin: d.coin, bnb: d.amountBnb, reason: `ask: ${d.reason}`, why: d.why } : { kind: "sell", coin: d.coin, fraction: d.fraction, reason: `ask: ${d.reason}`, why: d.why };
       const normal = normalizeIntent(request, { snapshot: { feast, now: clock(), limits: agent!.limits }, source: "manual", slippagePct: Math.min(3, agent!.limits.maxSlippagePct), ttlMs: 120_000 });
       if ("error" in normal) return finish(`invalid: ${normal.error}`);

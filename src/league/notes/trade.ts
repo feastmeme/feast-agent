@@ -56,3 +56,24 @@ export function tradeWhy(intent: { source: string; why?: string | null; reason?:
   if (intent.source === "runtime") return /\bL6\b/.test(intent.reason ?? "") ? STOP_LOSS_WHY : null;
   return null;
 }
+
+/**
+ * A hold's public line (task 975, run 26; the default v1.3 asks for "a hold with a public line on why not this round"):
+ * the answer's `why` on a hold becomes "held: <why>", through the same filter as every note, but only when it differs
+ * from this seat's last hold line and at least 30 minutes after it, so a quiet seat does not fill the league's page with
+ * the same line every five minutes. Trades keep their line on every trade.
+ */
+export const HOLD_LINE_EVERY_MS = 30 * 60_000;
+
+export const holdNoteText = (why: string) => `held: ${why}`;
+
+/** The seat's last published hold line, kept on disk so a restart does not repeat it. */
+export type HoldLine = { text: string; at: number };
+
+/** The hold line to publish now, cleaned, or null: none given, the same as the last, or under 30 minutes after it. */
+export function holdLineDue(last: HoldLine | null, raw: unknown, now: number): string | null {
+  const why = cleanWhy(raw);
+  if (!why) return null;
+  if (last && (last.text === why || now - last.at < HOLD_LINE_EVERY_MS)) return null;
+  return why;
+}

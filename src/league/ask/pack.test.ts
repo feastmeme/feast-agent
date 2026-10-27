@@ -173,6 +173,12 @@ describe("the answer, checked strictly", () => {
     expect(validateAnswer("buy c2", pack)).toEqual({ ok: false, why: "the answer is not a JSON object" });
   });
 
+  it("run 26: a hold keeps its why, cleaned (its public line), and the pack says how it is published", () => {
+    expect(validateAnswer({ action: "hold", coin: null, amountBnb: null, fraction: null, reason: "r", why: " the pit is quiet\n 0xabcdef0123 ", memo: "" }, pack)).toMatchObject({ ok: true, decision: { action: "hold", why: "the pit is quiet" } });
+    expect(validateAnswer({ action: "hold", coin: null, amountBnb: null, fraction: null, reason: "r", why: null, memo: "" }, pack)).toMatchObject({ ok: true, decision: { why: null } });
+    expect(pack.text).toContain('For a hold, one public line on why not this round, or null: it is published as "held: <why>" only when it differs from your last hold line and 30 minutes have passed since that one.');
+  });
+
   it("finds the JSON in a model's text: bare, fenced, or between braces", () => {
     expect(parseAnswerText('{"action":"hold"}')).toEqual({ action: "hold" });
     expect(parseAnswerText('Here:\n```json\n{"action":"hold"}\n```')).toEqual({ action: "hold" });

@@ -37,6 +37,7 @@ import { gatherPack } from "./ask/gather.ts";
 import { journalPath, readAskState, readJournal } from "./ask/journal.ts";
 import { readSnapshotCache, SnapshotClient, CACHE_FRESH_MS } from "./feed/snapshot.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
+import { publishHoldLine } from "./notes/hold.ts";
 import { noteCommand } from "./notes/queue.ts";
 import { liveToken, notesLogin, recordedAgentId } from "./notes/session.ts";
 import { checkHost, checkModel, declareHost, hostDetailHint, modelHint, readDeclaredHost, RUNTIME_RELEASE } from "./headers.ts";
@@ -898,7 +899,10 @@ async function main(argv: string[]): Promise<number> {
       appendJsonl(agentPaths(home, name).log, { at: new Date(answeredAt).toISOString(), event: "answer.taken", pack: printed.digest, action: d.action, coin: d.coin, amountBnb: d.amountBnb, fraction: d.fraction, reason });
       if (d.action === "hold") {
         decided({ action: "hold", reason, result: decisionResult("ok", "hold") });
-        print(json, { ok: true, action: "hold", pack: printed.digest }, () => `hold: nothing traded (pack ${printed.digest})`);
+        // Run 26: --why, else the answer's own why, is the hold's public line, by FL note's road, at most once in 30 minutes.
+        const signer = signerFor(home, null);
+        const line = await publishHoldLine(home, name, values.why ?? d.why, answeredAt, async (text) => (await noteCommand({ home, name, site: siteFromEnv(), fetch, wallet: () => signer.address() }, { text })).code === 0).catch(() => null);
+        print(json, { ok: true, action: "hold", pack: printed.digest, holdLine: line }, () => `hold: nothing traded (pack ${printed.digest})${line ? `; public line: held: ${line}` : ""}`);
         return 0;
       }
       // Task 1020: --why, else the answer's own why, becomes the trade's public note.

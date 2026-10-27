@@ -31,6 +31,8 @@ import {
 import { defaultStrategy, defaultStrategyVariants, PERSONAS, personaOf } from "./enter/strategy.ts";
 import { coinRow, FakeFeed, INDEXER, seeded, SITE, snapshotBody, type Answer } from "./feed/fakes.ts";
 import { RUNTIME_RELEASE } from "./headers.ts";
+import { holdLinePath } from "./notes/hold.ts";
+import { readNotes } from "./notes/queue.ts";
 import { saveSession } from "./notes/session.ts";
 import { fakeClock, marketWorld } from "./prompt/fakes.ts";
 import { recordHostAction } from "./prompt/host.ts";
@@ -537,6 +539,21 @@ describe("FL answer --reason: the hand-answered round, a hold's too", () => {
     return { home, env };
   }
   const answer = (a: Record<string, unknown>) => JSON.stringify({ action: "hold", coin: null, amountBnb: null, fraction: null, reason: "", memo: "", ...a });
+
+  it("run 26: a hold's why (or --why) is its public line, held: <why>, by FL note's road; the same line, or one under 30 minutes later, is not", async () => {
+    const { home, env } = answering();
+    const held = () => readNotes(home, "demo").map((n) => n.text);
+    const first = await cli(["answer", "demo", answer({ why: "the pit is quiet, waiting for a wave" })], env);
+    expect(first.code).toBe(0);
+    expect(first.stdout.trim()).toBe("hold: nothing traded (pack sha256:0123456789abcdef); public line: held: the pit is quiet, waiting for a wave");
+    expect(held()).toEqual(["held: the pit is quiet, waiting for a wave"]);
+    expect((await cli(["answer", "demo", answer({ why: "something new" })], env)).stdout.trim()).toBe("hold: nothing traded (pack sha256:0123456789abcdef)");
+    expect(held()).toHaveLength(1);
+    // 31 minutes later (the last line kept on disk, moved back): --why wins over the answer's own.
+    writeFileSync(holdLinePath(home, "demo"), JSON.stringify({ text: "the pit is quiet, waiting for a wave", at: Date.now() - 31 * 60_000 }));
+    expect((await cli(["answer", "demo", answer({ why: "the answer's" }), "--why", "the host's own line"], env)).code).toBe(0);
+    expect(held()).toEqual(["held: the pit is quiet, waiting for a wave", "held: the host's own line"]);
+  }, 60_000);
 
   it("a hold with --reason writes it; without it, the answer's own reason (\"\" when it gives none); the row is the contract's", async () => {
     const { home, env } = answering();
