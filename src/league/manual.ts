@@ -2,7 +2,8 @@ import { join } from "node:path";
 
 import { withHostHeaders } from "./headers.ts";
 import { liveToken } from "./notes/session.ts";
-import { agentPaths, readJson, writeJsonAtomic } from "./store.ts";
+import { sendDecisions } from "./decisions.ts";
+import { agentPaths, appendJsonl, readJson, writeJsonAtomic } from "./store.ts";
 
 /**
  * Manual mode (task 975, run 21; the owner's ruling of 2026-10-25): a host whose background processes die when the
@@ -44,13 +45,20 @@ export function manualBeat(o: { home: string; name: string; site: string; fetch:
     // Kept before the read: two commands at once send one.
     writeJsonAtomic(beatsPath(o.home), { ...kept, [o.name]: now });
     const site = o.site.replace(/\/+$/, "");
+    const headed = withHostHeaders(o.fetch, [site]);
+    let result: BeatResult;
     try {
-      const r = await withHostHeaders(o.fetch, [site])(`${site}/api/league?view=today&limit=1&me=${wallet.toLowerCase()}`, { headers: { accept: "application/json", authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(o.timeoutMs ?? 5_000) });
+      const r = await headed(`${site}/api/league?view=today&limit=1&me=${wallet.toLowerCase()}`, { headers: { accept: "application/json", authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(o.timeoutMs ?? 5_000) });
       await r.body?.cancel().catch(() => undefined);
-      return r.status === 200 ? "sent" : "failed";
+      result = r.status === 200 ? "sent" : "failed";
     } catch {
-      return "failed";
+      result = "failed";
     }
+    // Run 26 (item 14): the decisions ring rides this beat as it rides the loop's: at most 3 rows, the cursor moved on a
+    // 2xx only (`decisions.ts` sendDecisions); manual seats are FL answer's main users. It never changes the beat's result.
+    const log = (event: string, fields: Record<string, unknown> = {}) => appendJsonl(agentPaths(o.home, o.name).log, { at: new Date(now).toISOString(), event, ...fields });
+    await sendDecisions({ home: o.home, name: o.name, site, fetch: headed, token, now, log, timeoutMs: o.timeoutMs }).catch(() => undefined);
+    return result;
   })();
   pending.push(run);
   return run;

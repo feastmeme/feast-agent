@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { confirmAgent, loadAgent, planAgent, saveAgent } from "./agent.ts";
 import { askWithFor } from "./ask/host.ts";
+import { appendHostAnswer, pendingDecisions } from "./decisions.ts";
 import { renderCard } from "./card.ts";
 import { FakeFeed, INDEXER, seeded, SITE } from "./feed/fakes.ts";
 import { checkHost, hostDetailHint, hostHeaders, modelHint } from "./headers.ts";
@@ -174,6 +175,40 @@ describe("the heartbeat on a manual command", () => {
     }) as unknown as typeof fetch;
     expect(await manualBeat({ home, name: "maplegrin", site: SITE, fetch: down, wallet: async () => "0x000000000000000000000000000000000000A11C", now: T0 })).toBe("failed");
     expect(existsSync(join(home, "cache", "manual-beat.json"))).toBe(true);
+  });
+});
+
+describe("run 26 (item 14): the manual beat carries the decisions ring", () => {
+  it("at most 3 rows per beat, oldest first; the cursor moves on a 2xx only; a throttled beat sends none", async () => {
+    const { home } = manualAgent();
+    saveSession(home, { version: 1, agentId: "maplegrin", season: 1, token: "tok-manual", expiresAt: null, at: new Date(T0).toISOString() });
+    const agent = loadAgent(home, "maplegrin")!;
+    for (let i = 0; i < 4; i += 1) appendHostAnswer(home, agent, { at: T0 - (10 - i) * 60_000, action: "hold", reason: `round ${i}`, result: "ok: hold" }, false);
+    let status = 503;
+    const posted: { rows: { reason: string }[]; auth: string | null }[] = [];
+    const f = (async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/api/league/decisions")) {
+        posted.push({ rows: (JSON.parse(String(init!.body)) as { rows: { reason: string }[] }).rows, auth: new Headers(init?.headers).get("authorization") });
+        return new Response(JSON.stringify({ stored: 3 }), { status });
+      }
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const wallet = async () => "0x000000000000000000000000000000000000A11C";
+    // A 503: sent, not taken; the same three wait for the next beat.
+    expect(await manualBeat({ home, name: "maplegrin", site: SITE, fetch: f, wallet, now: T0 })).toBe("sent");
+    expect(posted.map((p) => p.rows.map((r) => r.reason))).toEqual([["round 0", "round 1", "round 2"]]);
+    expect(posted[0]!.auth).toBe("Bearer tok-manual");
+    expect(pendingDecisions(home, "maplegrin", T0)).toHaveLength(4);
+    // Throttled (under 2 minutes): no beat, no rows.
+    expect(await manualBeat({ home, name: "maplegrin", site: SITE, fetch: f, wallet, now: T0 + 60_000 })).toBe("throttled");
+    expect(posted).toHaveLength(1);
+    status = 200;
+    expect(await manualBeat({ home, name: "maplegrin", site: SITE, fetch: f, wallet, now: T0 + MANUAL_BEAT_MS })).toBe("sent");
+    expect(posted[1]!.rows.map((r) => r.reason)).toEqual(["round 0", "round 1", "round 2"]);
+    expect(pendingDecisions(home, "maplegrin", T0 + MANUAL_BEAT_MS).map((r) => r.reason)).toEqual(["round 3"]);
+    expect(await manualBeat({ home, name: "maplegrin", site: SITE, fetch: f, wallet, now: T0 + 2 * MANUAL_BEAT_MS })).toBe("sent");
+    expect(posted[2]!.rows.map((r) => r.reason)).toEqual(["round 3"]);
+    expect(pendingDecisions(home, "maplegrin", T0 + 2 * MANUAL_BEAT_MS)).toEqual([]);
   });
 });
 
