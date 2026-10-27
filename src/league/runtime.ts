@@ -10,7 +10,7 @@ import { loadAgent, type AgentConfig } from "./agent.ts";
 import { sha256Of } from "./audit/static.ts";
 import { auditRefusal } from "./audit/verdict.ts";
 import { BawError, type Signer } from "./baw.ts";
-import { bookView, clearPause, emptyBook, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
+import { bookView, clearPause, emptyBook, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, shrinkToWallet, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
 import { appendDecision, decisionRow, KEEPER_OFF, keeperOf, resultOfJournal, resultOfOutcome, rowSecrets, sendDecisions, strategyOf, writeKeeper, type DecisionAction, type DecisionKeeper, type DecisionSource } from "./decisions.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
@@ -633,6 +633,23 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
      * chain without the book and its exits knowing. A hash the node no longer knows, or an unknown
      * outcome that moved no balance, is released after 15 minutes.
      */
+    /**
+     * Run 26 (item 5): each position against the wallet's balance of its coin, shrink-only (`book.ts` shrinkToWallet): a
+     * coin sold outside the runtime stops counting as at work. A coin with a send in flight, or a balance that cannot be
+     * read, is left for the next pass. One log line per cut; never a trade.
+     */
+    const shrinkToWalletPass = async () => {
+      for (const position of Object.values(book.positions)) {
+        if (book.unresolved.some((u) => u.coin.toLowerCase() === position.coin.toLowerCase())) continue;
+        const held = await chain.tokenBalance(position.coin, wallet).catch(() => null);
+        if (held === null) continue;
+        const out = shrinkToWallet(book, position.coin, held);
+        if (!out.cut) continue;
+        book = out.book;
+        log("book.shrunk", { coin: position.coin, symbol: position.symbol, coinsFrom: out.cut.coinsFrom, coinsTo: out.cut.coinsTo, costFromWei: out.cut.costFromWei, costToWei: out.cut.costToWei, why: "the wallet holds fewer of this coin than the book did (sold outside the runtime)" });
+        save();
+      }
+    };
     const RELEASE_AFTER_MS = 15 * 60_000;
     const resolvePending = async () => {
       for (const item of [...book.unresolved]) {
@@ -1110,6 +1127,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (waits && !(gate.opensAt !== null && clock() >= gate.opensAt)) return { exit: "refused", reason: seasonClosedLine(gate.opensAt) };
       // An outcome an earlier run could not learn is asked about first, so the guard reads a book that is up to date.
       if (book.unresolved.length > 0) await resolvePending().catch((error: unknown) => log("unresolved.check.failed", { reason: String((error as Error).message) }));
+      await shrinkToWalletPass().catch((error: unknown) => log("book.shrink.failed", { reason: errorLine(error) }));
       for (const [i, request] of deps.only.entries()) {
         if (gate.over && request.kind !== "sell") return { exit: "refused", reason: SEASON_OVER_LINE };
         const normal = normalizeIntent(request, { snapshot: { feast, now: clock(), limits: agent.limits }, source: "manual", slippagePct: Math.min(3, agent.limits.maxSlippagePct), ttlMs: 120_000 });
@@ -1620,6 +1638,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         try {
           const balanceWei = await chain.balance(wallet);
           walletState = { ...walletState, balanceWei };
+          await shrinkToWalletPass().catch((error: unknown) => log("book.shrink.failed", { reason: errorLine(error) }));
           bnbUsd = await chain.bnbUsd(now).catch(() => bnbUsd);
           const marks = await market.marks(book);
           book = withEquity(book, marks);

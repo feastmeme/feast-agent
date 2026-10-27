@@ -11,7 +11,11 @@ import { fakeClock, marketWorld } from "../prompt/fakes.ts";
 import { recordHostAction } from "../prompt/host.ts";
 import { leagueWire } from "../register/fakes.ts";
 import { runAgent } from "../runtime.ts";
+import { emptyBook, parseBook, recordBuy, serializeBook, shrinkToWallet } from "../book.ts";
 import { agentPaths, writeJsonAtomic } from "../store.ts";
+import { MAINNET } from "../../sdk/networks.ts";
+
+const WBNB_ADDR = MAINNET.contracts.wrappedNative;
 import { readNotes } from "./queue.ts";
 import { readHoldLine } from "./hold.ts";
 import { HOLD_LINE_EVERY_MS, KEEPER_WHY, STOP_LOSS_WHY, WHY_MAX, cleanWhy, holdLineDue, holdNoteText, tradeNoteText, tradeWhy } from "./trade.ts";
@@ -259,5 +263,36 @@ describe("run 26: the answer's public note", () => {
     expect(texts.indexOf(GAME)).toBeLessThan(texts.indexOf("bought NOODFEED for 0.006 BNB: in first"));
     expect(readNotesLog(home)).toContain('"why":"answer note"');
   }, 60_000);
+});
+
+describe("run 26 (item 5): coins sold outside the runtime stop counting", () => {
+  it("shrink-only at the start and each tick: the book's position cut to the wallet's balance, its cost in proportion; one log line; never grown, never a trade", async () => {
+    const { home } = setup({ ask: false });
+    const c = fakeClock(T0);
+    const { feed, w } = world(c);
+    recordHostAction(home, "demo", "buy", T0);
+    const k = COINS[1]!;
+    // The book says 1,000 coins for 0.006 BNB; the wallet holds 400 (the player sold 600 in the Binance app).
+    writeFileSync(agentPaths(home, "demo").state, serializeBook(recordBuy(emptyBook(), { coin: k, symbol: "KOIFEED", quote: WBNB_ADDR, coinsOut: 1_000n * 10n ** 18n, bnbInWei: 6n * 10n ** 15n, gasWei: 0n, at: T0 - 10 * MIN, fundedBy: "wallet", ownLaunch: false, source: "manual" })));
+    w.held.set(k.toLowerCase(), 400n * 10n ** 18n);
+    await run(home, c, feed, w, T0 + 3 * MIN);
+    const log = readNotesLog(home).split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+    const shrunk = log.filter((l) => l.event === "book.shrunk");
+    expect(shrunk).toHaveLength(1);
+    expect(shrunk[0]).toMatchObject({ coin: k, coinsFrom: String(1_000n * 10n ** 18n), coinsTo: String(400n * 10n ** 18n), costFromWei: String(6n * 10n ** 15n), costToWei: String(24n * 10n ** 14n) });
+    // This fixture's price is far under the cost, so the hard stop-loss (L6) sells what the wallet holds: 400, not 1,000.
+    const sold = log.filter((l) => l.event === "sell.filled");
+    expect(sold.every((l) => l.coinsIn === String(400n * 10n ** 18n))).toBe(true);
+    expect(log.filter((l) => l.event === "buy.filled")).toEqual([]);
+  }, 60_000);
+
+  it("shrinkToWallet: cut in proportion, gone at 0, never grown", () => {
+    const k = COINS[0]!;
+    const held = recordBuy(emptyBook(), { coin: k, symbol: "N", quote: WBNB_ADDR, coinsOut: 1_000n, bnbInWei: 6_000n, gasWei: 0n, at: T0, fundedBy: "wallet", ownLaunch: false, source: "manual" });
+    expect(shrinkToWallet(held, k, 250n)).toMatchObject({ cut: { coinsFrom: 1_000n, coinsTo: 250n, costFromWei: 6_000n, costToWei: 1_500n } });
+    expect(shrinkToWallet(held, k, 0n).book.positions[k.toLowerCase()]).toBeUndefined();
+    expect(shrinkToWallet(held, k, 5_000n)).toEqual({ book: held, cut: null });
+    expect(shrinkToWallet(held, COINS[2]!, 0n).cut).toBeNull();
+  });
 });
 

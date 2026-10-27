@@ -211,6 +211,22 @@ export function recordSell(book: Book, fill: SellFill): Book {
   };
 }
 
+/**
+ * Run 26 (item 5, the v5.1.4 review): coins sold outside the runtime (the Binance app, another wallet tool) kept counting
+ * as at work. Shrink-only: when the wallet holds fewer of a coin than the book's position says, the position is cut to
+ * the wallet's balance, its cost basis in proportion (gone entirely at 0). Never grown, never a trade, no PnL booked.
+ */
+export function shrinkToWallet(book: Book, coin: Address, walletCoins: bigint): { book: Book; cut: { coinsFrom: bigint; coinsTo: bigint; costFromWei: bigint; costToWei: bigint } | null } {
+  const k = key(coin);
+  const held = book.positions[k];
+  if (!held || walletCoins < 0n || walletCoins >= held.coins) return { book, cut: null };
+  const positions = { ...book.positions };
+  const costTo = held.coins > 0n ? (held.costWei * walletCoins) / held.coins : 0n;
+  if (walletCoins === 0n) delete positions[k];
+  else positions[k] = { ...held, coins: walletCoins, costWei: costTo };
+  return { book: { ...book, positions }, cut: { coinsFrom: held.coins, coinsTo: walletCoins, costFromWei: held.costWei, costToWei: costTo } };
+}
+
 /** A transaction that moved no position: an approval, a claim, a launch. */
 export function recordGas(book: Book, gasWei: bigint, what: "arms" | "claims" | "launches"): Book {
   return { ...book, gasWei: book.gasWei + gasWei, failureStreak: 0, counters: { ...book.counters, [what]: book.counters[what] + 1 } };
