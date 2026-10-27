@@ -429,8 +429,8 @@ describe("run 17: the authenticated me= read every 9 minutes, in every mode", ()
       expect(a.url).toMatch(/me=0x[0-9a-f]{40}$/);
       expect(a.headers).toMatchObject({ authorization: "Bearer test-session-heartbeat", "x-feast-health": expect.stringMatching(/^(ok|degraded|failing)$/), "x-feast-runtime": expect.any(String), "x-feast-host": expect.any(String) });
     }
-    // No other request carries the bearer.
-    expect(feed.asked.filter((a) => a.headers.authorization && !a.url.startsWith(`${SITE}/api/league?view=today&limit=1&me=`))).toEqual([]);
+    // No other request carries the bearer (task 1018: but the same beat's decision rows, on their own route).
+    expect(feed.asked.filter((a) => a.headers.authorization && !a.url.startsWith(`${SITE}/api/league?view=today&limit=1&me=`) && a.url !== `${SITE}/api/league/decisions`)).toEqual([]);
     expect(readFileSync(agentPaths(home, "demo").log, "utf8")).not.toContain("test-session-heartbeat");
   }, 60_000);
 
