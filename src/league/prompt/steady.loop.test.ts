@@ -120,9 +120,11 @@ describe("the backup takes over after 30 minutes with no trade from the host", (
     expect(offAt - host).toBeLessThan(2 * MIN);
     const presetBuys = log.filter((l) => l.event === "intent.queued" && l.source === "preset" && l.kind === "buy").map((l) => Date.parse(l.at));
     expect(presetBuys.filter((at) => at > offAt && at < host + 30 * MIN)).toEqual([]);
-    // Its own position, opened before the host traded, still sells on its own time stop while it stands by.
-    const sales = fills(home).filter((f) => f.event === "sell.filled" && Date.parse(f.at) > offAt && Date.parse(f.at) < host + 30 * MIN);
-    expect(sales.length).toBeGreaterThanOrEqual(1);
+    // Run 26 (item 12): a floor round's sale comes at its next tick, so every buy it made before it stood by is sold
+    // on its own (its exits stay armed), none left open by the host's trade.
+    const keeperBuys = fills(home).filter((f) => f.event === "buy.filled" && Date.parse(f.at) < offAt && String(f.coin).toLowerCase() !== HOSTS.toLowerCase());
+    expect(keeperBuys.length).toBeGreaterThanOrEqual(1);
+    for (const b of keeperBuys) expect(fills(home).some((f) => f.event === "sell.filled" && String(f.coin).toLowerCase() === String(b.coin).toLowerCase() && Date.parse(f.at) > Date.parse(b.at))).toBe(true);
     // The host's own coin is never steady's to sell.
     expect(fills(home).filter((f) => f.event === "sell.filled" && String(f.coin).toLowerCase() === HOSTS.toLowerCase())).toEqual([]);
     expect(log.filter((l) => l.event === "autopilot.on").length).toBe(2);
@@ -226,7 +228,8 @@ describe("run 24 (item 17, amendment E): the floor keeper's trades in the pit", 
     recordHostAction(home, "demo", "buy", T0);
     await run(home, c, market(c, league), w, T0 + 2 * HOUR);
     expect(fills(home).some((f) => String(f.coin).toLowerCase() === PIT.toLowerCase())).toBe(false);
-    expect(fills(home).filter((f) => f.event === "buy.filled").map((f) => String(f.coin).toLowerCase())[0]).toBe(COINS[0]!.toLowerCase());
+    // Run 26 (item 12): its usual coin is one of the board's most-held WBNB pairs, drawn at random.
+    expect(COINS.map((k) => k.toLowerCase())).toContain(fills(home).filter((f) => f.event === "buy.filled").map((f) => String(f.coin).toLowerCase())[0]);
     const said = lines(home).filter((l) => l.event === "keeper.pit");
     expect(said).toHaveLength(1);
     expect(said[0]).toMatchObject({ state: "elsewhere", why: "the pool's opening cap refuses a 0.006 BNB buy" });

@@ -185,7 +185,15 @@ describe("2. the sign-in's end (G2)", () => {
     // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
     // (and ruling C, the same night: every trade the runtime makes posts its own public note, the keeper's included)
     expect(noted.filter((t) => t!.startsWith("⏰"))).toEqual(["⏰ 登录到期 · 24 小时后 · 主人需要重新扫码一次", "⏰ 登录到期 · 6 小时后 · 主人需要重新扫码一次", "⏰ 登录到期 · 1 小时后 · 主人需要重新扫码一次"]);
-    expect(noted.filter((t) => !t!.startsWith("⏰")).every((t) => /^(bought|sold) \S+ for [\d.]+ BNB: keeper: meeting today's activity floor$/.test(t!))).toBe(true);
+    // Run 26 (item 4): an every() on an empty list proves nothing: the keeper's notes are exactly its filled trades (one
+    // note each), and there are some.
+    const keeperNotes = noted.filter((t) => !t!.startsWith("⏰"));
+    for (const t of keeperNotes) expect(t).toMatch(/^(bought|sold) \S+ for [\d.]+ BNB: keeper: meeting today's activity floor$/);
+    const filledTrades = readFileSync(agentPaths(home, "demo").log, "utf8").split("\n").filter((l) => /"event":"(buy|sell)\.filled"/.test(l)).length;
+    expect(filledTrades).toBeGreaterThan(0);
+    expect(keeperNotes).toHaveLength(filledTrades);
+    // Two floor rounds (a buy and its sale each) on this day: four notes.
+    expect(keeperNotes).toHaveLength(4);
     expect(Buffer.from(noted[0]!).subarray(0, Buffer.byteLength("⏰ 登录到期")).toString("hex")).toBe(Buffer.from("⏰ 登录到期").toString("hex"));
     // The heartbeat: alive since the start, its last tick a safety pass of this run.
     const alive = JSON.parse(readFileSync(join(agentPaths(home, "demo").dir, "alive.json"), "utf8")) as { since: string; lastTick: string };

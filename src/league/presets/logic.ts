@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Address } from "viem";
 
 import { MAINNET } from "../../sdk/networks.ts";
@@ -343,9 +344,11 @@ function dca(): Strategy {
  * each position it holds; its volume plus their marks) misses its targets, it has bought fewer than
  * `maxEntriesPerDay` today, `spacingMinutes` have passed since its last buy, fewer than `maxPositions` of its own are
  * open, and at least 15 minutes are left before the dinner. In the last `rushMinutes`, with the day's floor not met,
- * buys and sales come 3 minutes apart. The coin: a WBNB pair, never the agent's own coin, FEAST or a coin the wallet
- * holds, at least `minAgeMinutes` old, with at least `minVolumeBnb` of 24 h volume: the busiest of the first `topN`
- * it has not bought today (ties: more trades); none clears the volume, the busiest with any (said once that day).
+ * buys and sales come 3 minutes apart. The coin (run 26, item 12): a WBNB pair, never the agent's own coin, FEAST or
+ * a coin the wallet holds, at least `minAgeMinutes` old, with some 24 h volume, one of the 10 with the most holders,
+ * drawn at random (`floorDraw`) and never the one of its last round; each round is the buy and its sale at the next
+ * tick (two trades, the room freed), with no other buy while the sale is pending (`topN` and `minVolumeBnb` no longer
+ * pick it; they stay in the card so no seated agent's card changes).
  * Run 24 (item 17, amendment E): with the league's pit named and buyable now (`extras.pit()`: the runtime checked its
  * quote token on chain, routed it by the address book's hops, quoted the buy, and kept L13's cooldown), the buy is in
  * the pit instead, a WBNB pair or not (the pit is paired with a stock token: BNB → BNCB → the pit), sized and booked
@@ -353,11 +356,19 @@ function dca(): Strategy {
  * trades, and the room freed); while that sale is pending, no other buy. The pit refused or not named: the rule
  * above, unchanged for every other coin.
  *
- * At the defaults that is two buys of 0.006 BNB, 15 minutes apart, each sold about 30 minutes later: 4 trades and
- * about 0.0238 BNB, the floor about 45 minutes after it takes over; then exits only, until the next day at 21:00.
+ * At the defaults that is two rounds of 0.006 BNB, 15 minutes apart, each a buy and its sale a minute later: 4 trades
+ * and about 0.0238 BNB, the floor about 16 minutes after it takes over; then exits only, until the next day at 21:00.
  * While its host trades it stands by (`extras.standingBy()`): no buy, its own exits only (ruling C7). It never
  * launches, and its intents take the guard like any preset's.
  */
+/** Run 26 (item 12): the floor round's coin is drawn from this many, the most holders first. */
+export const FLOOR_TOP_HOLDERS = 10;
+
+/** A draw in [0, n) from the tick's time and the day's buys: random enough to spread the rounds, the same on a replay. */
+export function floorDraw(now: number, buysToday: number, n: number): number {
+  return createHash("sha256").update(`steady-floor:${now}:${buysToday}`).digest().readUInt32BE(0) % n;
+}
+
 function steady(): Strategy {
   return {
     meta: { name: "steady", tickSeconds: PRESETS.steady.tickSeconds, events: [], watch: [] },
@@ -448,30 +459,33 @@ function steady(): Strategy {
         }
         return;
       }
+      // Run 26 (item 12, the owner's 08:1x ruling): its floor round's coin is one of the 10 with the most holders (a WBNB
+      // pair: the address book routes it; never its own coin, FEAST or one held), picked at random but never the same
+      // coin twice in a row; the round is the buy and its sale at the next tick (two trades, the room freed), and no
+      // other buy while that sale is pending.
+      if (held.length > 0) return;
       const eligible = api.read
-        .coins({ sort: "volume", limit: 200 })
+        .coins({ sort: "holders", limit: 200 })
         .filter((row) => {
           const k = lc(row.coin);
           return quoteSymbol(row.quote) === "WBNB" && k !== own && k !== feast && mine[k] === undefined && !api.read.position(row.coin) && row.ageSeconds >= p.minAgeMinutes * 60 && row.volume24hBnb > 0;
         })
-        .sort((a, b) => b.volume24hBnb - a.volume24hBnb || b.trades24h - a.trades24h);
-      const busy = eligible.filter((row) => row.volume24hBnb >= p.minVolumeBnb).slice(0, p.topN);
-      let pick = busy.find((row) => today[lc(row.coin)] === undefined) ?? busy[0] ?? null;
-      let why = `${pick?.volume24hBnb.toFixed(2)} BNB of 24 h volume`;
-      if (!pick && eligible.length > 0) {
-        pick = eligible[0]!;
-        why = `the busiest with any volume (${pick.volume24hBnb.toFixed(3)} BNB in 24 h), for the floor`;
-        once("thin", `steady: no coin has ${p.minVolumeBnb} BNB of 24 h volume; it buys the busiest with any, for the floor`);
-      }
-      if (!pick) return once("none", "steady: no coin it may buy (a WBNB pair, not your own coin, FEAST or one held, old enough, with volume): no buy");
-      if (api.buy({ coin: pick.coin, bnb: p.buyBnb, reason: reasonOf(why) })) {
+        .sort((a, b) => b.holders - a.holders || b.trades24h - a.trades24h)
+        .slice(0, FLOOR_TOP_HOLDERS);
+      const lastCoin = typeof state.lastFloorCoin === "string" ? state.lastFloorCoin : null;
+      const choices = eligible.length > 1 ? eligible.filter((row) => lc(row.coin) !== lastCoin) : eligible;
+      if (choices.length === 0) return once("none", "steady: no coin it may buy (a WBNB pair among the 10 with the most holders, not your own coin, FEAST or one held, old enough, with volume): no buy");
+      const pick = choices[floorDraw(now, buys.length, choices.length)]!;
+      if (api.buy({ coin: pick.coin, bnb: p.buyBnb, reason: reasonOf(`a round in ${pick.holders} holders' coin, one of the 10 with the most`) })) {
         const k = lc(pick.coin);
         mine[k] = now;
-        stops[k] = now + (fast ?? p.timeStopMinutes) * MINUTE;
+        // Its sale at the next tick: the floor round is the buy and its sale.
+        stops[k] = now + MINUTE;
         today[k] = now;
         delete bag<Record<string, boolean>>(state, "tookProfit", {})[k];
         buys.push(now);
         state.lastBuy = now;
+        state.lastFloorCoin = k;
       }
     },
   };
