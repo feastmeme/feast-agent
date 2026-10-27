@@ -346,6 +346,12 @@ function dca(): Strategy {
  * buys and sales come 3 minutes apart. The coin: a WBNB pair, never the agent's own coin, FEAST or a coin the wallet
  * holds, at least `minAgeMinutes` old, with at least `minVolumeBnb` of 24 h volume: the busiest of the first `topN`
  * it has not bought today (ties: more trades); none clears the volume, the busiest with any (said once that day).
+ * Run 24 (item 17, amendment E): with the league's pit named and buyable now (`extras.pit()`: the runtime checked its
+ * quote token on chain, routed it by the address book's hops, quoted the buy, and kept L13's cooldown), the buy is in
+ * the pit instead, a WBNB pair or not (the pit is paired with a stock token: BNB → BNCB → the pit), sized and booked
+ * in BNB like any native-paid buy, and sold at its next tick (a floor round in the pit is a buy and its sale: two
+ * trades, and the room freed); while that sale is pending, no other buy. The pit refused or not named: the rule
+ * above, unchanged for every other coin.
  *
  * At the defaults that is two buys of 0.006 BNB, 15 minutes apart, each sold about 30 minutes later: 4 trades and
  * about 0.0238 BNB, the floor about 45 minutes after it takes over; then exits only, until the next day at 21:00.
@@ -424,6 +430,24 @@ function steady(): Strategy {
       const feast = api.read.coin("FEAST")?.coin.toLowerCase() ?? null;
       const today = bag<Record<string, number>>(state, "boughtToday", {});
       for (const k of Object.keys(today)) if (today[k]! < day.startsAt) delete today[k];
+      const reasonOf = (why: string) => `steady: for the day's floor (${day.trades} trades, ${day.volumeBnb.toFixed(4)} BNB so far), ${why}`;
+      // The pit first (whatever the league names, FEAST too): never the agent's own coin, and never into a position already open (the keeper's own
+      // is sold at its next tick: no other buy until it is).
+      const pit = extras?.pit?.() ?? null;
+      const pk = pit ? lc(pit.coin) : null;
+      if (pit && pk !== own && mine[pk!] !== undefined && api.read.position(pit.coin)) return;
+      if (pit && pk !== own && !api.read.position(pit.coin)) {
+        if (api.buy({ coin: pit.coin, bnb: p.buyBnb, reason: reasonOf("in the league's pit") })) {
+          mine[pk!] = now;
+          // Its sale at the next tick: the floor round is the buy and its sale.
+          stops[pk!] = now + MINUTE;
+          today[pk!] = now;
+          delete bag<Record<string, boolean>>(state, "tookProfit", {})[pk!];
+          buys.push(now);
+          state.lastBuy = now;
+        }
+        return;
+      }
       const eligible = api.read
         .coins({ sort: "volume", limit: 200 })
         .filter((row) => {
@@ -440,8 +464,7 @@ function steady(): Strategy {
         once("thin", `steady: no coin has ${p.minVolumeBnb} BNB of 24 h volume; it buys the busiest with any, for the floor`);
       }
       if (!pick) return once("none", "steady: no coin it may buy (a WBNB pair, not your own coin, FEAST or one held, old enough, with volume): no buy");
-      const reason = `steady: for the day's floor (${day.trades} trades, ${day.volumeBnb.toFixed(4)} BNB so far), ${why}`;
-      if (api.buy({ coin: pick.coin, bnb: p.buyBnb, reason })) {
+      if (api.buy({ coin: pick.coin, bnb: p.buyBnb, reason: reasonOf(why) })) {
         const k = lc(pick.coin);
         mine[k] = now;
         stops[k] = now + (fast ?? p.timeStopMinutes) * MINUTE;

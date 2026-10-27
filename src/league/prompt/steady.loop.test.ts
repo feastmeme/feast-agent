@@ -187,3 +187,50 @@ describe("task 975, addendum 3: the machine slept", () => {
     expect(lines(home).filter((l) => l.event === "slept")).toEqual([]);
   }, 60_000);
 });
+
+describe("run 24 (item 17, amendment E): the floor keeper's trades in the pit", () => {
+  const PIT = coin(0x9171);
+  // The fake chain pairs every coin with WBNB; the page's pit says the same quote, so the check on chain agrees.
+  const pitWire = { coin: PIT, symbol: "PITC", name: "The pit", quote: getAddress("0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"), poolId: `0x${"ab".repeat(32)}` };
+  const league = () => leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: new Date(DINNER).toISOString() }, pit: pitWire });
+
+  it("with a pit named, the keeper's floor buy and its sale are in the pit, round after round, though the pit has no row on the board", async () => {
+    const { home } = setup();
+    const c = fakeClock(T0 - 10 * MIN);
+    const w = marketWorld({ coins: [OWN, ...COINS, PIT].map((k, i) => ({ coin: k, symbol: `S${i}` })), now: c.now });
+    recordHostAction(home, "demo", "buy", T0);
+    await run(home, c, market(c, league), w, T0 + 2 * HOUR);
+    const trades = fills(home).map((f) => [f.event, String(f.coin).toLowerCase()]);
+    expect(trades.length).toBeGreaterThanOrEqual(4);
+    expect(trades.every(([, k]) => k === PIT.toLowerCase())).toBe(true);
+    // Each round: a buy, then its sale.
+    expect(trades.slice(0, 4).map(([e]) => e)).toEqual(["buy.filled", "sell.filled", "buy.filled", "sell.filled"]);
+    expect(lines(home).find((l) => l.event === "keeper.pit")).toMatchObject({ pit: "PITC 0x0000…9171", state: "in the pit", why: "ok" });
+    const onAt = Date.parse(lines(home).find((l) => l.event === "autopilot.on")!.at);
+    expect(dayCount(home, "demo", onAt + HOUR, [OWN.toLowerCase(), FEAST.toLowerCase()]).passed).toBe(true);
+  }, 60_000);
+
+  it("the pit refuses (its pool's opening cap): the keeper falls back to its usual coin, said once; the floor is still kept", async () => {
+    const { home } = setup();
+    const c = fakeClock(T0 - 10 * MIN);
+    const w = marketWorld({ coins: [OWN, ...COINS, PIT].map((k, i) => ({ coin: k, symbol: `S${i}` })), now: c.now });
+    const chain = w.chain as unknown as { poolKey: (c: Address) => Promise<unknown>; client: { simulateContract: (a: unknown) => Promise<unknown> } };
+    let keyed: string | null = null;
+    const poolKey = chain.poolKey;
+    chain.poolKey = async (k: Address) => ((keyed = k.toLowerCase()), poolKey(k));
+    const simulate = chain.client.simulateContract;
+    chain.client.simulateContract = async (a: unknown) => {
+      if (keyed === PIT.toLowerCase()) throw new Error("PurchaseCapExceeded(): the pool is in its opening window");
+      return simulate(a);
+    };
+    recordHostAction(home, "demo", "buy", T0);
+    await run(home, c, market(c, league), w, T0 + 2 * HOUR);
+    expect(fills(home).some((f) => String(f.coin).toLowerCase() === PIT.toLowerCase())).toBe(false);
+    expect(fills(home).filter((f) => f.event === "buy.filled").map((f) => String(f.coin).toLowerCase())[0]).toBe(COINS[0]!.toLowerCase());
+    const said = lines(home).filter((l) => l.event === "keeper.pit");
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatchObject({ state: "elsewhere", why: "the pool's opening cap refuses a 0.006 BNB buy" });
+    const onAt = Date.parse(lines(home).find((l) => l.event === "autopilot.on")!.at);
+    expect(dayCount(home, "demo", onAt + HOUR, [OWN.toLowerCase(), FEAST.toLowerCase()]).passed).toBe(true);
+  }, 60_000);
+});

@@ -40,7 +40,8 @@ import { impacts } from "./quote.ts";
 import { nextDinner } from "./prompt/floor.ts";
 import { nextSlowRead, pollCadence, writeCadence, type Cadence } from "./feed/cadence.ts";
 import { sessionNotice, utc8 } from "./register/copy.ts";
-import { LeagueSite, siteFromEnv, type LeagueRead } from "./register/site.ts";
+import { LeagueSite, siteFromEnv, type LeagueRead, type Pit } from "./register/site.ts";
+import { capRefusal, checkedPit, pitLabel } from "./pit.ts";
 import { errorLine } from "./rpc.ts";
 import { GATE_READ_MS, SEASON_OVER_LINE, seasonClosedLine, seasonOver, tradingOpens, waitingStatusLine, warmUpDinner, writeGate } from "./season-gate.ts";
 import { keepSupport } from "./support.ts";
@@ -360,6 +361,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
       writeVersion(deps.home, deps.name, { ...v, saidFor: tell ? day : said });
     };
+    /** Run 24: the pit the league read last named (`pit`), not yet checked against the chain; null when none. */
+    let pitNamed: Pit | null = null;
     /** The dinner tonight is the warm-up's, which asks no floor (addendum 8): from the league's clock. */
     const warmUpTonight = (now: number) => gate.warmUpDinnerAt !== null && nextDinner(now) === gate.warmUpDinnerAt;
     /** One read of the league: when trading opens, whether the season is over, which dinner is the warm-up. A failed read keeps what was known, and asks again under the backoff. */
@@ -376,6 +379,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       noteRelease(read, now);
       // Run 22: the page's support link, kept for the lines that come without a read.
       keepSupport(deps.home, read);
+      pitNamed = read.pit ?? null;
       const wasOver = gate.over;
       gate.over = seasonOver(read);
       gate.day = read.state === "season" ? read.season.day : null;
@@ -461,6 +465,47 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       },
       standingBy: () => standingBy(),
       guard: () => guarding(),
+      // Run 24 (item 17, amendment E): the pit, when the floor keeper may buy it now: named, its quote checked on chain,
+      // routed by the address book, its buy at the keeper's size quoted within the last minute, and out of L13's cooldown.
+      pit: () => {
+        const p = keeperPit.pit;
+        if (!p) return null;
+        const last = book.lastEntryAt[p.coin.toLowerCase()];
+        return last !== undefined && clock() - last < agent!.limits.coinCooldownSeconds * 1_000 ? null : p;
+      },
+    };
+    /** The pit as the floor keeper sees it (`refreshKeeperPit`), and why not when it may not buy it. */
+    const keeperPit = { at: Number.NEGATIVE_INFINITY, pit: null as { coin: Address; symbol: string } | null, said: "" };
+    const refreshKeeperPit = async (now: number) => {
+      if (now - keeperPit.at < 60_000) return;
+      keeperPit.at = now;
+      let why: string;
+      let ok: { coin: Address; symbol: string } | null = null;
+      const pit = await checkedPit(pitNamed, chain, log);
+      if (!pit) why = pitNamed ? "the pit's quote token on chain is not the page's, or the chain could not be read" : "none named";
+      else {
+        const size = typeof agent!.params.buyBnb === "number" ? agent!.params.buyBnb : 0.006;
+        let routed = true;
+        try {
+          // The pit's quote is a stock token (BNCB today): its buy goes BNB → the quote → the pit by the address book's hops.
+          chain.hops(pit.quote, "buy");
+        } catch {
+          routed = false;
+        }
+        const quoted = routed ? await executor.prepareBuy(pit.coin, bnbToWei(size), Math.min(3, agent!.limits.maxSlippagePct)) : null;
+        if (!routed) why = "no route for its quote token in the address book";
+        else if (!quoted!.ok) why = capRefusal(quoted!.reason) ? `the pool's opening cap refuses a ${size} BNB buy` : "its buy could not be quoted (the pool not open, or no route)";
+        else {
+          why = "ok";
+          ok = { coin: pit.coin, symbol: pit.symbol };
+        }
+      }
+      keeperPit.pit = ok;
+      const said = `${pit?.coin ?? ""}:${why}`;
+      if (said !== keeperPit.said) {
+        keeperPit.said = said;
+        log("keeper.pit", { pit: pit ? pitLabel(pit) : null, state: ok ? "in the pit" : "elsewhere", why });
+      }
     };
 
     const warmup = () =>
@@ -1508,6 +1553,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             const board = needBoard() && (agent.track !== "prompt" || autopilotOn);
             if (feed && board) await feed.prepareBoard(now);
             const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: board, stale: feed?.stale() ?? null });
+            if (agent.preset === "steady" && pitNamed) await refreshKeeperPit(now);
+            else keeperPit.pit = null;
             const made = await runStrategy("onTick", snapshot);
             // Task 1018: a keeper pass that decides nothing says so, at most once an ask interval, so a keeper-only seat shows up.
             if (agent.track === "prompt" && autopilotOn && made.length === 0 && now - keeperRowAt >= everyMs()) decide({ at: now, source: "keeper", action: "hold", reason: `${agent.preset}: nothing to trade this pass`, result: "ok: hold" });

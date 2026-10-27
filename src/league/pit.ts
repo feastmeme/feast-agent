@@ -74,7 +74,8 @@ export async function checkedPit(pit: Pit | null | undefined, chain: Pick<PitCha
   return pit;
 }
 
-const capRefusal = (reason: string) => /PurchaseCapExceeded|opening window/i.test(reason);
+/** The quoter's refusal by the pool's opening cap (each wallet's buy capped in its first blocks with trades). */
+export const capRefusal = (reason: string) => /PurchaseCapExceeded|opening window/i.test(reason);
 
 /** A 0.01 BNB buy's impact from the quoter; refused by the opening cap, the largest of the smaller sizes that fits. */
 export async function pitImpact(coin: Address, quote: (coin: Address, bnb: number) => Promise<{ impactPct: number | null } | { error: string }>): Promise<PitImpact> {

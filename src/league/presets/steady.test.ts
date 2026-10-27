@@ -2,6 +2,7 @@ import { getAddress, type Address } from "viem";
 import { describe, expect, it } from "vitest";
 
 import { MAINNET } from "../../sdk/networks.ts";
+import { LeagueChain } from "../chain.ts";
 import { DEFAULT_LIMITS } from "../limits.ts";
 import type { DayCount } from "../prompt/floor.ts";
 import { makeApi, type CoinRow, type PositionRow, type PresetExtras, type Snapshot } from "../strategy.ts";
@@ -41,7 +42,7 @@ function day(over: Partial<DayCount> = {}): DayCount {
   return { startsAt: endsAt - 24 * 60 * MIN, endsAt, trades, volumeWei: BigInt(Math.round(volumeBnb * 1e18)), volumeBnb, passed: trades >= 3 && volumeBnb >= 0.02, ...over };
 }
 
-type World = { now: number; coins: CoinRow[]; positions: PositionRow[]; day: DayCount | null; standingBy: boolean; launched: Address | null; state: Record<string, unknown>; params: Record<string, unknown> };
+type World = { now: number; coins: CoinRow[]; positions: PositionRow[]; day: DayCount | null; standingBy: boolean; launched: Address | null; state: Record<string, unknown>; params: Record<string, unknown>; pit?: { coin: Address; symbol: string } | null };
 
 function world(over: Partial<World> = {}): World {
   return { now: DINNER - 6 * 60 * MIN, coins: [row(coin(0xc1), { volume24hBnb: 9 }), row(coin(0xc2), { volume24hBnb: 5 }), row(coin(0xc3), { volume24hBnb: 2 })], positions: [], day: day(), standingBy: false, launched: OWN, state: {}, params: { ...DEFAULTS }, ...over };
@@ -52,7 +53,7 @@ function tick(w: World) {
   const snapshot: Snapshot = { now: w.now, balanceBnb: 1, limits: DEFAULT_LIMITS, warmup: null, coins: w.coins, positions: w.positions, trades: [], holders: {}, launchesByCreator: {}, feast: FEAST, launched: w.launched ? { coin: w.launched, at: 0 } : null };
   const logs: string[] = [];
   const { api, intents } = makeApi(snapshot, { params: w.params, state: w.state, source: "preset", ttlMs: 60_000, log: (t) => logs.push(t) });
-  const extras: PresetExtras = { claimAndBuyBack: () => null, day: () => w.day, standingBy: () => w.standingBy };
+  const extras: PresetExtras = { claimAndBuyBack: () => null, day: () => w.day, standingBy: () => w.standingBy, pit: () => w.pit ?? null };
   presetStrategy("steady").onTick(api, extras);
   return { intents, logs, buys: intents.filter((i) => i.kind === "buy"), sells: intents.filter((i) => i.kind === "sell") };
 }
@@ -292,5 +293,57 @@ describe("task 975, addendum 8: the warm-up dinner", () => {
     expect(tick(w).logs).not.toContain("steady: tonight's dinner is the warm-up, which asks no floor: no buy");
     // The same world on a day with a floor: it buys.
     expect(tick(world()).buys.length).toBe(1);
+  });
+});
+
+describe("run 24 (item 17, amendment E): the floor keeper in the pit", () => {
+  // The pit is paired with a stock token, not WBNB, and need not be on the board at all.
+  const PIT = { coin: coin(0x9171), symbol: "PITC" };
+
+  it("with the pit named and buyable, the floor buy is in the pit, though its pair is not WBNB and it is not on the board; booked in BNB at the keeper's size", () => {
+    const w = world({ pit: PIT });
+    const out = tick(w);
+    expect(out.buys.map((b) => [b.coin, b.bnb, b.payIn ?? "native"])).toEqual([[PIT.coin, 0.006, "native"]]);
+    expect(out.buys[0]!.reason).toBe("steady: for the day's floor (0 trades, 0.0000 BNB so far), in the league's pit");
+  });
+
+  it("its sale is in the pit at the next tick (a floor round: the buy and its sale); no other buy while it is pending; two rounds keep the floor", () => {
+    const w = world({ pit: PIT });
+    fill(w, tick(w));
+    const pending = tick(world({ ...w, now: w.now + 30_000 }));
+    expect(pending.buys).toEqual([]);
+    w.now += MIN;
+    const sold = tick(w);
+    expect(sold.sells.map((x) => [x.coin, x.fraction])).toEqual([[PIT.coin, 1]]);
+    expect(sold.buys).toEqual([]);
+    w.positions = [];
+    w.day = day({ trades: 2, volumeBnb: 0.012 });
+    w.now += 14 * MIN;
+    expect(tick(w).buys.map((b) => b.coin)).toEqual([PIT.coin]);
+  });
+
+  it("the pit refused or not named (extras.pit() null): the busiest WBNB pair, as before; a pit the host holds is never bought into", () => {
+    for (const pit of [null, undefined]) expect(tick(world({ pit })).buys.map((b) => b.coin)).toEqual([coin(0xc1)]);
+    // A pit position the host holds is never bought into: the keeper buys its usual coin.
+    const host = world({ pit: PIT, positions: [position(PIT.coin)] });
+    expect(tick(host).buys.map((b) => b.coin)).toEqual([coin(0xc1)]);
+    // Never the agent's own coin, even named as the pit.
+    expect(tick(world({ pit: { coin: OWN, symbol: "OWN" } })).buys.map((b) => b.coin)).toEqual([coin(0xc1)]);
+  });
+
+  it("every other coin's filter is unchanged: a stock pair that is not the pit is still never bought", () => {
+    const w = world({ pit: null, coins: [row(coin(0xc4), { quote: STOCK, volume24hBnb: 20 }), row(coin(0xc1), { volume24hBnb: 9 })] });
+    expect(tick(w).buys.map((b) => b.coin)).toEqual([coin(0xc1)]);
+  });
+});
+
+describe("run 24 (amendment E): the pit's two-hop route is the address book's", () => {
+  it("a BNCB-paired pit is bought BNB → BNCB → the pit and sold back the same way; a quote the book lacks has no route", () => {
+    const chain = new LeagueChain(MAINNET, "http://127.0.0.1:9");
+    const bncb = MAINNET.stocks.find((x) => x.symbol === "BNCB")!;
+    expect(chain.hops(bncb.address, "buy")).toEqual([{ tokenOut: bncb.address, fee: 2500 }]);
+    expect(chain.hops(bncb.address, "sell")).toEqual([{ tokenOut: WBNB, fee: 2500 }]);
+    expect(chain.hops(WBNB, "buy")).toEqual([]);
+    expect(() => chain.hops(coin(0x5170c), "buy")).toThrow(/no route for quote/);
   });
 });

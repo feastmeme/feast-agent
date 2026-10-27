@@ -117,6 +117,8 @@ export type PresetExtras = {
   standingBy?(): boolean;
   /** Task 975, addendum 4: the floor guard is on (20 minutes before the dinner, the day's floor unmet): the floor keeper's smallest, fastest moves. */
   guard?(): boolean;
+  /** Run 24 (item 17): the league's pit, when the floor keeper may buy it now (the runtime checked it); null: elsewhere. */
+  pit?(): { coin: Address; symbol: string } | null;
 };
 
 export type Strategy = {
