@@ -28,5 +28,5 @@ This once, by hand: `git -C "$HOME/.feast-league/runtime" fetch --depth 1 origin
   - a doctor check that newly fails, and an agent that does not start, both roll back.
 - **Every manifest failure** leaves the runtime as it was: a changed file, an extra file, no manifest, another key's signature, no signature, another tag, a failed fetch.
 - **The rest:** `badVersions`; patch-only comparison; each auto rail; the loop's hourly look; the real tarball and git doors with `npm ci`; the signing tool's bytes matching the runtime's check.
-- A dry run against a fixture site pointer: `docs/league/upgrade-dryrun-20261026T0333Z.md`.
+- A dry run against a fixture site pointer: `docs/league/upgrade-dryrun-20261027T0722Z.md`.
 - Not covered: a real signed release on GitHub (no key exists yet; the tag is not made).

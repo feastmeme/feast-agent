@@ -624,6 +624,56 @@ async function killedMidSend(): Promise<void> {
   await first;
 }
 
+async function pitScene(): Promise<void> {
+  section("(p) The pit (runs 24 and 26): a pack that names it and one that names none, the league's 15 minutes, the candidates; the floor keeper's rounds in the pit, and off it when the pit refuses");
+  // A made-up pit coin, not on the board; the fake chain pairs every coin with WBNB, and so does the page's pit.
+  const PIT = coin(0x9171);
+  symbolOf.set(PIT.toLowerCase(), "QQPIT");
+  const pitWire = { coin: PIT, symbol: "QQPIT", name: "The pit", quote: getAddress("0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"), poolId: `0x${"ab".repeat(32)}` };
+  const day2 = { state: "season", season: { number: 1, day: 2, countdownTo: new Date(DINNER).toISOString() } };
+  const firstPack = async (league: () => unknown) => {
+    const s = scene(at8("14:00"), { hostTradedAt: at8("13:55"), ask: { every: 5, with: "claude" }, league });
+    const { packs } = await runAsking(s, at8("14:06"), "hold");
+    const first = readdirSync(packs).sort()[0];
+    return first ? readFileSync(join(packs, first), "utf8") : "";
+  };
+  const named = await firstPack(() => leagueWire({ ...day2, pit: pitWire }));
+  const lines = named.split("\n");
+  const from = (head: string) => {
+    const i = lines.findIndex((l) => l.startsWith(head));
+    if (i < 0) return [];
+    const end = lines.indexOf("```", lines.indexOf("```untrusted", i) + 1);
+    return lines.slice(i, end + 1);
+  };
+  say("The page names a pit (`GET /api/league` → `pit`, a made-up coin with no row on the board). The ask loop's first pack at 14:00 UTC+8 (the stub holds): its first line, the pit's row (c1, pinned), the league's 15 minutes, the players' trades and the candidates:\n");
+  block([lines[0]!, "…", ...lines.filter((l) => /^c1 \| /.test(l)).slice(0, 1), "…", ...from("league trades in the last 15 min"), "", ...from("Candidates to lead")].join("\n"));
+  const none = await firstPack(() => leagueWire(day2));
+  say("\nThe same pack when the page names no pit (or an older site sends no `pit` key): its first line:\n");
+  block(none.split("\n")[0] ?? "(none)");
+
+  const keeperScene = () => scene(at8("13:50"), { hostTradedAt: at8("13:20"), league: () => leagueWire({ ...day2, pit: pitWire }) });
+  const inPit = keeperScene();
+  await run(inPit, at8("15:30"));
+  say("\nThe floor keeper alone (the host quiet since 13:20 UTC+8, the backup on at 13:50), the pit named: each floor round is a buy in the pit and its sale at the next tick.\n");
+  fillTable(fills(inPit.home));
+  for (const l of logOf(inPit.home).filter((x) => x.event === "keeper.pit")) say(`- ${hm(Date.parse(l.at))} \`keeper.pit\`: ${String(l.pit)} ${String(l.state)} (${String(l.why)})`);
+
+  const refused = keeperScene();
+  const chain = refused.w.chain as unknown as { poolKey: (c: Address) => Promise<unknown>; client: { simulateContract: (a: unknown) => Promise<unknown> } };
+  let keyed: string | null = null;
+  const poolKey = chain.poolKey;
+  chain.poolKey = async (k: Address) => ((keyed = k.toLowerCase()), poolKey(k));
+  const simulate = chain.client.simulateContract;
+  chain.client.simulateContract = async (a: unknown) => {
+    if (keyed === PIT.toLowerCase()) throw new Error("PurchaseCapExceeded(): the pool is in its opening window");
+    return simulate(a);
+  };
+  await run(refused, at8("15:30"));
+  say("\nThe same, while the pit's pool still caps each wallet's buy (its opening window): the keeper says so once and keeps the floor off the pit, on one of the board's most-held WBNB pairs, never the same coin twice in a row.\n");
+  fillTable(fills(refused.home));
+  for (const l of logOf(refused.home).filter((x) => x.event === "keeper.pit")) say(`- ${hm(Date.parse(l.at))} \`keeper.pit\`: ${String(l.pit)} ${String(l.state)} (${String(l.why)})`);
+}
+
 const results: Record<string, ReturnType<typeof firstHour>> = {};
 
 async function main(): Promise<void> {
@@ -646,6 +696,7 @@ async function main(): Promise<void> {
   await seasonEnd();
   await warmUp();
   await killedMidSend();
+  await pitScene();
   section("The numbers");
   say("(The first 60 minutes are cut at the dinner: the next day's fills are not in them.)\n");
   say("| scene | took over (UTC+8) | steady's fills in its first 60 min | their volume | the day's floor | steady's buys that day |");
