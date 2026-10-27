@@ -1377,13 +1377,15 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
      */
     const askTick = async (startedAt: number) => {
       const ask = agent!.ask!;
+      // Run 26 (item 8): the players' window starts at this agent's previous pack.
+      const previousPackAt = askState.lastAskAt;
       askState = { ...askState, lastAskAt: startedAt };
       writeAskState(deps.home, deps.name, askState);
       save();
       // A read right before the ask (addendum 6): the pack sees the market as it is now, not as the slow cadence left it.
       if (feed && feed.due()) await feed.step({ events: false }).catch(() => []);
       // The pack (addenda 4 and 5): the book this runtime just saved, the snapshot the feed holds, the league, candles, impacts.
-      const gathered = await gatherPack({ home: deps.home, agent: agent!, now: startedAt, wallet, chain, snapshot: feed?.held() ?? null, fetch: deps.fetch ?? fetch, site: deps.site ?? siteFromEnv(), gate: { opensAt: gate.opensAt, open: gate.open, noFloorTonight: warmUpTonight(startedAt), signInEndsAt: session.end }, feast, impacts: impacts(executor, chain), recent: feed?.recent(startedAt), log });
+      const gathered = await gatherPack({ home: deps.home, agent: agent!, now: startedAt, wallet, chain, snapshot: feed?.held() ?? null, fetch: deps.fetch ?? fetch, site: deps.site ?? siteFromEnv(), gate: { opensAt: gate.opensAt, open: gate.open, noFloorTonight: warmUpTonight(startedAt), signInEndsAt: session.end }, feast, impacts: impacts(executor, chain), recent: feed?.recent(startedAt), previousPackAt, log });
       const pack: Pack = gathered.pack;
       const input = gathered.input;
       log("ask.pack", { pack: pack.digest, chars: pack.text.length, coins: pack.ids.size, requests: gathered.requests });

@@ -1106,7 +1106,7 @@ async function main(argv: string[]): Promise<number> {
         }
         const g = readGate(home, name);
         const opensAt = g?.opensAt ? Date.parse(g.opensAt) : null;
-        const gathered = await gatherPack({ home, agent, now: Date.now(), wallet, chain, snapshot, fetch, site: siteFromEnv(), gate: { opensAt, open: g ? g.state === "open" : !agent.league?.waitForSeason, noFloorTonight: noFloorTonight(g, Date.now()), signInEndsAt: signInEndOf(home, name) }, feast: MAINNET.platformCoin?.address ?? null, impacts: impacts(quoter, chain) });
+        const gathered = await gatherPack({ home, agent, now: Date.now(), wallet, chain, snapshot, fetch, site: siteFromEnv(), gate: { opensAt, open: g ? g.state === "open" : !agent.league?.waitForSeason, noFloorTonight: noFloorTonight(g, Date.now()), signInEndsAt: signInEndOf(home, name) }, feast: MAINNET.platformCoin?.address ?? null, impacts: impacts(quoter, chain), previousPackAt: ((at) => (Number.isFinite(at) ? at : null))(Math.max(readPrinted(home, name)?.at ?? -Infinity, readAskState(home, name).lastAskAt ?? -Infinity)) });
         // Addendum 11: its ids kept 10 minutes, for `FL answer <name> '<json>'` (a host with no headless CLI answers by hand).
         writeJsonAtomic(join(agentPaths(home, name).dir, "printed-pack.json"), { at: Date.now(), digest: gathered.pack.digest, maxBuyBnb: gathered.pack.maxBuyBnb, ids: [...gathered.pack.ids.entries()] });
         print(json, { ok: true, digest: gathered.pack.digest, chars: gathered.pack.text.length, requests: gathered.requests, pack: gathered.pack.text }, () => gathered.pack.text);

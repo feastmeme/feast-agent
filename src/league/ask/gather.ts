@@ -4,7 +4,7 @@ import type { Address } from "viem";
 import type { AgentConfig } from "../agent.ts";
 import { notesCachePath } from "../data/notes.ts";
 import { exitImpacts, picture, type Picture } from "../data/picture.ts";
-import { playerTrades, rosterOf } from "../data/players.ts";
+import { leagueTradeCount, playerTrades, playersWindowMs, ranksOf, rosterOf } from "../data/players.ts";
 import { selfView, type SelfChain } from "../data/self.ts";
 import { fromArena, fromField, readStanding, RULES, standing } from "../data/standing.ts";
 import type { FeastSnapshot } from "../feed/snapshot.ts";
@@ -40,6 +40,8 @@ export type GatherDeps = {
   impacts?: { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null>; buyQuote?: (coin: Address, bnb: number) => Promise<{ impactPct: number | null } | { error: string }> };
   /** Run 24: the trades of the last 15 minutes the caller holds (the feed's `recent`); default the snapshot's tail. */
   recent?: Record<string, unknown>[];
+  /** Run 26 (item 8): when this agent's previous pack was built (the ask state's), so the players' window starts there. */
+  previousPackAt?: number | null;
   log?: (event: string, data: Record<string, unknown>) => void;
   /** The league's read, when the caller already has it (tests); default one GET. */
   league?: LeagueRead | null;
@@ -100,6 +102,8 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     pitCoin.priceBnb ??= pit.priceBnb;
     if (pit.impact && "pct" in pit.impact) pitCoin.impactPct = pit.impact.pct;
   }
+  const events15m = d.recent ?? d.snapshot?.events ?? [];
+  const playersWindow = playersWindowMs(d.now, d.previousPackAt ?? null);
   const exits = await exitImpacts([...mine.positions, ...mine.ownCoin], pictured, d.impacts?.exit);
   const read = d.agent.prompt ? readPrompt(d.agent.prompt.path) : null;
   const state = readAskState(d.home, d.agent.name);
@@ -124,7 +128,11 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     coins: pictured.coins,
     launches: pictured.launches,
     // Task 1020: who in the league bought or sold what in the last 2 minutes, joined by the field's (or the arena's) wallets.
-    players: playerTrades(d.snapshot?.events ?? [], d.now, roster, (q) => pictured.bnbPerQuote?.[q] ?? null, d.wallet),
+    // Run 26 (items 7, 8, 10): since this agent's previous pack (at most 15 minutes, 20 rows), each seat with its rank;
+    // and the league's trades of the last 15 minutes, the cold-arena line the default strategy keys on.
+    players: playerTrades(events15m, d.now, roster, (q) => pictured.bnbPerQuote?.[q] ?? null, d.wallet, playersWindow, ranksOf(league?.field ?? league?.arena)),
+    playersWindowMs: playersWindow,
+    leagueTrades15m: leagueTradeCount(events15m, d.now, roster, d.wallet),
     pit,
     quiet: pictured.quiet,
     standing: leagueRead.standing,

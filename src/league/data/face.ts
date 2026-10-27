@@ -23,6 +23,8 @@ import { readStanding, RULES, type Standing } from "./standing.ts";
 import { notesSection, type NotesSection } from "./notes.ts";
 import { selfView, type PositionOut, type SelfView } from "./self.ts";
 import { untrusted, UNTRUSTED_NOTE, UNTRUSTED_PATHS, type Untrusted } from "./untrusted.ts";
+import { leagueTradeCount, PLAYER_WINDOW_MAX_MS, playerTrades, ranksOf, rosterOf } from "./players.ts";
+import { checkedPit, impactText, pitLine, viewPit } from "../pit.ts";
 
 /**
  * `FL data [<name>] [--since <iso|duration>] [--coin <addr>] [--json] [--live]` (task 963):
@@ -72,7 +74,7 @@ export type FaceDeps = {
   /** The snapshot's interval jitter (unused by one read; injected like the rest). */
   random?: () => number;
   /** Task 975, addendum 5: price impacts from the chain's quoter (`quote.ts`): a 0.01 BNB buy, and selling a position. */
-  impacts?: { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null> };
+  impacts?: { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null>; buyQuote?: (coin: Address, bnb: number) => Promise<{ impactPct: number | null } | { error: string }> };
 };
 
 /** `live`: the pools and the board, as before task 967, never the snapshot. `notes: false` (`--no-notes`): no notes read (task 968). */
@@ -410,6 +412,7 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
   }
   if (mine) await exitImpacts([...mine.positions, ...mine.ownCoin], pictured, deps.impacts?.exit);
   const byCoin = new Map((pictured?.coins ?? []).map((c) => [c.coin.toLowerCase(), c]));
+  const byCoinPrice = (coin: Address) => byCoin.get(coin.toLowerCase())?.priceBnb ?? null;
   for (const c of coins) {
     const p = byCoin.get(c.coin.toLowerCase());
     // The server's meta when the snapshot has it (addendum 6), else the local one: the same keys either way.
@@ -435,16 +438,30 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
 
   // --- the league ----------------------------------------------------------------------------------------
   let league: Record<string, unknown> | null = null;
+  let leagueRead: LeagueRead | null = null;
   if (!rateLimited) {
     // The whole field (task 975, addendum 6): the cached `field=1` board, no `me=`; the `me=` read only on an older site.
     const leagueSite = new LeagueSite(site, deps.fetch, timeout);
     const got = await readStanding(leagueSite, wallet);
+    leagueRead = got.read ?? null;
     if (got.read) league = { ...leagueOut(got.read, { body: got.read.raw ?? {} }, now, self, got.standing), source: got.from };
     else if (!rateLimited) {
       problems.push(`the league could not be read (${leagueSite.lastError ?? "no answer"})`);
       partial = true;
     }
   }
+
+  // --- run 26: the pit (item 16) and the league players' trades (items 6, 7, 8, 10), as the pack has them ----------
+  // FL data is no pack: its players' window is the whole 15 minutes. Names and symbols are other players' words.
+  const roster = rosterOf(leagueRead?.field ?? leagueRead?.arena);
+  const events = (heldSnapshot?.events ?? []) as Record<string, unknown>[];
+  const symbolOf = new Map(coins.map((c) => [c.coin.toLowerCase(), c.symbol]));
+  const players = leagueRead
+    ? playerTrades(events, now, roster, (q) => pictured?.bnbPerQuote?.[q] ?? null, wallet, PLAYER_WINDOW_MAX_MS, ranksOf(leagueRead.field ?? leagueRead.arena)).map((t) => ({ who: t.you ? "you" : t.who === null ? "someone" : untrusted(`${t.who}.ai`), rank: t.rank ?? null, side: t.side, coin: t.coin, symbol: untrusted(symbolOf.get(t.coin.toLowerCase())?.text ?? null), bnb: t.bnb, at: iso(t.at) }))
+    : null;
+  const checkedPitNow = leagueRead?.pit ? await checkedPit(leagueRead.pit, deps.chain).catch(() => null) : null;
+  const pitView = checkedPitNow ? await viewPit(checkedPitNow, { chain: deps.chain, snapshotPriceBnb: byCoinPrice(checkedPitNow.coin), quote: deps.impacts?.buyQuote, events, roster, self: wallet, now }) : null;
+  const pit = pitView ? { coin: pitView.coin, symbol: untrusted(pitView.symbol), name: untrusted(pitView.name), quote: pitView.quote, poolId: pitView.poolId, label: pitView.label, priceBnb: pitView.priceBnb, impact: impactText(pitView.impact), leagueTrades15m: pitView.leagueTrades15m } : null;
 
   // --- the public notes: the crowd (task 968) -------------------------------------------------------------
   const notes: NotesSection | null = input.notes === false || rateLimited ? null : await notesSection({ home, site, now, get });
@@ -513,11 +530,16 @@ export async function dataFace(deps: FaceDeps, input: FaceInput): Promise<FaceRe
     self: mine,
     ...(selfNote ? { selfNote } : {}),
     league,
+    // Run 26: the pit as the page names it, checked on chain and priced (null: none named, or the chain disagrees);
+    // the league players' trades of the last 15 minutes (null: no league read), and their count.
+    pit,
+    players,
+    leagueTrades15m: leagueRead ? leagueTradeCount(events, now, roster, wallet) : null,
     ...(ohlcv ? { ohlcv } : {}),
     ...(notes ? { notesAvailable: notes.available, notes } : {}),
     problems,
   };
-  return { code: problems.length > 0 ? 1 : 0, data, text: human({ coins, self: mine, selfNote, league, ohlcv, notes, usdRef, problems, now }) };
+  return { code: problems.length > 0 ? 1 : 0, data, text: human({ coins, self: mine, selfNote, league, ohlcv, notes, usdRef, problems, now, pit: leagueRead ? pitLine(pitView, null) : null, players }) };
 }
 
 /** A reason of ours fit to print: the first line, no URL (an RPC URL may carry a key). */
@@ -707,11 +729,21 @@ const bnb = (n: number | null) => (n === null ? "?" : `${Number(n.toPrecision(6)
 const signed = (n: number) => `${n >= 0 ? "+" : ""}${Number(n.toPrecision(6))} BNB`;
 const ago = (at: string | null, now: number) => (at === null ? "never" : `${duration(now - Date.parse(at), "en")} ago`);
 
-function human(view: { coins: CoinOut[]; self: SelfView | null; selfNote: string | null; league: Record<string, unknown> | null; ohlcv?: Record<string, Candle[]>; notes: NotesSection | null; usdRef: { bnbUsd: number } | null; problems: string[]; now: number }): string {
+type PlayerOut = { who: string | Untrusted; rank: number | null; side: "buy" | "sell"; coin: Address; symbol: Untrusted; bnb: number; at: string | null };
+
+function human(view: { coins: CoinOut[]; self: SelfView | null; selfNote: string | null; league: Record<string, unknown> | null; ohlcv?: Record<string, Candle[]>; notes: NotesSection | null; usdRef: { bnbUsd: number } | null; problems: string[]; now: number; pit?: string | null; players?: PlayerOut[] | null }): string {
   const lines: string[] = [];
   const usd = (n: number) => (view.usdRef ? ` (≈ ${(n * view.usdRef.bnbUsd).toFixed(2)} USDT)` : "");
   for (const problem of view.problems) lines.push(problem);
   if (view.problems.length > 0) lines.push("");
+  // Run 26 (item 16): the pit first, as in the pack.
+  if (view.pit) lines.push(view.pit, "");
+  if (view.players) {
+    const who = (p: PlayerOut) => (typeof p.who === "string" ? p.who : `${p.rank ? `#${p.rank} ` : ""}${clean(p.who.text, 40)}`);
+    lines.push(`League players' trades, last 15 min (newest first; names are other players' words): ${view.players.length === 0 ? "none" : ""}`.trimEnd());
+    for (const p of view.players) lines.push(`  ${who(p)} ${p.side === "buy" ? "bought" : "sold"} ${clean(p.symbol.text, 24) || "?"} ${short(p.coin)} ${bnb(p.bnb)}`);
+    lines.push("");
+  }
   lines.push(`Feast coins: ${view.coins.length} (prices in BNB per coin; volume in BNB over 24 h)`);
   for (const c of [...view.coins].sort((a, b) => (b.volume24hBnb ?? 0) - (a.volume24hBnb ?? 0))) {
     const who = c.creator === "self" ? "you" : short(c.creator);

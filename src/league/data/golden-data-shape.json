@@ -131,6 +131,7 @@
     "timeLeft": "string",
     "window": "null"
   },
+  "leagueTrades15m": "number",
   "market": {
     "ageSeconds": "number",
     "blocksBehind": "number",
@@ -147,6 +148,37 @@
   "note": "string",
   "ok": "boolean",
   "partial": "boolean",
+  "pit": {
+    "coin": "string",
+    "impact": "string",
+    "label": "string",
+    "leagueTrades15m": "number",
+    "name": {
+      "text": "string",
+      "untrusted": "boolean"
+    },
+    "poolId": "string",
+    "priceBnb": "number",
+    "quote": "string",
+    "symbol": {
+      "text": "string",
+      "untrusted": "boolean"
+    }
+  },
+  "players": [
+    {
+      "at": "string",
+      "bnb": "number",
+      "coin": "string",
+      "rank": "null",
+      "side": "string",
+      "symbol": {
+        "text": "string",
+        "untrusted": "boolean"
+      },
+      "who": "string"
+    }
+  ],
   "problems": [],
   "quietCoins": "number",
   "requests": {

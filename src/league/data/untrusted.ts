@@ -36,4 +36,8 @@ export const UNTRUSTED_PATHS = [
   "notes.items[].symbol",
   "notes.items[].text",
   "notes.crowd[].symbol",
+  "pit.symbol",
+  "pit.name",
+  "players[].who",
+  "players[].symbol",
 ];

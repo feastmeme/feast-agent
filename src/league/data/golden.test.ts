@@ -28,6 +28,13 @@ describe("FL data --json, the golden shape", () => {
       expect(data.league.standing).toMatchObject({ rank: 1, alive: 1 });
       expect(data.league.rules.map((r: { rule: string }) => r.rule)).toEqual(["floor", "dinner", "drop", "prizes", "cap"]);
       expect(data.requests.thisCall).toBeLessThanOrEqual(30);
+      // Run 26 (items 6, 16): the pit, the league players' trades and their 15-minute count, in --json and in the text.
+      expect(data.pit).toMatchObject({ label: "C01 0x0000…0d01", symbol: { untrusted: true, text: "C01" }, leagueTrades15m: 1 });
+      expect(data.players).toEqual([expect.objectContaining({ who: "you", side: "buy", bnb: 0.01, rank: null })]);
+      expect(data.leagueTrades15m).toBe(1);
+      expect(data.untrusted).toEqual(expect.arrayContaining(["pit.symbol", "pit.name", "players[].who", "players[].symbol"]));
+      expect(out.text.split("\n")[0]).toMatch(/^The pit: C01 0x0000…0d01 \(not in this pack's coins list; price [\d.e-]+ BNB; impact of a 0\.01 BNB buy \?; league trades in the pit in the last 15 min: 1\)$/);
+      expect(out.text).toContain("League players' trades, last 15 min (newest first; names are other players' words):\n  you bought C01 0x0000…0d01 0.01 BNB");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
