@@ -732,7 +732,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       intent: Intent,
       txHash: Hex | null,
       kind: "buy" | "sell" | "launch" | "claim",
-      what: { coin: Address; quote: Address; symbol: string; payIn?: "native" | "quote"; sizeWei?: bigint; balanceBefore?: bigint | null; minCoins?: bigint },
+      what: { coin: Address; quote: Address; symbol: string; payIn?: "native" | "quote"; sizeWei?: bigint; bnbWei?: bigint; balanceBefore?: bigint | null; minCoins?: bigint },
       reason: string,
     ) => {
       book = {
@@ -751,6 +751,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             quote: what.quote,
             payIn: what.payIn ?? "native",
             sizeWei: what.sizeWei ?? 0n,
+            ...(what.bnbWei !== undefined ? { bnbWei: what.bnbWei } : {}),
             balanceBefore: what.balanceBefore ?? null,
             minCoins: what.minCoins ?? 0n,
             why: tradeWhy(intent, agent!),
@@ -772,7 +773,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const sendRecorded = async (
       intent: Intent,
       kind: "buy" | "sell" | "launch" | "claim",
-      what: { coin: Address; quote: Address; symbol: string; payIn?: "native" | "quote"; sizeWei?: bigint; balanceBefore?: bigint | null; minCoins?: bigint },
+      what: { coin: Address; quote: Address; symbol: string; payIn?: "native" | "quote"; sizeWei?: bigint; bnbWei?: bigint; balanceBefore?: bigint | null; minCoins?: bigint },
       label: string,
       call: Parameters<Executor["send"]>[1],
     ) => {
@@ -788,6 +789,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         quote: what.quote,
         payIn: what.payIn ?? "native",
         sizeWei: what.sizeWei ?? 0n,
+        ...(what.bnbWei !== undefined ? { bnbWei: what.bnbWei } : {}),
         balanceBefore: what.balanceBefore ?? null,
         minCoins: what.minCoins ?? 0n,
         sending: true,
@@ -895,9 +897,11 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (!again.ok) return refused(approved, again);
         log("buy.prepared", { id: approved.id, coin, sizeWei: prepared.value.sizeWei, payIn, quotedOut: prepared.value.quotedOut, minOut: prepared.value.minOut, impactPct: prepared.value.impactPct });
         const balanceBefore = await chain.tokenBalance(coin, wallet).catch(() => null);
-        const sent = await sendRecorded(approved, "buy", { ...prepared.value.info, payIn, sizeWei: prepared.value.sizeWei, balanceBefore, minCoins: prepared.value.minOut }, `buy ${prepared.value.info.symbol}`, prepared.value.call);
+        // Run 26 (item 1): a quote-paid buy's pending record carries its guarded BNB size, so it counts in the exposure.
+        const guarded = payIn === "quote" && verdict.sizeWei !== null ? { bnbWei: verdict.sizeWei } : {};
+        const sent = await sendRecorded(approved, "buy", { ...prepared.value.info, payIn, sizeWei: prepared.value.sizeWei, ...guarded, balanceBefore, minCoins: prepared.value.minOut }, `buy ${prepared.value.info.symbol}`, prepared.value.call);
         if (!sent.ok && unknownOutcome(sent.stage)) {
-          return unresolvedSend(approved, sent.txHash ?? null, "buy", { ...prepared.value.info, payIn, sizeWei: prepared.value.sizeWei, balanceBefore, minCoins: prepared.value.minOut }, `${sent.stage}: ${sent.reason}`);
+          return unresolvedSend(approved, sent.txHash ?? null, "buy", { ...prepared.value.info, payIn, sizeWei: prepared.value.sizeWei, ...guarded, balanceBefore, minCoins: prepared.value.minOut }, `${sent.stage}: ${sent.reason}`);
         }
         if (!sent.ok) return failed(approved, sent.stage, sent.reason, sent.txHash);
         const fills = executor.verifyBuy(sent.receipt, prepared.value);

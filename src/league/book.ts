@@ -75,6 +75,11 @@ export type Unresolved = {
   payIn: "native" | "quote";
   /** A buy's size, BNB in wei (or the quote paid, for a buy paid in the quote); a sale's coins. */
   sizeWei: bigint;
+  /**
+   * Run 26 (item 1): a buy paid in the quote token, its size in BNB as the guard approved it (wei), so a pending
+   * quote-paid buy counts against the cap on BNB at work as a native one does; absent on older records and on sales.
+   */
+  bnbWei?: bigint;
   /** The wallet's balance of the coin before it was sent, and the least a fill moves it by: an unknown outcome is read from these. */
   balanceBefore: bigint | null;
   minCoins: bigint;
@@ -253,7 +258,8 @@ export function withEquity(book: Book, marks: Record<string, bigint | null>): Bo
 /** The figures the guard needs for one intent's coin. */
 /** What pending (unresolved) buys may have spent, BNB in wei: counted as spent until they resolve. */
 export function pendingBuysWei(book: Book, fundedBy?: "wallet" | "claim"): bigint {
-  return (book.unresolved ?? []).filter((u) => u.kind === "buy" && u.payIn === "native" && (fundedBy === undefined || u.fundedBy === fundedBy)).reduce((sum, u) => sum + u.sizeWei, 0n);
+  // Run 26 (item 1): a quote-paid buy counts too, at the BNB size the guard approved (an older record: 0, as before).
+  return (book.unresolved ?? []).filter((u) => u.kind === "buy" && (fundedBy === undefined || u.fundedBy === fundedBy)).reduce((sum, u) => sum + (u.payIn === "native" ? u.sizeWei : (u.bnbWei ?? 0n)), 0n);
 }
 
 /** Why entries are paused: an L14 failure pause, or else a transaction whose outcome is not known yet. The two never overwrite each other. */
@@ -305,6 +311,7 @@ const BIGINT_FIELDS = new Set([
   "lastEquityWei",
   "claimFundsWei",
   "sizeWei",
+  "bnbWei",
   "balanceBefore",
   "minCoins",
 ]);

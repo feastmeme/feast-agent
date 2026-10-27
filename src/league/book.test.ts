@@ -2,7 +2,8 @@ import type { Address } from "viem";
 import { describe, expect, it } from "vitest";
 
 import { bookView, emptyBook, markArmed, parseBook, pruned, recordBuy, recordClaim, recordFailure, recordSell, serializeBook, withEquity } from "./book.ts";
-import { bnbToWei } from "./limits.ts";
+import { guard } from "./guard.ts";
+import { DEFAULT_LIMITS, bnbToWei } from "./limits.ts";
 
 // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
 
@@ -104,3 +105,22 @@ describe("the book on disk", () => {
     expect(pauseReason(clearPause({ ...pending, unresolved: [] }))).toBeNull();
   });
 });
+
+describe("run 26 (item 1): a quote-paid pending buy is at work", () => {
+  const COIN2 = "0x00000000000000000000000000000000c0ffee02" as Address;
+  const pendingQuoteBuy = (bnbWei?: bigint) => ({ txHash: null, kind: "buy" as const, at: T, intentId: "bb", source: "preset", fundedBy: "claim" as const, coin: COIN2, symbol: "B", quote: QUOTE, payIn: "quote" as const, sizeWei: 5n * 10n ** 18n, ...(bnbWei !== undefined ? { bnbWei } : {}), balanceBefore: 0n, minCoins: 1n });
+
+  it("counted at the BNB size the guard approved, kept across a save; against the 0.15 at-work cap a buy that would cross it is refused (L3)", () => {
+    const held = recordBuy(emptyBook(), { coin: COIN, symbol: "T", quote: QUOTE, coinsOut: 1_000n, bnbInWei: bnbToWei(0.12), gasWei: 0n, at: T, fundedBy: "wallet", ownLaunch: false, source: "manual" });
+    const book = parseBook(serializeBook({ ...held, unresolved: [pendingQuoteBuy(bnbToWei(0.02))] }));
+    expect(book.unresolved[0]!.bnbWei).toBe(bnbToWei(0.02));
+    const view = bookView(book, COIN, T);
+    expect(view.exposureWei).toBe(bnbToWei(0.14));
+    // The pending record pauses entries anyway; with the pause aside, the exposure alone refuses a 0.02 BNB buy.
+    const verdict = guard({ intent: { id: "x", kind: "buy", coin: COIN, bnb: 0.02, slippagePct: 3, reason: "t", source: "manual", createdAt: T }, limits: DEFAULT_LIMITS, now: T, wallet: { connected: true, devMode: true, quotaLeftUsd: 1_000, balanceWei: bnbToWei(1) }, bnbUsd: 600, stopped: false, coinIsFeast: true, book: { ...view, paused: null }, othersAtWorkWei: 0n, warmup: null });
+    expect(verdict.ok ? "ok" : verdict.limit).toBe("L3");
+    // A record from an older runtime (no BNB size): 0, as before.
+    expect(bookView({ ...held, unresolved: [pendingQuoteBuy()] }, COIN, T).exposureWei).toBe(bnbToWei(0.12));
+  });
+});
+
