@@ -26,7 +26,7 @@ import { hostDetailHint, modelHint } from "../headers.ts";
 import { agentPaths, appendJsonl, readJson, removeStop, walletLockHolder, writeJsonAtomic, writeStop } from "../store.ts";
 import type { IntentRequest } from "../strategy.ts";
 import { upgradeSentence, versionView } from "../version.ts";
-import { keepSupport } from "../support.ts";
+import { keepPit, keepSupport } from "../support.ts";
 import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.ts";
 import * as copy from "./copy.ts";
 import { composeMeme, hostPicture, type Meme } from "./meme.ts";
@@ -489,6 +489,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, ...refLate(), copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     const rerunRead = await leagueOnce();
     keepSupport(deps.home, rerunRead);
+    keepPit(deps.home, rerunRead);
     const opens = tradingOpens(rerunRead);
     const upgrade = upgradeSentence(versionView(rerunRead?.latestRuntime, now()), lang);
     const signInEnd = await signInEndNow();
@@ -555,6 +556,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   };
 
   keepSupport(deps.home, leagueRead);
+  keepPit(deps.home, leagueRead);
   const season = leagueRead?.season.number ?? 1;
   const opens = tradingOpens(leagueRead);
   const upgrade = upgradeSentence(versionView(leagueRead?.latestRuntime, now()), lang);

@@ -4,6 +4,7 @@ import type { HostDetail, Model } from "./headers.ts";
 import { DEFAULT_AUTOPILOT } from "./prompt/constants.ts";
 import { auditRefusal } from "./audit/verdict.ts";
 import { renderCard } from "./card.ts";
+import { migrateDefault, type Migration } from "./enter/migrate.ts";
 import { promptChanged } from "./prompt/host.ts";
 import { statusOf } from "./runtime.ts";
 import { scriptCheckPassed } from "./script/check.ts";
@@ -51,7 +52,8 @@ export type StartCheck =
   /** Never confirmed, and no yes given: the card, and nothing starts. */
   | { kind: "needs-yes"; agent: AgentConfig; card: string }
   | { kind: "refused"; why: string }
-  | { kind: "ready"; agent: AgentConfig; replanned: boolean; confirmedNow: boolean };
+  /** `strategy` (run 26): what the start did with an unedited earlier default (`enter/migrate.ts`). */
+  | { kind: "ready"; agent: AgentConfig; replanned: boolean; confirmedNow: boolean; strategy?: Migration };
 
 export function prepareStart(
   home: string,
@@ -71,6 +73,17 @@ export function prepareStart(
   },
 ): StartCheck {
   let agent = loadAgent(home, name);
+  // Run 26 (amendment C): an unedited earlier default moves to the current one, its card with it, before anything else
+  // reads the file; never under a running loop. Its failure is the old file left as it was.
+  let strategy: Migration = { kind: "none" };
+  if (agent && !statusOf(home, name).running) {
+    try {
+      strategy = migrateDefault(home, agent, options.now);
+      if (strategy.kind === "migrated") agent = strategy.agent;
+    } catch {
+      strategy = { kind: "none" };
+    }
+  }
   let replanned = false;
   if (options.plan) {
     const planned = planAgent(options.plan, options.now);
@@ -115,5 +128,5 @@ export function prepareStart(
     const why = auditRefusal(home, agent.script!.path);
     if (why) return { kind: "refused", why };
   }
-  return { kind: "ready", agent, replanned, confirmedNow };
+  return { kind: "ready", agent, replanned, confirmedNow, strategy };
 }

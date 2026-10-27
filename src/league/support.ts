@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import type { LeagueRead } from "./register/site.ts";
+import type { LeagueRead, Pit } from "./register/site.ts";
 import { readJson, writeJsonAtomic } from "./store.ts";
 
 /**
@@ -35,4 +35,23 @@ export function splitHelp(text: string): { text: string; help: string | null } {
   if (!/^(Need help\? |需要帮助？)/.test(last)) return { text, help: null };
   lines.pop();
   return { text: lines.length ? `${lines.join("\n")}\n` : "", help: last };
+}
+
+/**
+ * The pit the page last named (task 975, run 26), kept for what needs it with no read at hand: the default a seat is
+ * moved to on start names it (`enter/migrate.ts`). A read with no `pit` key (an older site) leaves what is kept; a
+ * read that says `null` keeps null. Only the coin and its symbol: the label is rendered where it is used.
+ */
+const pitPath = (home: string) => join(home, "cache", "pit.json");
+
+export function keepPit(home: string, read: LeagueRead | null | undefined): void {
+  if (!read || read.pit === undefined) return;
+  const next = read.pit ? { coin: read.pit.coin, symbol: read.pit.symbol } : null;
+  const kept = readJson<{ pit?: unknown }>(pitPath(home));
+  if (!kept || JSON.stringify(kept.pit ?? null) !== JSON.stringify(next)) writeJsonAtomic(pitPath(home), { pit: next, at: new Date().toISOString() });
+}
+
+export function keptPit(home: string): Pick<Pit, "coin" | "symbol"> | null {
+  const pit = readJson<{ pit?: { coin?: unknown; symbol?: unknown } | null }>(pitPath(home))?.pit;
+  return pit && typeof pit.coin === "string" && /^0x[0-9a-fA-F]{40}$/.test(pit.coin) && typeof pit.symbol === "string" ? { coin: pit.coin as Pit["coin"], symbol: pit.symbol } : null;
 }

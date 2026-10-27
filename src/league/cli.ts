@@ -17,7 +17,7 @@ import { BawError, BawSigner, execRunner } from "./baw.ts";
 import { aliveLine, markStarting, readAlive, startingNow } from "./alive.ts";
 import { appendHostAnswer, decisionResult, resultOfOutcome, type DecisionAction } from "./decisions.ts";
 import { manualBeat, readManual, recordManual, settleBeats } from "./manual.ts";
-import { keepSupport, supportLine, supportUrl } from "./support.ts";
+import { keepPit, keepSupport, supportLine, supportUrl } from "./support.ts";
 import { fit, logTail, saveReport, scrub, sendReport, type ReportBundle } from "./report.ts";
 import { daemon, daemonPath, kickDaemon, windowsLines, type Runner } from "./daemon.ts";
 import { bookView } from "./book.ts";
@@ -37,6 +37,8 @@ import { gatherPack } from "./ask/gather.ts";
 import { journalPath, readAskState, readJournal } from "./ask/journal.ts";
 import { readSnapshotCache, SnapshotClient, CACHE_FRESH_MS } from "./feed/snapshot.ts";
 import { bnbToWei, weiToBnb } from "./limits.ts";
+import { migrationLine, restoreDefault } from "./enter/migrate.ts";
+import { DEFAULT_STRATEGY_VERSION } from "./enter/strategy.ts";
 import { publishAnswerNote } from "./notes/answer.ts";
 import { publishHoldLine } from "./notes/hold.ts";
 import { noteCommand } from "./notes/queue.ts";
@@ -146,6 +148,8 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   answer's why (or --why) becomes the trade's public note; --reason (else the answer's
                                   own reason) is the round's one line on feast.meme, a hold's too, at most 140 characters
   every <name> <minutes>          change how often the agent is asked
+  strategy restore <name>         put back the season-1 default an earlier runtime copied, after a start moved the
+                                  unedited file to the new default (the old file was kept beside it)
   ask <name> [--print] [--json]   one ask now, into the running agent; --print: the exact pack it would send, nothing sent
   quote --coin <0x…|FEAST> --bnb <n> [--sell] [--fraction f] [--json]
                                   read-only: a buy's (or with --sell a sale's) expected fill, price impact, round-trip
@@ -520,6 +524,9 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       const agent = checked.agent;
+      // Run 26 (amendment C): said once, at the start that did it; an edited old default, at every start.
+      if (checked.strategy?.kind === "migrated") console.log(`your strategy file was the unedited season-1 default ${checked.strategy.from}: it is the new default ${checked.strategy.to} now, in the same language and style (the old file is kept at ${checked.strategy.backup}; FL strategy restore ${name} puts it back)`);
+      else if (checked.strategy?.kind === "edited") console.log(`a new season-1 default strategy ${DEFAULT_STRATEGY_VERSION} is out; your edited strategy file is left as it is`);
       if (checked.replanned && checked.confirmedNow) console.log(`${renderCard(agent)}\n`);
       if (agent.manual && command !== "run") {
         const g = readGate(home, name);
@@ -718,6 +725,8 @@ async function main(argv: string[]): Promise<number> {
               ? [
                   `prompt: ${mine.prompt.path} (sha256 ${mine.prompt.sha256.slice(0, 6)}…${mine.prompt.sha256.slice(-4)})${mine.prompt.changed ? `; CHANGED since the user's yes: FL start ${name} --prompt ${mine.prompt.path} shows the new card` : ""}`,
                   ...(data.persona ? [`style: ${data.persona} (the season-1 default strategy, as FL enter copied it)`] : []),
+                  // Run 26 (amendment C): the default moved on start, kept by a restore, or edited with a new one out.
+                  ...((line) => (line ? [line] : []))(migrationLine(home, s.agent!)),
                   // Addendum 10: after the season, nothing about asking or the floor keeper: the season-over line says it all.
                   ...(seasonOverNow
                     ? []
@@ -977,6 +986,20 @@ async function main(argv: string[]): Promise<number> {
         console.log(`${name}\t${s.agent?.track ?? "?"}\t${s.agent?.prompt?.path ?? s.agent?.preset ?? s.agent?.script?.path ?? ""}${s.agent?.track === "prompt" && s.agent.preset ? ` (autopilot ${s.agent.preset})` : ""}\t${s.running ? "running" : "stopped"}${s.stop ? " (stop file)" : ""}`);
       }
       return 0;
+    }
+    case "strategy": {
+      // Run 26 (amendment C): FL strategy restore <name>, the one way back from a default moved on start.
+      if (args[0] !== "restore") throw new Error("FL strategy restore <name>");
+      const name = notEntry(agentArg(args[1]));
+      const agent = loadAgent(home, name);
+      if (!agent) throw new Error(`no agent "${name}": plan it first`);
+      if (statusOf(home, name).running) {
+        print(json, { ok: false, running: true }, () => `"${name}" is running: FL stop ${name} first, then FL strategy restore ${name}`);
+        return 2;
+      }
+      const out = restoreDefault(home, agent);
+      print(json, out.ok ? { ok: true, restored: out.from, path: out.path } : { ok: false, refused: out.why }, () => (out.ok ? `restored the default ${out.from} to ${out.path}; the next start leaves it as it is: FL start ${name}` : `not restored: ${out.why}`));
+      return out.ok ? 0 : 2;
     }
     case "every": {
       // Task 975, addendum 4: how often the running agent asks its AI, without planning it again.
@@ -1302,6 +1325,7 @@ async function leagueStanding(home: string, lang: Lang, agent: StandingInput["ag
   const ranked = await readStanding(site, me);
   const today = ranked.read;
   keepSupport(home, today);
+  keepPit(home, today);
   const season = today && (today.state === "season" || today.state === "over") ? await site.league("season", me) : null;
   const lines = standingLines({ agentId, seating, today, season, now: Date.now(), site: siteFromEnv(), entered, agent, standing: ranked.standing }, lang);
   // The page's own rows, without the wallet's address: printed output keeps the home's rule.
