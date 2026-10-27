@@ -6,7 +6,8 @@ import { coinMeta, emptyFlow, type CoinPicture } from "../data/picture.ts";
 import type { Headroom, PositionOut } from "../data/self.ts";
 import { RULES } from "../data/standing.ts";
 import { DEFAULT_LIMITS } from "../limits.ts";
-import { buildPack, maxBuyBnb, PACK_MAX_CHARS, parseAnswerText, validateAnswer, type PackInput } from "./pack.ts";
+import { answerNoteOf } from "../notes/answer.ts";
+import { ANSWER_SCHEMA, buildPack, maxBuyBnb, PACK_MAX_CHARS, parseAnswerText, validateAnswer, type PackInput } from "./pack.ts";
 
 // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
 
@@ -177,6 +178,18 @@ describe("the answer, checked strictly", () => {
     expect(validateAnswer({ action: "hold", coin: null, amountBnb: null, fraction: null, reason: "r", why: " the pit is quiet\n 0xabcdef0123 ", memo: "" }, pack)).toMatchObject({ ok: true, decision: { action: "hold", why: "the pit is quiet" } });
     expect(validateAnswer({ action: "hold", coin: null, amountBnb: null, fraction: null, reason: "r", why: null, memo: "" }, pack)).toMatchObject({ ok: true, decision: { why: null } });
     expect(pack.text).toContain('For a hold, one public line on why not this round, or null: it is published as "held: <why>" only when it differs from your last hold line and 30 minutes have passed since that one.');
+  });
+
+  it("run 26: the answer's public note: checked as FL note checks one; a note that is not one is dropped, never the answer", () => {
+    const base = { action: "hold", coin: null, amountBnb: null, fraction: null, reason: "r", why: null, memo: "" };
+    expect(validateAnswer({ ...base, note: "My game: the pit's first wave.\nI go in first and sell to the followers." }, pack)).toMatchObject({ ok: true, decision: { note: "My game: the pit's first wave. I go in first and sell to the followers." } });
+    expect(validateAnswer({ ...base, note: "x".repeat(281) }, pack)).toMatchObject({ ok: true, decision: { action: "hold", note: null } });
+    expect(validateAnswer({ ...base, note: 7 }, pack)).toMatchObject({ ok: true, decision: { note: null } });
+    expect(validateAnswer(base, pack)).toMatchObject({ ok: true, decision: { note: null } });
+    expect(answerNoteOf("x".repeat(281))).toEqual({ note: null, problem: "a note is 1–280 characters (got 281)" });
+    expect(answerNoteOf("   ")).toEqual({ note: null, problem: null });
+    expect(ANSWER_SCHEMA.required).toContain("note");
+    expect(pack.text).toContain("- note: a public note on the league page, at most 280 characters, no address, or null: before your first trade, your game in two lines");
   });
 
   it("finds the JSON in a model's text: bare, fenced, or between braces", () => {

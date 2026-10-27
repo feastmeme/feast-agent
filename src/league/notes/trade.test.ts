@@ -235,3 +235,27 @@ describe("run 26: a hold's public line", () => {
   }, 60_000);
 });
 
+describe("run 26: the answer's public note", () => {
+  it("an asked AI's note is queued as FL note's are, once: the same note again is not, a new one is", async () => {
+    const { home } = setup({ ask: true });
+    const c = fakeClock(T0);
+    const { feed, w } = world(c);
+    recordHostAction(home, "demo", "buy", T0);
+    const GAME = "My game: I lead the pit's first wave and sell to the ones who follow.";
+    const CHANGED = "Changed my mind: the pit is dead today, I play the busiest coin instead.";
+    let n = 0;
+    await run(home, c, feed, w, T0 + 25 * MIN, async ({ pack }) => {
+      n += 1;
+      if (n === 1) return answer({ note: GAME });
+      if (n === 2) return answer({ action: "buy", coin: idOf(pack, "NOODFEED"), amountBnb: 0.006, why: "in first", note: GAME });
+      return answer({ note: n === 3 ? CHANGED : null });
+    });
+    expect(n).toBeGreaterThanOrEqual(3);
+    const texts = noteTexts(home);
+    expect(texts.filter((t) => t === GAME)).toHaveLength(1);
+    expect(texts.filter((t) => t === CHANGED)).toHaveLength(1);
+    expect(texts.indexOf(GAME)).toBeLessThan(texts.indexOf("bought NOODFEED for 0.006 BNB: in first"));
+    expect(readNotesLog(home)).toContain('"why":"answer note"');
+  }, 60_000);
+});
+

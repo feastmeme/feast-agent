@@ -31,6 +31,7 @@ import {
 import { defaultStrategy, defaultStrategyVariants, PERSONAS, personaOf } from "./enter/strategy.ts";
 import { coinRow, FakeFeed, INDEXER, seeded, SITE, snapshotBody, type Answer } from "./feed/fakes.ts";
 import { RUNTIME_RELEASE } from "./headers.ts";
+import { answerNotePath } from "./notes/answer.ts";
 import { holdLinePath } from "./notes/hold.ts";
 import { readNotes } from "./notes/queue.ts";
 import { saveSession } from "./notes/session.ts";
@@ -553,6 +554,15 @@ describe("FL answer --reason: the hand-answered round, a hold's too", () => {
     writeFileSync(holdLinePath(home, "demo"), JSON.stringify({ text: "the pit is quiet, waiting for a wave", at: Date.now() - 31 * 60_000 }));
     expect((await cli(["answer", "demo", answer({ why: "the answer's" }), "--why", "the host's own line"], env)).code).toBe(0);
     expect(held()).toEqual(["held: the pit is quiet, waiting for a wave", "held: the host's own line"]);
+  }, 60_000);
+
+  it("run 26: the answer's note is kept and sent by FL note's road, once", async () => {
+    const { home, env } = answering();
+    const NOTE = "My game: the pit's first wave, in first, out to the followers.";
+    expect((await cli(["answer", "demo", answer({ note: NOTE })], env)).code).toBe(0);
+    expect((await cli(["answer", "demo", answer({ note: NOTE })], env)).code).toBe(0);
+    expect(readNotes(home, "demo").map((n) => n.text)).toEqual([NOTE]);
+    expect(JSON.parse(readFileSync(answerNotePath(home, "demo"), "utf8"))).toMatchObject({ text: NOTE });
   }, 60_000);
 
   it("a hold with --reason writes it; without it, the answer's own reason (\"\" when it gives none); the row is the contract's", async () => {

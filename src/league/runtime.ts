@@ -26,6 +26,7 @@ import { WARMUP_SIZE_BNB, WARMUP_TRADES, bnbToWei, resolveLimits, weiToBnb, type
 import { Market } from "./market.ts";
 import { checkNote, flushNotes, notesPath, readNotes } from "./notes/queue.ts";
 import { liveToken } from "./notes/session.ts";
+import { publishAnswerNote } from "./notes/answer.ts";
 import { publishHoldLine } from "./notes/hold.ts";
 import { tradeNoteText, tradeWhy } from "./notes/trade.ts";
 import { presetStrategy } from "./presets/logic.ts";
@@ -1361,6 +1362,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (!checked.ok) return failed(`invalid answer: ${checked.why}`);
       const d = checked.decision;
       askState = { ...askState, streak: 0, cause: null, floorKeeperSince: null, memo: d.memo || askState.memo, promptSha: input.prompt.sha256 };
+      // Run 26: the answer's public note, queued with the notes before the action is taken (FL note's road for a headless host).
+      if (d.note) await publishAnswerNote(deps.home, deps.name, d.note, clock(), (text) => publicNote(text, "answer note")).catch((error: unknown) => log("note.failed", { by: "answer", reason: errorLine(error) }));
       const decided = { action: d.action, coin: d.coin, symbol: d.symbol, amountBnb: d.amountBnb, fraction: d.fraction, reason: d.reason };
       const finish = (result: string) => {
         askState = { ...askState, last: { at: startedAt, action: d.action, reason: d.reason, result } };
