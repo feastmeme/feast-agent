@@ -35,9 +35,16 @@ const ADDRESS = /(?:0x)?[0-9a-f]{40}/gi;
 /** The AI a note says wrote it, and the host's hint: one source with the `x-feast-host` header (task 975). */
 export { checkModel, MODELS, modelHint, type Model } from "../headers.ts";
 
-export type NoteState = { id: string; ts: string; text: string; tx: string | null; model: Model; state: "queued" | "sent" | "refused" | "dropped"; status?: number; at?: string };
+/** `filledAt` (run 26, item 2): a trade's note, stamped with the trade's fill time; absent on every other note. */
+export type NoteState = { id: string; ts: string; text: string; tx: string | null; model: Model; state: "queued" | "sent" | "refused" | "dropped"; status?: number; at?: string; filledAt?: string };
 
-type Line = { id: string; ts?: string; text?: string; tx?: string | null; model?: string; sent?: boolean; refused?: number; dropped?: number; at?: string };
+type Line = { id: string; ts?: string; text?: string; tx?: string | null; model?: string; sent?: boolean; refused?: number; dropped?: number; at?: string; filledAt?: string };
+
+/**
+ * Run 26 (item 2, the v5.1.4 review): a trade's note is news for 10 minutes after its fill. One still queued later (it
+ * waited out a 429, or a notes session that was not open) is dropped at the flush, never sent as if fresh.
+ */
+export const TRADE_NOTE_FRESH_MS = 10 * 60_000;
 
 export const notesPath = (home: string, name: string) => join(agentPaths(home, name).dir, "notes.jsonl");
 
@@ -69,7 +76,7 @@ export function readNotes(home: string, name: string): NoteState[] {
     const known = notes.get(line.id);
     if (typeof line.text === "string" && !known) {
       const model = checkModel(line.model ?? "");
-      notes.set(line.id, { id: line.id, ts: String(line.ts), text: line.text, tx: line.tx ?? null, model: model.ok ? model.model : "other", state: "queued" });
+      notes.set(line.id, { id: line.id, ts: String(line.ts), text: line.text, tx: line.tx ?? null, model: model.ok ? model.model : "other", state: "queued", ...(typeof line.filledAt === "string" ? { filledAt: line.filledAt } : {}) });
     } else if (known && known.state === "queued" && line.sent === true) notes.set(line.id, { ...known, state: "sent", at: line.at });
     else if (known && known.state === "queued" && typeof line.refused === "number") notes.set(line.id, { ...known, state: "refused", status: line.refused, at: line.at });
     else if (known && known.state === "queued" && typeof line.dropped === "number") notes.set(line.id, { ...known, state: "dropped", status: line.dropped, at: line.at });
@@ -102,8 +109,12 @@ export type Flushed = { sent: number; kept: number; refused: number; dropped: nu
 export async function flushNotes(home: string, name: string, wallet: Address, deps: SendDeps): Promise<Flushed> {
   const now = deps.now ?? Date.now;
   const dev = deps.dev ?? notesDev();
-  const queued = readNotes(home, name).filter((n) => n.state === "queued");
-  const out: Flushed = { sent: 0, kept: queued.length, refused: 0, dropped: 0, lastRefused: null, reason: null };
+  const all = readNotes(home, name).filter((n) => n.state === "queued");
+  // Item 2: a trade's note more than 10 minutes after its fill is stale: dropped here, never sent.
+  const stale = (n: NoteState) => n.filledAt !== undefined && now() - Date.parse(n.filledAt) > TRADE_NOTE_FRESH_MS;
+  for (const n of all.filter(stale)) appendJsonl(notesPath(home, name), { id: n.id, dropped: 0, stale: true, at: new Date(now()).toISOString() });
+  const queued = all.filter((n) => !stale(n));
+  const out: Flushed = { sent: 0, kept: queued.length, refused: 0, dropped: all.length - queued.length, lastRefused: null, reason: null };
   let token = dev ? null : liveToken(home);
   if (!dev && !token) return queued.length > 0 ? { ...out, reason: "no-session" } : out;
   let relogged = false;

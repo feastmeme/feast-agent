@@ -120,6 +120,8 @@ describe("a public note for every trade the runtime makes", () => {
     });
     expect(noteTexts(home)).toEqual(["bought NOODFEED for 0.006 BNB: the crowd is buying NOODFEED"]);
     expect(noteTexts(home).join(" ")).not.toContain("for the player");
+    // Run 26 (item 2): stamped with its fill time, so a flush 10 minutes later drops it.
+    expect(Date.parse(readNotes(home, "demo")[0]!.filledAt!)).toBe(Date.parse(readNotes(home, "demo")[0]!.ts));
   }, 60_000);
 
   it("the host's FL buy and FL sell: --why, or no colon part without one", async () => {

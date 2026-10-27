@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { confirmAgent, planAgent, saveAgent } from "../agent.ts";
 import { FakeFeast, SITE, WALLET, type Answer } from "../data/fakes.ts";
 import { hostPath } from "../prompt/host.ts";
-import { checkModel, checkNote, flushNotes, modelHint, noteCommand, notesPath, readNotes } from "./queue.ts";
+import { checkModel, checkNote, flushNotes, modelHint, noteCommand, notesPath, readNotes, TRADE_NOTE_FRESH_MS } from "./queue.ts";
+import { appendJsonl } from "../store.ts";
 import { readSession, saveSession } from "./session.ts";
 
 const NOW = Date.parse("2026-10-29T05:00:00Z");
@@ -197,3 +198,32 @@ describe("the notes session on the wire", () => {
     expect(w.feast.auths).toEqual([null]);
   });
 });
+
+describe("run 26 (item 2): a trade's note is news for 10 minutes", () => {
+  const tradeNote = (home: string, id: string, filledAt: number) => appendJsonl(notesPath(home, "demo"), { id, ts: new Date(filledAt).toISOString(), text: `bought C01 for 0.006 BNB: ${id}`, tx: null, model: "claude", sent: false, filledAt: new Date(filledAt).toISOString() });
+
+  it("queued before a 429, flushed 11 minutes after its fill: dropped, never sent; a fresh one is sent; a plain note has no clock", async () => {
+    expect(TRADE_NOTE_FRESH_MS).toBe(10 * 60_000);
+    const w = world([{ status: 429, body: {} }, { status: 201, body: {} }, { status: 201, body: {} }]);
+    tradeNote(w.home, "old", NOW);
+    const first = await flushNotes(w.home, "demo", WALLET, { site: SITE, fetch: w.feast.fetch, now: () => NOW + 60_000, dev: false });
+    expect(first.sent).toBe(0);
+    expect(w.feast.posts).toHaveLength(1);
+    tradeNote(w.home, "fresh", NOW + 9 * 60_000);
+    appendJsonl(notesPath(w.home, "demo"), { id: "plain", ts: new Date(NOW).toISOString(), text: "my game: the pit's first wave", tx: null, model: "claude", sent: false });
+    const later = await flushNotes(w.home, "demo", WALLET, { site: SITE, fetch: w.feast.fetch, now: () => NOW + 11 * 60_000, dev: false });
+    expect(later).toMatchObject({ sent: 2, dropped: 1 });
+    expect(w.feast.posts.slice(1).map((p) => (p as { id: string }).id)).toEqual(["fresh", "plain"]);
+    expect(readNotes(w.home, "demo").find((n) => n.id === "old")).toMatchObject({ state: "dropped", status: 0 });
+  });
+
+  it("with no notes session the stale one is dropped too (it would be stale by the time a session opens)", async () => {
+    const w = world({ status: 201, body: {} }, { session: false });
+    tradeNote(w.home, "old", NOW);
+    tradeNote(w.home, "fresh", NOW + 5 * 60_000);
+    const out = await flushNotes(w.home, "demo", WALLET, { site: SITE, fetch: w.feast.fetch, now: () => NOW + 11 * 60_000, dev: false });
+    expect(out).toMatchObject({ sent: 0, dropped: 1, reason: "no-session" });
+    expect(readNotes(w.home, "demo").map((n) => [n.id, n.state])).toEqual([["old", "dropped"], ["fresh", "queued"]]);
+  });
+});
+

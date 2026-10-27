@@ -251,13 +251,14 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     /** A note queued by the runtime itself (the sign-in's, addendum 11): the next pass flushes the notes at once. */
     let notesDue = false;
     /** True when the note was queued. */
-    const publicNote = (text: string, why: string): boolean => {
+    const publicNote = (text: string, why: string, filledAt?: number): boolean => {
       const checked = checkNote(text, wallet);
       if (!checked.ok) {
         log("note.skipped", { why, problem: checked.reason });
         return false;
       }
-      appendJsonl(notesPath(deps.home, deps.name), { id: randomUUID(), ts: new Date(clock()).toISOString(), text: checked.text, tx: null, model: modelHint(), sent: false });
+      // Run 26 (item 2): a trade's note carries its fill time; the flush drops it 10 minutes after.
+      appendJsonl(notesPath(deps.home, deps.name), { id: randomUUID(), ts: new Date(clock()).toISOString(), text: checked.text, tx: null, model: modelHint(), sent: false, ...(filledAt !== undefined ? { filledAt: new Date(filledAt).toISOString() } : {}) });
       log("note.queued", { by: "runtime", why });
       notesDue = true;
       return true;
@@ -270,7 +271,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const tradeNote = (trade: { side: "buy" | "sell"; symbol: string | null; bnbWei: bigint; why: string | null }) => {
       try {
         if (activeWaits(deps.home, deps.name, clock()).some((w) => w.door === "notes")) return log("note.dropped", { by: "trade", why: "the notes door is waiting (rate-limited)" });
-        publicNote(tradeNoteText({ side: trade.side, symbol: trade.symbol, bnb: weiToBnb(trade.bnbWei), why: trade.why }), `${trade.side} note`);
+        publicNote(tradeNoteText({ side: trade.side, symbol: trade.symbol, bnb: weiToBnb(trade.bnbWei), why: trade.why }), `${trade.side} note`, clock());
       } catch (error) {
         log("note.failed", { by: "trade", reason: errorLine(error) });
       }
