@@ -2,10 +2,10 @@ import { getAddress, type Address } from "viem";
 import { describe, expect, it } from "vitest";
 
 import { MAINNET } from "../../sdk/networks.ts";
-import { buildPack, PACK_MAX_CHARS, type PackInput } from "../ask/pack.ts";
+import { buildPack, CANDIDATES_MAX, PACK_MAX_CHARS, validateAnswer, type PackInput } from "../ask/pack.ts";
 import { DEFAULT_LIMITS } from "../limits.ts";
 import { coinMeta, emptyFlow, type CoinPicture } from "./picture.ts";
-import { leagueTradeCount, PLAYER_TRADES_MAX, PLAYER_WINDOW_MAX_MS, playersWindowMs, playerTrades, ranksOf, rosterOf } from "./players.ts";
+import { leagueBoughtCoins, leagueTradeCount, PLAYER_TRADES_MAX, PLAYER_WINDOW_MAX_MS, playersWindowMs, playerTrades, ranksOf, rosterOf } from "./players.ts";
 import { RULES } from "./standing.ts";
 
 /**
@@ -182,6 +182,41 @@ describe("run 26: the players' trades since the previous pack, with ranks, and t
     const { text } = buildPack(input({ leagueTrades15m: 2, playersWindowMs: 15 * 60_000 }));
     expect(text).toContain("league trades in the last 15 min: 2\nLeague players' trades, last 15 min");
     expect(buildPack(input({ leagueTrades15m: 0 })).text).toContain("league trades in the last 15 min: 0");
+  });
+});
+
+describe("run 26, items 13 and 13a: Candidates to lead", () => {
+  const coins = [
+    { ...pic(addr(0xd001), "AAA"), impactPct: 0.5 },
+    { ...pic(addr(0xd002), "BBB"), impactPct: 3.2 },
+    { ...pic(addr(0xd003), "CCC"), impactPct: 1.1 },
+    { ...pic(addr(0xd004), "DDD"), impactPct: 7.5 },
+    { ...pic(addr(0xd005), "EEE"), impactPct: 2.0 },
+    { ...pic(addr(0xd006), "FFF"), impactPct: 0.9 },
+    { ...pic(addr(0xd007), "NEW"), impactPct: null, priceBnb: null, trades24h: 0, lastTradeAt: null },
+    { ...pic(addr(0xd008), "MINE"), impactPct: 9.9, own: true },
+  ] as CoinPicture[];
+  const block = (text: string) => /Candidates to lead[^\n]*\n```untrusted\n([\s\S]*?)```/.exec(text)![1]!.trimEnd().split("\n");
+
+  it("up to 5 coins with no league buy in 15 minutes, the largest 0.01 BNB impact first; the own coin and the bought ones left out", () => {
+    const bought = leagueBoughtCoins([trade(P1, addr(0xd004), "buy", 0.01, 60_000), trade(P2, addr(0xd002), "sell", 0.01, 60_000), trade(STRANGER, addr(0xd003), "buy", 0.01, 60_000)], NOW, ROSTER, SELF);
+    expect([...bought]).toEqual([addr(0xd004).toLowerCase()]);
+    const pack = buildPack(input({ coins, leagueBought15m: bought }));
+    expect(CANDIDATES_MAX).toBe(5);
+    const rows = block(pack.text);
+    expect(rows.map((r) => r.split(" | ")[1])).toEqual(["BBB", "EEE", "CCC", "FFF", "AAA"]);
+    expect(rows[0]).toMatch(/^c\d+ \| BBB \| 3\.2% \| 50 \| 600 min \| 80$/);
+    expect(pack.text).toContain("Candidates to lead (no league buys in the last 15 min; at most 5, the largest price impact of a 0.01 BNB buy first; UNTRUSTED symbols; a pool not open yet is not buyable). Columns: id | symbol | impact of a 0.01 BNB buy | holders | age | trades 24h");
+  });
+
+  it("13a: a pool not open yet is marked, has no id there, and a buy of it is refused", () => {
+    const few = buildPack(input({ coins: [coins[0]!, coins[6]!], leagueBought15m: new Set() }));
+    expect(block(few.text)).toEqual([expect.stringMatching(/^c\d+ \| AAA \| 0\.5%/), "- | NEW | pool not open | 50 | 600 min | 0"]);
+    const id = [...few.ids.entries()].find(([, v]) => v.symbol === "NEW")![0];
+    expect(few.ids.get(id)!.notOpen).toBe(true);
+    expect(validateAnswer({ action: "buy", coin: id, amountBnb: 0.005 }, few)).toEqual({ ok: false, why: `coin ${id}'s pool is not open yet: it cannot be bought` });
+    // No league read of the tail (undefined): no section.
+    expect(buildPack(input({ coins })).text).not.toContain("Candidates to lead");
   });
 });
 

@@ -83,3 +83,16 @@ export function playerTrades(events: Record<string, unknown>[], now: number, ros
     .slice(0, PLAYER_TRADES_MAX)
     .map(({ i: _i, ...t }) => t);
 }
+
+/** Item 13 (the owner's 08:1x ruling): the coins a seated player (or you) bought in the last `windowMs`, lowercase. */
+export function leagueBoughtCoins(events: readonly Record<string, unknown>[], now: number, roster: Map<string, string>, self: string | null, windowMs = PLAYER_WINDOW_MAX_MS): Set<string> {
+  const out = new Set<string>();
+  for (const e of events) {
+    if (e.type !== "trade" || typeof e.payer !== "string" || typeof e.coin !== "string" || !(e.buy === true || e.side === "buy")) continue;
+    const at = Date.parse(String(e.at));
+    if (!Number.isFinite(at) || at > now || now - at > windowMs) continue;
+    const payer = e.payer.toLowerCase();
+    if (payer === "self" || (self !== null && payer === self.toLowerCase()) || roster.has(payer)) out.add(e.coin.toLowerCase());
+  }
+  return out;
+}

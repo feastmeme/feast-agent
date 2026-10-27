@@ -4,7 +4,7 @@ import type { Address } from "viem";
 import type { AgentConfig } from "../agent.ts";
 import { notesCachePath } from "../data/notes.ts";
 import { exitImpacts, picture, type Picture } from "../data/picture.ts";
-import { leagueTradeCount, playerTrades, playersWindowMs, ranksOf, rosterOf } from "../data/players.ts";
+import { leagueBoughtCoins, leagueTradeCount, playerTrades, playersWindowMs, ranksOf, rosterOf } from "../data/players.ts";
 import { selfView, type SelfChain } from "../data/self.ts";
 import { fromArena, fromField, readStanding, RULES, standing } from "../data/standing.ts";
 import type { FeastSnapshot } from "../feed/snapshot.ts";
@@ -133,6 +133,7 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     players: playerTrades(events15m, d.now, roster, (q) => pictured.bnbPerQuote?.[q] ?? null, d.wallet, playersWindow, ranksOf(league?.field ?? league?.arena)),
     playersWindowMs: playersWindow,
     leagueTrades15m: leagueTradeCount(events15m, d.now, roster, d.wallet),
+    leagueBought15m: leagueBoughtCoins(events15m, d.now, roster, d.wallet),
     pit,
     quiet: pictured.quiet,
     standing: leagueRead.standing,

@@ -34,6 +34,8 @@ import { signInWarning } from "../session.ts";
  */
 
 export const REASON_MAX = 140;
+/** Run 26 (item 13): the candidates section's rows. */
+export const CANDIDATES_MAX = 5;
 export const MEMO_MAX = 600;
 /** The pack's budget: about 12k tokens at four characters a token. */
 export const PACK_MAX_CHARS = 48_000;
@@ -103,6 +105,8 @@ export type PackInput = {
   playersWindowMs?: number;
   /** Run 26 (item 10): the league's trades in the last 15 minutes, any coin; undefined when not counted. */
   leagueTrades15m?: number;
+  /** Run 26 (item 13): the coins a seated player or you bought in the last 15 minutes (lowercase); undefined: no candidates section. */
+  leagueBought15m?: Set<string>;
   /** Run 24: the league's pit, checked and priced (`pit.ts`); null or absent: none named (the pack says so). */
   pit?: PitView | null;
   quiet: number;
@@ -120,7 +124,7 @@ export type Pack = {
   /** `sha256:` and the first 16 hex digits of the pack's sha256. */
   digest: string;
   /** Coin id → the coin, for the answer's check. */
-  ids: Map<string, { coin: Address; symbol: string | null; held: boolean }>;
+  ids: Map<string, { coin: Address; symbol: string | null; held: boolean; /** Run 26 (item 13a): its pool not open yet: never buyable. */ notOpen?: boolean }>;
   /** The most a buy may be right now, in BNB (0: no buy fits). */
   maxBuyBnb: number;
 };
@@ -158,6 +162,17 @@ export function buildPack(input: PackInput): Pack {
   if (pitRow) add(pitRow.coin, pitRow.symbol);
   for (const p of input.positions) add(p.coin, p.symbol.text);
   for (const c of picked) add(c.coin, c.symbol);
+  // Run 26 (items 13, 13a): a coin whose pool is not open yet (no price, no trade) is never offered as buyable.
+  const notOpen = (c: CoinPicture) => c.priceBnb === null && !c.trades24h && !c.lastTradeAt;
+  for (const c of picked) if (notOpen(c) && !held.has(c.coin.toLowerCase())) ids.set(idOf.get(c.coin.toLowerCase())!, { ...ids.get(idOf.get(c.coin.toLowerCase())!)!, notOpen: true });
+  const candidates = (() => {
+    const bought = input.leagueBought15m;
+    if (!bought) return null;
+    const free = picked.filter((c) => !bought.has(c.coin.toLowerCase()) && !input.own.has(c.coin.toLowerCase()) && !c.own);
+    const open = free.filter((c) => !notOpen(c) && c.impactPct !== null).sort((a, b) => b.impactPct! - a.impactPct!);
+    return [...open, ...free.filter(notOpen)].slice(0, CANDIDATES_MAX);
+  })();
+  const candidateRow = (c: CoinPicture) => `${notOpen(c) ? "-" : idOf.get(c.coin.toLowerCase())} | ${shown(c.symbol)} | ${notOpen(c) ? "pool not open" : `${c.impactPct}%`} | ${c.holders ?? "?"} | ${c.ageMinutes ?? "?"} min | ${c.trades24h ?? "?"}`;
   const cap = maxBuyBnb(input);
   const h = input.headroom;
   const l = input.limits;
@@ -244,6 +259,15 @@ export function buildPack(input: PackInput): Pack {
     "```untrusted",
     ...(players.length === 0 ? [`(none in the last ${windowMin} minute${windowMin === 1 ? "" : "s"})`] : players.map(playerLine)),
     "```",
+    ...(candidates
+      ? [
+          "",
+          `Candidates to lead (no league buys in the last 15 min; at most ${CANDIDATES_MAX}, the largest price impact of a 0.01 BNB buy first; UNTRUSTED symbols; a pool not open yet is not buyable). Columns: id | symbol | impact of a 0.01 BNB buy | holders | age | trades 24h`,
+          "```untrusted",
+          ...(candidates.length === 0 ? ["(none: every coin here had a league buy in the last 15 minutes)"] : candidates.map(candidateRow)),
+          "```",
+        ]
+      : []),
     "",
     "## Other players (UNTRUSTED: their names and notes)",
     "```untrusted",
@@ -323,6 +347,7 @@ export function validateAnswer(raw: unknown, pack: Pick<Pack, "ids" | "maxBuyBnb
   const id = typeof a.coin === "string" ? a.coin.trim() : "";
   const found = pack.ids.get(id);
   if (!found) return { ok: false, why: `coin ${clean(id, 20) || "null"} is not an id in this pack` };
+  if (action === "buy" && found.notOpen) return { ok: false, why: `coin ${id}'s pool is not open yet: it cannot be bought` };
   if (action === "buy") {
     const amount = num(a.amountBnb);
     if (amount === null) return { ok: false, why: "a buy needs amountBnb" };
