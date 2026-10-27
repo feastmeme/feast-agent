@@ -56,6 +56,11 @@ export class MarketFeed {
     return this.mode === "snapshot" ? this.client.held : null;
   }
 
+  /** Run 24: the trades of the last 15 minutes from every snapshot this feed held (`recent.ts`); empty in the legacy mode. */
+  recent(now: number): Record<string, unknown>[] {
+    return this.mode === "snapshot" ? this.client.recent.list(now) : [];
+  }
+
   constructor(private readonly d: FeedDeps) {
     this.indexer = (d.indexer ?? INDEXER_URL).replace(/\/+$/, "");
     this.client = new SnapshotClient({ site: d.site, fetch: d.fetch, now: d.now, random: d.random, pollSeconds: d.pollSeconds, timeoutMs: d.timeoutMs, log: d.log, onStale: d.onStale, cache: d.cache });

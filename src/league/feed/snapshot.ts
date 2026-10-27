@@ -5,6 +5,7 @@ import { getAddress, isAddress, type Address } from "viem";
 import { withHostHeaders } from "../headers.ts";
 import { writeFileAtomic } from "../store.ts";
 import { Backoff, failureOf, type Failure, type FeedLog } from "./backoff.ts";
+import { RecentTrades } from "./recent.ts";
 import { comparePosition, CURSOR_RE, decodeCursor } from "./events.ts";
 
 /**
@@ -308,6 +309,8 @@ export class SnapshotClient {
   private goodAt: number | null;
   private readonly startedAt: number;
   private servedStale = false;
+  /** Run 24: the trades of every tail held in the last 15 minutes (`recent.ts`), in memory only. */
+  readonly recent = new RecentTrades();
 
   /** The options' fetch, with the host's and the release's headers on feast.meme (task 975). */
   private readonly fetchImpl: typeof fetch;
@@ -320,6 +323,7 @@ export class SnapshotClient {
     this.snapshot = o.seed?.snapshot ?? null;
     this.goodAt = o.seed?.at ?? null;
     this.startedAt = o.now();
+    if (this.snapshot) this.recent.absorb(this.snapshot.events ?? [], this.startedAt);
   }
 
   get held(): FeastSnapshot | null {
@@ -375,6 +379,7 @@ export class SnapshotClient {
           // An older copy (a CDN's, after a newer one) never replaces what is held.
           if (!this.snapshot || !olderThan(parsed, this.snapshot)) {
             this.snapshot = parsed;
+            this.recent.absorb(parsed.events, now);
             this.etag = response.headers.get("etag");
             outcome = { kind: "new", snapshot: parsed };
           }
@@ -416,6 +421,7 @@ export class SnapshotClient {
         if (!tail) failure = { status: 200, reason: "HTTP 200, not the events tail" };
         else {
           this.tail = tail;
+          this.recent.absorb(tail.events, this.o.now());
           this.tailEtag = response.headers.get("etag");
         }
       } else failure = failureOf(response.status, response.headers.get("retry-after"), now) ?? { status: response.status, reason: `HTTP ${response.status}` };

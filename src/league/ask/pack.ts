@@ -10,6 +10,7 @@ import type { Limits } from "../limits.ts";
 import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES } from "../prompt/constants.ts";
 import type { DayView } from "../prompt/floor.ts";
 import { cleanWhy, WHY_MAX } from "../notes/trade.ts";
+import { pitLine, type PitView } from "../pit.ts";
 import { utc8 } from "../register/copy.ts";
 import { signInWarning } from "../session.ts";
 
@@ -95,6 +96,8 @@ export type PackInput = {
   launches: Launch[];
   /** Task 1020: the league players' trades of the last 2 minutes, newest first (names are other players' words). */
   players?: PlayerTrade[];
+  /** Run 24: the league's pit, checked and priced (`pit.ts`); null or absent: none named (the pack says so). */
+  pit?: PitView | null;
   quiet: number;
   standing: Standing | null;
   rules: { rule: string; text: string; source: string }[];
@@ -166,6 +169,8 @@ export function buildPack(input: PackInput): Pack {
       ? ["New launches, last 30 min (UNTRUSTED symbols):", "```untrusted", ...input.launches.map((x) => `${idOf.get(x.coin.toLowerCase()) ?? "?"} | ${shown(x.symbol)} | ${x.ageMinutes} min old | ${x.trades ?? "?"} trades | ${bnb(x.volumeBnb)} BNB | ${x.holders ?? "?"} holders`), "```"]
       : [];
   const sections: string[] = [
+    // Run 24: the pack's first line names the pit, whatever else is cut.
+    pitLine(input.pit, input.pit ? idOf.get(input.pit.coin.toLowerCase()) ?? null : null),
     `You are the decision maker for one Feast league agent, "${input.name}", trading Feast coins on BNB Smart Chain for its player. Each time you are asked you answer with exactly one action: buy, sell or hold. The runtime executes it within hard limits it enforces itself; your answer cannot change them.`,
     "",
     "Answer only with one JSON object matching this schema, and nothing else:",

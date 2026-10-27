@@ -58,8 +58,10 @@ export async function quoteSell(executor: Prep, chain: Marks, coin: Address, coi
 }
 
 /** The impact functions `picture` and `selfView` take, from one executor. */
-export function impacts(executor: Prep, chain: Marks): { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null> } {
+export function impacts(executor: Prep, chain: Marks): { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null>; buyQuote: (coin: Address, bnb: number) => Promise<QuoteOut | { error: string }> } {
   return {
+    // Run 24: the pit's quote, with the quoter's reason when it refuses (the pool's opening cap).
+    buyQuote: (coin, bnb) => quoteBuy(executor, coin, bnb).catch((error: unknown) => ({ error: String((error as Error)?.message ?? error) })),
     buy: async (coin, bnb) => {
       const q = await quoteBuy(executor, coin, bnb).catch(() => null);
       return q && !("error" in q) ? q.impactPct : null;

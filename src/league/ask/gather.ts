@@ -10,6 +10,7 @@ import { fromArena, fromField, readStanding, RULES, standing } from "../data/sta
 import type { FeastSnapshot } from "../feed/snapshot.ts";
 import { leftOut } from "../prompt/floor.ts";
 import { readPrompt } from "../prompt/host.ts";
+import { checkedPit, viewPit, type PitChain } from "../pit.ts";
 import { LeagueSite, type LeagueRead } from "../register/site.ts";
 import { readJson } from "../store.ts";
 import { readAskState, readJournal } from "./journal.ts";
@@ -28,13 +29,18 @@ export type GatherDeps = {
   agent: AgentConfig;
   now: number;
   wallet: Address | null;
-  chain: SelfChain & { quoteBnbE18(quote: Address): Promise<bigint> };
+  /** `coinInfo` and `spotQuotePerCoinE18` (run 24): the pit's quote check and its price from the pool; without them, no pit. */
+  chain: SelfChain & PitChain;
   snapshot: FeastSnapshot | null;
   fetch: typeof fetch;
   site: string;
   gate: { opensAt: number | null; open: boolean; noFloorTonight?: boolean; signInEndsAt?: number | null };
   feast: Address | null;
-  impacts?: { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null> };
+  /** `buyQuote` (run 24): the pit's quote, with the quoter's reason when it refuses (the opening cap). */
+  impacts?: { buy: (coin: Address, bnb: number) => Promise<number | null>; exit: (coin: Address, coins: bigint) => Promise<number | null>; buyQuote?: (coin: Address, bnb: number) => Promise<{ impactPct: number | null } | { error: string }> };
+  /** Run 24: the trades of the last 15 minutes the caller holds (the feed's `recent`); default the snapshot's tail. */
+  recent?: Record<string, unknown>[];
+  log?: (event: string, data: Record<string, unknown>) => void;
   /** The league's read, when the caller already has it (tests); default one GET. */
   league?: LeagueRead | null;
 };
@@ -82,6 +88,18 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     own,
   });
   // The exit impacts after the picture (addendum 6): the server's sale table first, the local quoter only where it falls short.
+  // Run 24: the pit, checked against the chain, priced from its pool and the quoter even with no trades (amendment A).
+  const roster = rosterOf(league?.field ?? league?.arena);
+  const checked = await checkedPit(league?.pit, d.chain, d.log);
+  const pitCoin = checked ? pictured.coins.find((c) => c.coin.toLowerCase() === checked.coin.toLowerCase()) ?? null : null;
+  const pit = checked
+    ? await viewPit(checked, { chain: d.chain, snapshotPriceBnb: pitCoin?.priceBnb ?? null, quote: d.impacts?.buyQuote, events: d.recent ?? d.snapshot?.events ?? [], roster, self: d.wallet, now: d.now })
+    : null;
+  if (pit && pitCoin) {
+    // Its row says the same: the pool's price where the snapshot has none, the quoter's impact where it gave one.
+    pitCoin.priceBnb ??= pit.priceBnb;
+    if (pit.impact && "pct" in pit.impact) pitCoin.impactPct = pit.impact.pct;
+  }
   const exits = await exitImpacts([...mine.positions, ...mine.ownCoin], pictured, d.impacts?.exit);
   const read = d.agent.prompt ? readPrompt(d.agent.prompt.path) : null;
   const state = readAskState(d.home, d.agent.name);
@@ -106,7 +124,8 @@ export async function gatherPack(d: GatherDeps): Promise<{ pack: Pack; input: Pa
     coins: pictured.coins,
     launches: pictured.launches,
     // Task 1020: who in the league bought or sold what in the last 2 minutes, joined by the field's (or the arena's) wallets.
-    players: playerTrades(d.snapshot?.events ?? [], d.now, rosterOf(league?.field ?? league?.arena), (q) => pictured.bnbPerQuote?.[q] ?? null, d.wallet),
+    players: playerTrades(d.snapshot?.events ?? [], d.now, roster, (q) => pictured.bnbPerQuote?.[q] ?? null, d.wallet),
+    pit,
     quiet: pictured.quiet,
     standing: leagueRead.standing,
     rules: RULES,

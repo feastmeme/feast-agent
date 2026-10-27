@@ -1272,7 +1272,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       // A read right before the ask (addendum 6): the pack sees the market as it is now, not as the slow cadence left it.
       if (feed && feed.due()) await feed.step({ events: false }).catch(() => []);
       // The pack (addenda 4 and 5): the book this runtime just saved, the snapshot the feed holds, the league, candles, impacts.
-      const gathered = await gatherPack({ home: deps.home, agent: agent!, now: startedAt, wallet, chain, snapshot: feed?.held() ?? null, fetch: deps.fetch ?? fetch, site: deps.site ?? siteFromEnv(), gate: { opensAt: gate.opensAt, open: gate.open, noFloorTonight: warmUpTonight(startedAt), signInEndsAt: session.end }, feast, impacts: impacts(executor, chain) });
+      const gathered = await gatherPack({ home: deps.home, agent: agent!, now: startedAt, wallet, chain, snapshot: feed?.held() ?? null, fetch: deps.fetch ?? fetch, site: deps.site ?? siteFromEnv(), gate: { opensAt: gate.opensAt, open: gate.open, noFloorTonight: warmUpTonight(startedAt), signInEndsAt: session.end }, feast, impacts: impacts(executor, chain), recent: feed?.recent(startedAt), log });
       const pack: Pack = gathered.pack;
       const input = gathered.input;
       log("ask.pack", { pack: pack.digest, chars: pack.text.length, coins: pack.ids.size, requests: gathered.requests });

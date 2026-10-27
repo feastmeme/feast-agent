@@ -1,4 +1,4 @@
-import { getAddress, isAddress, type Address } from "viem";
+import { getAddress, isAddress, type Address, type Hex } from "viem";
 
 import { failureOf, retrying, type Failure, type Retry } from "../feed/backoff.ts";
 import { withDoors } from "../doors.ts";
@@ -168,7 +168,15 @@ export type LeagueRead = {
   latestRuntime?: { tag: string; publishedAt: number | null; minSupported: string | null };
   /** Run 22: where a player gets help (`support.url`), as the page gives it; undefined when it does not. */
   support?: { url: string };
+  /**
+   * Task 975, run 24: the league's one permanent pit coin (`pit`), checked whole by `pitOf`; null when the page says
+   * none is named, undefined when it sends no key (an older site). The symbol and the name are the coin's own words.
+   */
+  pit?: Pit | null;
 };
+
+/** The pit as the page names it: the coin, its symbol and name (≤ 16 and ≤ 32), its quote token and its pool. */
+export type Pit = { coin: Address; symbol: string; name: string; quote: Address; poolId: Hex };
 
 /** One seated agent of `field=1`: names are other players' words. `trades` only when the page gives it. */
 export type FieldRow = { rank: number | null; name: string; wallet: string | null; pnlBnb: number; danger: boolean; eaten: { day: number | null; reason: string | null } | null; bodyCoin: string | null; hp: number | null; trades: number | null };
@@ -282,7 +290,26 @@ export function parseLeague(body: unknown): LeagueRead | null {
   if (latest) read.latestRuntime = latest;
   const support = supportOf(b.support);
   if (support) read.support = support;
+  if ("pit" in b) read.pit = pitOf(b.pit);
   return read;
+}
+
+/**
+ * `pit: { coin, symbol, name, quote, poolId } | null` (run 24), checked as `supportOf` and `latestRuntimeOf` are:
+ * `coin` and `quote` 0x and 40 hex, `poolId` 0x and 64 hex, `symbol` at most 16 characters and `name` at most 32, both
+ * not empty. Any field that fails makes no pit at all, never a partial one.
+ */
+export function pitOf(raw: unknown): Pit | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const address = (v: unknown) => (typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) ? getAddress(v) : null);
+  const text = (v: unknown, max: number) => (typeof v === "string" && v.trim() !== "" && [...v].length <= max ? v : null);
+  const coin = address(r.coin);
+  const quote = address(r.quote);
+  const poolId = typeof r.poolId === "string" && /^0x[0-9a-fA-F]{64}$/.test(r.poolId) ? (r.poolId.toLowerCase() as Hex) : null;
+  const symbol = text(r.symbol, 16);
+  const name = text(r.name, 32);
+  return coin && quote && poolId && symbol !== null && name !== null ? { coin, symbol, name, quote, poolId } : null;
 }
 
 /** `support: { url }`, checked (page data, shown to the player): an https URL of at most 200 characters, nothing else. */
