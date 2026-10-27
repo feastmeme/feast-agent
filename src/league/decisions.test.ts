@@ -596,10 +596,10 @@ describe("FL answer --reason: the hand-answered round, a hold's too", () => {
 describe("the docs say what goes up, in the same words", () => {
   const ROOT = join(import.meta.dirname, "..", "..");
   const PRIVACY = "Each round's action and its one-line reason go to feast.meme with the heartbeat and are shown publicly five minutes later, as notes are; the strategy text never leaves this machine — only an 8-character hash of it, for the site's operators.";
-  it("README, SKILL, ask-hosts and the CHANGELOG's unreleased entry carry the privacy sentence verbatim; FL answer's usage and the routine name --reason", () => {
+  it("README, SKILL, ask-hosts and the CHANGELOG's league-v5.1.5 entry carry the privacy sentence verbatim; FL answer's usage and the routine name --reason", () => {
     for (const f of ["README.md", "skills/feast-league/SKILL.md", "docs/league/ask-hosts.md"]) expect(readFileSync(join(ROOT, f), "utf8"), f).toContain(PRIVACY);
     const log = readFileSync(join(ROOT, "docs/CHANGELOG.md"), "utf8");
-    const unreleased = log.slice(log.indexOf("## Unreleased\n"), log.indexOf("## league-v"));
+    const unreleased = log.slice(log.indexOf("## league-v5.1.5\n"), log.indexOf("## league-v5.1.4\n"));
     expect(unreleased).toContain(PRIVACY);
     expect(unreleased).toContain("`FL answer --reason");
     expect(readFileSync(join(ROOT, "docs/league/ask-hosts.md"), "utf8")).toContain(`FL answer <name> '<the JSON object>' --reason "<one line: why, a hold's too>"`);

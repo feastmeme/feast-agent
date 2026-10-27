@@ -14,7 +14,7 @@ import { agentPaths, readJson, writeJsonAtomic } from "./store.ts";
 export const UPGRADE_COMMAND = "npx skills add feastmeme/feast-agent";
 
 /**
- * `league-vN`, `league-vN.M` or `league-vN.M.P` (addendum 11: league-v5.1; run 17: league-v5.1.1; run 19: league-v5.1.2; run 21: league-v5.1.3; task 1020: league-v5.1.4) → one number that
+ * `league-vN`, `league-vN.M` or `league-vN.M.P` (addendum 11: league-v5.1; run 17: league-v5.1.1; run 19: league-v5.1.2; run 21: league-v5.1.3; task 1020: league-v5.1.4; task 975 run 24: league-v5.1.5) → one number that
  * orders them (N + M/1000 + P/1000000); null for anything else.
  */
 export const releaseNumber = (tag: string | null | undefined): number | null => {
