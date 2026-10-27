@@ -108,7 +108,7 @@ describe("1. version awareness (G1)", () => {
   it("behind, current, absent: the status line, the You're in sentence, never an upgrade", () => {
     const behind = versionView(league(BEHIND).latestRuntime, T0)!;
     // Run 26: the release this build is.
-    expect(behind).toMatchObject({ current: "league-v5.1.6", latest: "league-v6", behind: true, unsupported: false });
+    expect(behind).toMatchObject({ current: "league-v5.1.7", latest: "league-v6", behind: true, unsupported: false });
     // Run 23: one line, the command that does it.
     expect(versionLine(behind)).toBe("runtime league-v6 is out, run FL upgrade");
     expect(versionLine(versionView(league(CURRENT).latestRuntime, T0))).toBeNull();
@@ -122,15 +122,16 @@ describe("1. version awareness (G1)", () => {
     expect(versionView({ tag: "league-v5.1.2", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
     expect(versionView({ tag: "league-v5.1.3", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
     expect(versionView({ tag: "league-v5.1.4", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
-    // Run 26: this build is league-v5.1.6: ahead of v5.1.5, behind v5.1.7.
+    // Run 26: this build is league-v5.1.7: ahead of v5.1.6 and v5.1.5, behind v5.1.8.
     expect(versionView({ tag: "league-v5.1.5", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
     expect(versionView({ tag: "league-v5.1.6", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
-    expect(versionView({ tag: "league-v5.1.7", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: true });
+    expect(versionView({ tag: "league-v5.1.7", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: false });
+    expect(versionView({ tag: "league-v5.1.8", publishedAt: null, minSupported: "league-v4" }, T0)).toMatchObject({ behind: true });
     expect(league({ latestRuntime: { tag: "league-v5.1.4", publishedAt: null, minSupported: "league-v4" } }).latestRuntime).toMatchObject({ tag: "league-v5.1.4" });
-    expect(versionLine(versionView({ tag: "league-v7", publishedAt: null, minSupported: "league-v6" }, T0))).toBe("runtime league-v7 is out, run FL upgrade (league-v5.1.6 is older than league-v6, the oldest feast.meme still supports: upgrade before the next dinner)");
+    expect(versionLine(versionView({ tag: "league-v7", publishedAt: null, minSupported: "league-v6" }, T0))).toBe("runtime league-v7 is out, run FL upgrade (league-v5.1.7 is older than league-v6, the oldest feast.meme still supports: upgrade before the next dinner)");
     const opens = { kind: "open" as const };
     const shown = { preset: "steady", idleMinutes: 30, ask: { every: 5, with: "claude" } };
-    expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(behind, "en"))).toMatch(/ Runtime league-v6 is out \(this is league-v5\.1\.6\): run `FL upgrade`\.$/);
+    expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(behind, "en"))).toMatch(/ Runtime league-v6 is out \(this is league-v5\.1\.7\): run `FL upgrade`\.$/);
     expect(doneRunning("maplegrin", opens, "en", shown, "strategy.md", upgradeSentence(versionView(league(CURRENT).latestRuntime, T0), "en"))).toBe(doneRunning("maplegrin", opens, "en", shown));
     expect(upgradeSentence(behind, "zh")).toContain("`FL upgrade`");
   });
@@ -458,8 +459,8 @@ describe("run 17: the authenticated me= read every 9 minutes, in every mode", ()
 // --- run 23: the opt-in auto-upgrade in the loop -------------------------------------------------------------
 
 describe("run 23: the loop's auto-upgrade (off by default; on, it starts FL upgrade --auto when the rails hold)", () => {
-  // Run 26: the patch after this build (league-v5.1.6).
-  const PATCH = (canaryAt: number) => ({ latestRuntime: { tag: "league-v5.1.7", publishedAt: new Date(canaryAt - HOUR).toISOString(), minSupported: "league-v4", autoUpgradeFrom: new Date(canaryAt).toISOString() } });
+  // Run 26: the patch after this build (league-v5.1.7).
+  const PATCH = (canaryAt: number) => ({ latestRuntime: { tag: "league-v5.1.8", publishedAt: new Date(canaryAt - HOUR).toISOString(), minSupported: "league-v4", autoUpgradeFrom: new Date(canaryAt).toISOString() } });
   const KEY = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA0000000000000000000000000000000000000000000=\n-----END PUBLIC KEY-----\n";
   async function loop(o: { on?: "agent" | "env"; key?: string | null }) {
     const { home } = setup({ ask: true });
@@ -489,8 +490,8 @@ describe("run 23: the loop's auto-upgrade (off by default; on, it starts FL upgr
     // The loop's first league read (the one before the loop only opens the gate).
     expect(on.spawned[0]! - (DINNER - 5 * HOUR)).toBeLessThanOrEqual(5 * MIN);
     for (let i = 1; i < on.spawned.length; i++) expect(on.spawned[i]! - on.spawned[i - 1]!).toBeGreaterThanOrEqual(HOUR);
-    expect(on.log[0]).toMatchObject({ event: "upgrade.auto.start", from: "league-v5.1.6", to: "league-v5.1.7" });
-    expect(notices(on.home).some((n) => n.text.startsWith("auto-upgrade: league-v5.1.6 → league-v5.1.7 now"))).toBe(true);
+    expect(on.log[0]).toMatchObject({ event: "upgrade.auto.start", from: "league-v5.1.7", to: "league-v5.1.8" });
+    expect(notices(on.home).some((n) => n.text.startsWith("auto-upgrade: league-v5.1.7 → league-v5.1.8 now"))).toBe(true);
   }, 60_000);
 
   it("on by FL_AUTO_UPGRADE=1, but no release key: it waits, and says why in its log, once an hour", async () => {

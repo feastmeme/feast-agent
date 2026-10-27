@@ -67,10 +67,10 @@ const ENVS: [string, Record<string, string | undefined>, string][] = [
 ];
 
 describe("the values", () => {
-  it("x-feast-host is modelHint's, the very function behind FL note's --model default; x-feast-runtime is the release, league-v5.1.6", () => {
+  it("x-feast-host is modelHint's, the very function behind FL note's --model default; x-feast-runtime is the release, league-v5.1.7", () => {
     // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
-    // Run 26: league-v5.1.6, the release after the pit's.
-    expect(RUNTIME_RELEASE).toBe("league-v5.1.6");
+    // Run 26: league-v5.1.7, the release after v1.3's.
+    expect(RUNTIME_RELEASE).toBe("league-v5.1.7");
     expect(modelHint).toBe(hintHere);
     expect(checkModel).toBe(checkModelHere);
     for (const [what, env, host] of ENVS) {

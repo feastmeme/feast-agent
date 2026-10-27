@@ -373,9 +373,9 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
-| GET feast.meme /api/league | grok | league-v5.1.6 | accept, x-feast-health |
-| POST feast.meme /api/league/notes | grok | league-v5.1.6 | accept, content-type, cookie |
-| GET feast.meme /api/v1/snapshot | grok | league-v5.1.6 | accept |
+| GET feast.meme /api/league | grok | league-v5.1.7 | accept, x-feast-health |
+| POST feast.meme /api/league/notes | grok | league-v5.1.7 | accept, content-type, cookie |
+| GET feast.meme /api/v1/snapshot | grok | league-v5.1.7 | accept |
 | GET indexer /v1/board | — | — | accept |
 
 13 requests in all: 10 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
@@ -384,9 +384,9 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
-| GET feast.meme /api/league | claude | league-v5.1.6 | accept, x-feast-health |
-| POST feast.meme /api/league/notes | claude | league-v5.1.6 | accept, content-type, cookie |
-| GET feast.meme /api/v1/snapshot | claude | league-v5.1.6 | accept |
+| GET feast.meme /api/league | claude | league-v5.1.7 | accept, x-feast-health |
+| POST feast.meme /api/league/notes | claude | league-v5.1.7 | accept, content-type, cookie |
+| GET feast.meme /api/v1/snapshot | claude | league-v5.1.7 | accept |
 | GET indexer /v1/board | — | — | accept |
 
 13 requests in all: 10 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
@@ -395,9 +395,9 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
-| GET feast.meme /api/league | codex | league-v5.1.6 | accept, x-feast-health |
-| POST feast.meme /api/league/notes | codex | league-v5.1.6 | accept, content-type, cookie |
-| GET feast.meme /api/v1/snapshot | codex | league-v5.1.6 | accept |
+| GET feast.meme /api/league | codex | league-v5.1.7 | accept, x-feast-health |
+| POST feast.meme /api/league/notes | codex | league-v5.1.7 | accept, content-type, cookie |
+| GET feast.meme /api/v1/snapshot | codex | league-v5.1.7 | accept |
 | GET indexer /v1/board | — | — | accept |
 
 13 requests in all: 10 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
@@ -406,9 +406,9 @@ A short run each (the gate's `/api/league`, the market, a note's flush), then on
 
 | request | x-feast-host | x-feast-runtime | other headers |
 | --- | --- | --- | --- |
-| GET feast.meme /api/league | other | league-v5.1.6 | accept, x-feast-health |
-| POST feast.meme /api/league/notes | other | league-v5.1.6 | accept, content-type, cookie |
-| GET feast.meme /api/v1/snapshot | other | league-v5.1.6 | accept |
+| GET feast.meme /api/league | other | league-v5.1.7 | accept, x-feast-health |
+| POST feast.meme /api/league/notes | other | league-v5.1.7 | accept, content-type, cookie |
+| GET feast.meme /api/v1/snapshot | other | league-v5.1.7 | accept |
 | GET indexer /v1/board | — | — | accept |
 
 13 requests in all: 10 to feast.meme, each with both headers: true; 3 to the indexer, any with either: false.
@@ -656,7 +656,7 @@ The notifications (the season and the release):
 | 20:43 | steady | sell | MOTHFEED 0x0000…c0e3 | 0.005881 | 5 trades, 0.027762 BNB: **passed** |
 | 21:10 | host | sell | NOODFEED 0x0000…c0e1 | 0.00392 | 1 trade, 0.00392 BNB: not yet |
 
-The release is told once a league day: once before 21:00 UTC+8 and once after it, the dinner being a new league day; `FL status` says `runtime league-v5.1.6 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent` meanwhile. Nothing upgrades by itself.
+The release is told once a league day: once before 21:00 UTC+8 and once after it, the dinner being a new league day; `FL status` says `runtime league-v5.1.7 · latest league-v6 · upgrade: npx skills add feastmeme/feast-agent` meanwhile. Nothing upgrades by itself.
 
 ## (n) The warm-up dinner: day 1, the AI only holds, the floor unmet at 20:40 UTC+8
 

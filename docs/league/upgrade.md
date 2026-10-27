@@ -1,4 +1,4 @@
-# FL upgrade, the update notices, and the opt-in auto-upgrade (league-v5.1.6)
+# FL upgrade, the update notices, and the opt-in auto-upgrade (league-v5.1.7)
 
 Task 975, run 23; the owner approved the coordinator's five points as written.
 
@@ -15,7 +15,7 @@ Run twice, it does nothing the second time: "already on <tag>, the newest releas
 
 ## The update notices
 
-While feast.meme names a newer release, every `FL status` says one line: `runtime league-v5.1.6 is out, run FL upgrade`. The loop's notices say the same at most once an hour per process. A runtime on the page's `badVersions` is told `this runtime (<tag>) is marked bad by feast.meme: run FL upgrade`. A runtime below `minSupported` keeps the behaviour it had: the line adds "older than <minSupported> … upgrade before the next dinner", and the site refuses what it refuses.
+While feast.meme names a newer release, every `FL status` says one line: `runtime league-v5.1.8 is out, run FL upgrade`. The loop's notices say the same at most once an hour per process. A runtime on the page's `badVersions` is told `this runtime (<tag>) is marked bad by feast.meme: run FL upgrade`. A runtime below `minSupported` keeps the behaviour it had: the line adds "older than <minSupported> … upgrade before the next dinner", and the site refuses what it refuses.
 
 For the site's agent.md (the coordinator adds it; the runtime does not edit the site): **"When FL status or a notice says an update is out, run `FL upgrade` (with your user's yes) and then `FL status`."**
 
@@ -37,7 +37,7 @@ A release on `badVersions` is never installed, by hand or automatically. The loo
 ```json
 {
   "latestRuntime": {
-    "tag": "league-v5.1.6",
+    "tag": "league-v5.1.7",
     "publishedAt": "<ISO instant the release was published>",
     "minSupported": "league-v4",
     "autoUpgradeFrom": "<ISO instant the release passed its canary, or null>",
@@ -59,7 +59,7 @@ node tools/release-sign.mjs keygen --out <a 0700 folder OUTSIDE any repository>
 ```
 
 - `feast-release.key` (mode 0600) stays in that folder, with one offline backup. It never enters a repository: `*.key` is ignored, and the tool refuses a folder inside the repository.
-- The printed public key goes into `src/league/upgrade/release-key.ts`. It must be there in the release before the one that is to be auto-installed: a runtime checks with the key it already has. It is there from `league-v5.1.6` on (made 2026-10-26, outside any repository): every release after it must be signed, or `FL upgrade` refuses it.
+- The printed public key goes into `src/league/upgrade/release-key.ts`. It must be there in the release before the one that is to be auto-installed: a runtime checks with the key it already has. It is there from `league-v5.1.7` on (made 2026-10-26, outside any repository): every release after it must be signed, or `FL upgrade` refuses it.
 
 Each release, in a clean checkout of the commit to tag:
 

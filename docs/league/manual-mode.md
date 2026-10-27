@@ -31,7 +31,7 @@ The sandbox has Node 20, no git and no curl; `baw` 1.12.1 is at `/usr/local/bin`
 ```bash
 mkdir -p ~/node22 && cd ~/node22 && node -e "fetch('https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.gz').then(r => r.arrayBuffer()).then(b => require('fs').writeFileSync('node.tar.gz', Buffer.from(b)))" && tar xzf node.tar.gz --strip-components=1 && rm node.tar.gz
 export PATH=~/node22/bin:$PATH && node --version
-export PATH=~/node22/bin:$PATH && mkdir -p ~/.feast-league/runtime && cd ~/.feast-league/runtime && node -e "fetch('https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.6').then(r => r.arrayBuffer()).then(b => require('fs').writeFileSync('runtime.tar.gz', Buffer.from(b)))" && tar xzf runtime.tar.gz --strip-components=1 && rm runtime.tar.gz && npm ci --omit=dev
+export PATH=~/node22/bin:$PATH && mkdir -p ~/.feast-league/runtime && cd ~/.feast-league/runtime && node -e "fetch('https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.7').then(r => r.arrayBuffer()).then(b => require('fs').writeFileSync('runtime.tar.gz', Buffer.from(b)))" && tar xzf runtime.tar.gz --strip-components=1 && rm runtime.tar.gz && npm ci --omit=dev
 ```
 
 `tar` may print `chown` errors: they are harmless. The wallet signs in through AI Pro's own sign-in panel (a 364-day session), not `baw auth signin`. Then run `FL doctor`; every check should pass.

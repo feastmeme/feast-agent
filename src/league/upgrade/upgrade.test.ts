@@ -394,8 +394,8 @@ describe("FL upgrade and the notices, through the binary (a site of the test's o
 
   it("FL status: the update line; a bad version said; FL start --auto-upgrade kept and shown; a non-entered manual agent is told no gate holds it", async () => {
     const base = temp("st");
-    // Run 26: newer than this build (league-v5.1.6).
-    let pointer: Record<string, unknown> = { tag: "league-v5.1.7", publishedAt: new Date().toISOString(), minSupported: "league-v4" };
+    // Run 26: newer than this build (league-v5.1.7).
+    let pointer: Record<string, unknown> = { tag: "league-v5.1.8", publishedAt: new Date().toISOString(), minSupported: "league-v4" };
     const s = await site(() => pointer);
     try {
       const home = join(base, "home");
@@ -405,9 +405,9 @@ describe("FL upgrade and the notices, through the binary (a site of the test's o
       if (!planned.ok) throw new Error("plan");
       saveAgent(home, confirmAgent(planned.agent));
       const env = { HOME: join(base, "user"), FEAST_LEAGUE_HOME: home, FEAST_LEAGUE_SITE: s.url, FEAST_LEAGUE_INDEXER: s.url, FEAST_LEAGUE_BAW: "/nonexistent", FEAST_MAINNET_RPC_URL: "http://127.0.0.1:9", FEAST_LEAGUE_DAEMON: "off" };
-      expect((await cli(["status", "demo"], env)).stdout).toContain("runtime league-v5.1.7 is out, run FL upgrade");
-      pointer = { ...pointer, badVersions: ["league-v5.1.6"] };
-      expect((await cli(["status", "demo"], env)).stdout).toContain("this runtime (league-v5.1.6) is marked bad by feast.meme: run FL upgrade (league-v5.1.7 is out)");
+      expect((await cli(["status", "demo"], env)).stdout).toContain("runtime league-v5.1.8 is out, run FL upgrade");
+      pointer = { ...pointer, badVersions: ["league-v5.1.7"] };
+      expect((await cli(["status", "demo"], env)).stdout).toContain("this runtime (league-v5.1.7) is marked bad by feast.meme: run FL upgrade (league-v5.1.8 is out)");
       const manual = await cli(["start", "demo", "--manual", "--auto-upgrade"], env);
       expect(manual.stdout).toContain("This agent is not an entered seat, so no season gate holds it: FL buy trades whenever you run it.");
       expect(loadAgent(home, "demo")).toMatchObject({ manual: true, autoUpgrade: true });

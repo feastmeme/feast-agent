@@ -2,9 +2,9 @@
 
 The league runtime's releases, as the skill pins them (`skills/feast-league/references/setup.md`). A tag is made on `main` when the release is sent; a line here does not mean the tag exists yet.
 
-## league-v5.1.7 (unreleased)
+## league-v5.1.7
 
-The release after v1.3's (task 975, runs 23 and 26, on the owner's rulings of 2026-10-26 and 2026-10-27). Not tagged yet. `minSupported` stays `league-v4`.
+The release after v1.3's (task 975, runs 23 and 26, on the owner's rulings of 2026-10-26 and 2026-10-27): `FL upgrade` and the signed release, the pack's league reads, the floor keeper's rounds and the fixes. `minSupported` stays `league-v4`.
 
 - **`FL upgrade`.** It reads `latestRuntime` and fetches the tag into a new folder beside the active runtime: a git clone where the runtime is one, else the tag's tarball, unpacked with no `chown`. It checks every file against the release's manifest and the signature with the shipped release key, then runs `npm ci`. It stops the running agents, points the active runtime path at the new folder (parking the old one the first time), refreshes the installed skill's files and restarts the agents as they ran (by their daemon, or with their flags). Then it runs `FL doctor`. A check that newly fails, or an agent that does not start, rolls it all back. Twice is once. `--check` says what it would do.
 - **The update notices.** `FL status` and the loop's notices (once an hour per process) say "runtime <tag> is out, run FL upgrade"; a runtime on the page's `badVersions` is told it is marked bad. Below `minSupported`, nothing changes.
@@ -20,6 +20,7 @@ The release after v1.3's (task 975, runs 23 and 26, on the owner's rulings of 20
 - **Launches and L3** (item 3). A launch is expected to send no BNB (the SDK's launch request carries value 0, pinned by a test); should a prepared launch carry a value, the runtime logs `launch.value` and guards it again: that BNB is at work like a buy's and must fit the 0.15 BNB cap with the wallet's other agents (L3).
 - **Stale trade notes are dropped** (item 2). Each trade's public note is stamped with its fill time; at the flush, one more than 10 minutes after its fill (it waited out a 429, or a notes session that was not open) is dropped, never sent as if fresh. Every other note (FL note, a hold's line, an answer's note, the sign-in's) keeps waiting as before.
 - **Coins sold outside the runtime stop counting** (item 5). At the start and once per tick, each position is checked against the wallet's balance of its coin, shrink-only: when the wallet holds fewer coins than the book says (sold in the Binance app, say), the position is cut to the wallet's balance and its cost basis in proportion (gone at 0), with one `book.shrunk` log line; the book is never grown, nothing is traded, no PnL is booked, and a coin with a send in flight or an unreadable balance waits for the next pass.
+- **The release.** `league-v5.1.7`.
 
 ## league-v5.1.6
 

@@ -80,9 +80,9 @@ describe("the skill, the setup, the release notes", () => {
     const setup = read("skills/feast-league/references/setup.md");
     expect(setup).toContain("--branch league-v5");
     expect(setup).not.toContain("--branch league-v4");
-    // Run 26: FL upgrade first ships in league-v5.1.6 (league-v5.1.5 is the pit's release).
-    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.5` moves to `league-v5.1.6` once by hand");
-    expect(setup).toContain("From league-v5.1.6 on, **`FL upgrade`** moves a runtime to the newest release");
+    // Run 26: FL upgrade first ships in league-v5.1.7 (league-v5.1.5 is the pit's release, league-v5.1.6 v1.3's).
+    expect(setup).toContain("A runtime installed at `league-v1` … `league-v5.1.6` moves to `league-v5.1.7` once by hand");
+    expect(setup).toContain("From league-v5.1.7 on, **`FL upgrade`** moves a runtime to the newest release");
     expect(setup).toContain("If `FL --help` does not list `--no-autopilot` and `--every`, the runtime is older than `league-v5`: ask the user before you update it.");
   });
 
@@ -350,7 +350,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
     expect(section9).toContain("passes `--host grok`");
     // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
     // Run 26: the release this build is.
-    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.6`)");
+    expect(section9).toContain("`x-feast-host` (claude, codex, grok or other) and `x-feast-runtime` (`league-v5.1.7`)");
     expect(skill).toMatch(/Every request `FL` makes to feast\.meme carries two headers: `x-feast-host`/);
   });
 
@@ -359,7 +359,7 @@ describe("the autopilot backup and the two headers (task 975)", () => {
     expect(log.indexOf("## league-v5")).toBeLessThan(log.indexOf("## league-v4"));
     const v5 = log.slice(log.indexOf("## league-v5"), log.indexOf("## league-v4"));
     for (const word of ["steady", "--no-autopilot", "30 minutes", "x-feast-host", "x-feast-runtime"]) expect(v5, word).toContain(word);
-    // Run 26: the newest heading may say it is not tagged yet ("## league-v5.1.6 (unreleased)").
+    // Run 26: the newest heading may say it is not tagged yet ("## league-v5.1.7 (unreleased)").
     expect(/^## (league-v\d+(?:\.\d+){0,2})(?: \(unreleased\))?$/m.exec(log)![1]).toBe(RUNTIME_RELEASE);
   });
 
@@ -709,7 +709,7 @@ describe("task 975, run 21: league-v5.1.3, manual mode for Binance AI Pro", () =
       expect(text).toContain("export PATH=~/node22/bin:$PATH");
       // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits (league-v5.1.4: the release)
       // Run 26: the release this build is.
-      expect(text).toContain("https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.6");
+      expect(text).toContain("https://codeload.github.com/feastmeme/feast-agent/tar.gz/refs/tags/league-v5.1.7");
       expect(text).toContain("npm ci --omit=dev");
       expect(text).toMatch(/chown/);
     }
@@ -769,16 +769,16 @@ describe("task 975, run 22: FL report, the support line, the Monday start in the
   });
 });
 
-describe("task 975, run 23: FL upgrade, the notices, the opt-in auto-upgrade (league-v5.1.6)", () => {
-  // Run 26: league-v5.1.4 went out without it and league-v5.1.5 is the pit's: FL upgrade rides league-v5.1.6.
+describe("task 975, run 23: FL upgrade, the notices, the opt-in auto-upgrade (league-v5.1.7)", () => {
+  // Run 26: league-v5.1.4 went out without it, league-v5.1.5 is the pit's and league-v5.1.6 v1.3's: FL upgrade rides league-v5.1.7.
   const log = read("docs/CHANGELOG.md");
-  const v514 = log.slice(log.indexOf("## league-v5.1.6 (unreleased)\n"), log.indexOf("## Unreleased\n"));
-  const notes = read("docs/league/release-v5.1.6.md");
+  const v514 = log.slice(log.indexOf("## league-v5.1.7\n"), log.indexOf("## league-v5.1.6\n"));
+  const notes = read("docs/league/release-v5.1.7.md");
   const up = read("docs/league/upgrade.md");
   it("the release notes say auto-upgrade is off by default this season, and that S2 may turn it on after a signature and a week of logs", () => {
     expect(notes).toContain("**Auto-upgrade is opt-in, and off by default this season.**");
     expect(notes).toContain("Season 2 may turn it on by default, after a signed release and a week of logs.");
-    expect(notes).toContain("A patch on `league-v5.1.5`. `minSupported` stays `league-v4`");
+    expect(notes).toContain("A patch on `league-v5.1.6`. `minSupported` stays `league-v4`");
     for (const w of ["`FL upgrade`", "**off by default this season**", "(a)", "(b)", "(c)", "(d)", "`badVersions`", "Emergencies still raise `minSupported`", "`minSupported` stays `league-v4`"]) expect(v514, w).toContain(w);
   });
   it("upgrade.md: the four rails, emergencies through minSupported, the pointer's shape, the key kept outside the repository, the agent.md sentence", () => {
