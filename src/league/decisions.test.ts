@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { getAddress, type Address } from "viem";
@@ -22,6 +22,7 @@ import {
   readDecisionsState,
   resultOfJournal,
   resultOfOutcome,
+  rowSecrets,
   sendDecisions,
   strategyOf,
   writeKeeper,
@@ -161,6 +162,31 @@ describe("the ring on disk", () => {
     const [kept] = readDecisions(home, "demo");
     expect(kept!.reason).toContain("mine self and self");
     expect(kept!.result).toMatch(/^failed: execute: 0xabab…abab 0x0000…c0e1 at ~/);
+  });
+});
+
+describe("named secrets never reach a row", () => {
+  it("the notes token, a keyed RPC or indexer URL and the agent's ask key (its variable or its stored file), wherever they appear in a cause", () => {
+    const home = tempDir();
+    saveSession(home, { version: 1, agentId: "maplegrin", season: 1, token: "rawnotestoken-1018", expiresAt: null, at: new Date(T0).toISOString() });
+    mkdirSync(agentPaths(home, "demo").dir, { recursive: true });
+    writeFileSync(join(agentPaths(home, "demo").dir, "ask-key"), "stored-ask-key-1018\n");
+    const env = { FEAST_MAINNET_RPC_URL: "https://rpc.test/keyed-path-1018", FEAST_LEAGUE_INDEXER: "https://indexer.test/v1-1018", MY_ENDPOINT_KEY: "env-ask-key-1018" };
+    const fromFile = rowSecrets(home, { name: "demo", ask: { every: 5, with: "openai", model: "m", keyEnv: null } }, env);
+    const fromEnv = rowSecrets(home, { name: "demo", ask: { every: 5, with: "openai", model: "m", keyEnv: "MY_ENDPOINT_KEY" } }, env);
+    expect(fromFile).toEqual(["rawnotestoken-1018", "https://rpc.test/keyed-path-1018", "https://indexer.test/v1-1018", "stored-ask-key-1018"]);
+    expect(fromEnv.at(-1)).toBe("env-ask-key-1018");
+    const cause = "the endpoint said 401 for env-ask-key-1018 and stored-ask-key-1018 via https://rpc.test/keyed-path-1018 (session rawnotestoken-1018)";
+    const r = decisionRow({ at: T0, source: "runtime-ask", action: "none", reason: cause, result: `failed: ${cause}`, strategy, keeper: KEEPER_OFF }, { home, secrets: [...fromFile, ...fromEnv] });
+    for (const secret of ["rawnotestoken-1018", "https://rpc.test/keyed-path-1018", "stored-ask-key-1018", "env-ask-key-1018"]) {
+      expect(r.reason).not.toContain(secret);
+      expect(r.result).not.toContain(secret);
+    }
+    expect(r.result).toBe("failed: the endpoint said 401 for <redacted> and <redacted> via <redacted> (session <redacted>)");
+    // A secret across the 160th character: scrubbed whole before the cut, never left in part.
+    const across = decisionRow({ at: T0, source: "runtime-ask", action: "none", reason: "", result: resultOfJournal(`error: ${"y".repeat(140)} rawnotestoken-1018 and more`), strategy, keeper: KEEPER_OFF }, { home, secrets: fromFile });
+    expect(across.result).not.toMatch(/rawnot/);
+    expect(points(across.result)).toBeLessThanOrEqual(160);
   });
 });
 

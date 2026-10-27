@@ -4,10 +4,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { AgentConfig } from "./agent.ts";
+import { endpointKey } from "./ask/host.ts";
 import { clean } from "./enter/copy.ts";
 import { defaultPersonaOf, type PersonaKey } from "./enter/strategy.ts";
 import { HOST_DETAIL_HEADER, HOST_HEADER, hostHeaders, RUNTIME_RELEASE } from "./headers.ts";
-import { recordedAgentId } from "./notes/session.ts";
+import { liveToken, recordedAgentId } from "./notes/session.ts";
 import { readPrompt } from "./prompt/host.ts";
 import { scrub } from "./report.ts";
 import { agentPaths, appendJsonl, readJson, writeFileAtomic, writeJsonAtomic } from "./store.ts";
@@ -25,8 +26,9 @@ import { agentPaths, appendJsonl, readJson, writeFileAtomic, writeJsonAtomic } f
  *                                       floor keeper switch, for `FL answer`'s rows
  *
  * Neither holds a wallet address, a key or a path: every line is scrubbed as `FL report` scrubs (an address or a hash
- * as its 6+4, a home folder as `~`). The strategy's text never leaves this machine: only its kind and the first 8 hex
- * of a sha256 (the prompt's, the script file's, or the preset's canonical parameters).
+ * as its 6+4, a key by its shape, a URL's query, a home folder as `~`, and by value the notes token, the keyed RPC and
+ * indexer URLs and the agent's ask key). The strategy's text never leaves this machine: only its kind and the first 8
+ * hex of a sha256 (the prompt's, the script file's, or the preset's canonical parameters).
  */
 
 export const DECISIONS_KEPT = 30;
@@ -67,19 +69,40 @@ export const keeperOf = (on: boolean, why: string | null): DecisionKeeper => (on
 
 // --- one line of a row ------------------------------------------------------------------------------------------
 
-/** One line, at most `max` characters: the wallet as `self`, any address or hash as its 6+4, no key or token, the home folders as `~`. */
-export function decisionLine(text: string, max: number, o: { home?: string; wallet?: string | null } = {}): string {
+type LineOptions = { home?: string; wallet?: string | null; secrets?: string[] };
+
+/** What a row must never carry, by value, as `FL report` names it: the notes token, the keyed RPC and indexer URLs, the agent's ask key. */
+export function rowSecrets(home: string, agent?: Pick<AgentConfig, "name" | "ask"> | null, env: Record<string, string | undefined> = process.env): string[] {
+  const read = (f: () => string | null | undefined) => {
+    try {
+      return f() ?? "";
+    } catch {
+      return "";
+    }
+  };
+  return [
+    read(() => liveToken(home)),
+    ...["FEAST_MAINNET_RPC_URL", "FEAST_MAINNET_RPC_FALLBACK", "FEAST_LEAGUE_INDEXER", "GEMINI_API_KEY"].map((k) => env[k]?.trim() ?? ""),
+    read(() => (agent ? endpointKey({ home, name: agent.name, keyEnv: agent.ask?.keyEnv ?? null, env }) : null)),
+  ].filter((s) => s.length >= 6);
+}
+
+/** One line, at most `max` characters: the wallet as `self`, any address or hash as its 6+4, no key, token or named secret, the home folders as `~`. */
+export function decisionLine(text: string, max: number, o: LineOptions = {}): string {
   let t = text;
   if (o.wallet) t = t.split(o.wallet).join("self").split(o.wallet.toLowerCase()).join("self");
   const homes = [{ path: homedir(), as: "~" }, ...(o.home ? [{ path: o.home, as: "<league-home>" }] : [])];
-  return clean(scrub(t, { homes, secrets: [] }), max);
+  return clean(scrub(t, { homes, secrets: o.secrets ?? [] }), max);
 }
 
 const RESULT = /^(?:ok|refused|failed)(?:: .+)?$/;
 
-/** `ok`, `refused` or `failed`, and its one sentence when there is one. */
-export function decisionResult(kind: "ok" | "refused" | "failed", sentence = "", o: { home?: string; wallet?: string | null } = {}): string {
-  const said = decisionLine(sentence, DECISION_RESULT_MAX - kind.length - 2, o);
+/**
+ * `ok`, `refused` or `failed`, and its one sentence when there is one, on one line. Neither scrubbed nor cut here: the
+ * row scrubs the whole text, named secrets first, and only then cuts it to 160, so no secret is ever cut in two.
+ */
+export function decisionResult(kind: "ok" | "refused" | "failed", sentence = ""): string {
+  const said = clean(sentence, Number.POSITIVE_INFINITY);
   return said ? `${kind}: ${said}` : kind;
 }
 
@@ -189,7 +212,7 @@ export function hostTag(env: Record<string, string | undefined> = process.env): 
 /** One row in the contract's shape: every field within its limit, the reason and the result scrubbed to one line. */
 export function decisionRow(
   d: { at: number | string; source: DecisionSource; action: DecisionAction; reason: string; result: string; strategy: DecisionStrategy; keeper: DecisionKeeper },
-  o: { home?: string; wallet?: string | null; env?: Record<string, string | undefined> } = {},
+  o: LineOptions & { env?: Record<string, string | undefined> } = {},
 ): DecisionRow {
   const result = decisionLine(d.result, DECISION_RESULT_MAX, o);
   return {
@@ -197,7 +220,7 @@ export function decisionRow(
     source: d.source,
     action: d.action,
     reason: decisionLine(d.reason, DECISION_REASON_MAX, o),
-    result: RESULT.test(result) ? result : decisionResult("failed", d.result, o),
+    result: RESULT.test(result) ? result : decisionLine(decisionResult("failed", d.result), DECISION_RESULT_MAX, o),
     strategy: { kind: d.strategy.kind.slice(0, SHORT_MAX), sha8: d.strategy.sha8, ...(d.strategy.persona ? { persona: d.strategy.persona } : {}) },
     keeper: { on: d.keeper.on, mode: clean(d.keeper.mode, SHORT_MAX) },
     runtime: RUNTIME_RELEASE.slice(0, SHORT_MAX),
@@ -252,10 +275,10 @@ const writeState = (home: string, name: string, state: DecisionsState) => writeJ
 export const writeKeeper = (home: string, name: string, keeper: DecisionKeeper, now: number) => writeState(home, name, { ...readDecisionsState(home, name), keeper: { ...keeper, at: new Date(now).toISOString() } });
 
 /** `FL answer`'s row: the running runtime's keeper switch, off when no runtime runs. */
-export function appendHostAnswer(home: string, agent: Pick<AgentConfig, "name" | "track" | "preset" | "script" | "prompt" | "params">, d: { at: number; action: DecisionAction; reason: string; result: string }, running: boolean): DecisionRow {
+export function appendHostAnswer(home: string, agent: Pick<AgentConfig, "name" | "track" | "preset" | "script" | "prompt" | "params" | "ask">, d: { at: number; action: DecisionAction; reason: string; result: string }, running: boolean): DecisionRow {
   const kept = readDecisionsState(home, agent.name).keeper;
   const keeper = running && kept ? { on: kept.on, mode: kept.mode } : KEEPER_OFF;
-  return appendDecision(home, agent.name, decisionRow({ ...d, source: "host-answer", strategy: strategyOf(home, agent), keeper }, { home }));
+  return appendDecision(home, agent.name, decisionRow({ ...d, source: "host-answer", strategy: strategyOf(home, agent), keeper }, { home, secrets: rowSecrets(home, agent) }));
 }
 
 /** The rows the site has not taken, oldest first: newer than the cursor, and young enough for the site to take. */

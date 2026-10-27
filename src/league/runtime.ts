@@ -12,7 +12,7 @@ import { auditRefusal } from "./audit/verdict.ts";
 import { BawError, type Signer } from "./baw.ts";
 import { bookView, clearPause, emptyBook, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
-import { appendDecision, decisionRow, KEEPER_OFF, keeperOf, resultOfJournal, resultOfOutcome, sendDecisions, strategyOf, writeKeeper, type DecisionAction, type DecisionKeeper, type DecisionSource } from "./decisions.ts";
+import { appendDecision, decisionRow, KEEPER_OFF, keeperOf, resultOfJournal, resultOfOutcome, rowSecrets, sendDecisions, strategyOf, writeKeeper, type DecisionAction, type DecisionKeeper, type DecisionSource } from "./decisions.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
 import { activeWaits } from "./doors.ts";
 import { autopilotLine } from "./enter/copy.ts";
@@ -269,7 +269,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     const decide = (d: { at: number; source: DecisionSource; action: DecisionAction; reason: string; result: string }) => {
       try {
         if (d.source === "keeper") keeperRowAt = clock();
-        appendDecision(deps.home, deps.name, decisionRow({ ...d, strategy: strategyOf(deps.home, agent!), keeper: keeperNow() }, { home: deps.home, wallet }));
+        appendDecision(deps.home, deps.name, decisionRow({ ...d, strategy: strategyOf(deps.home, agent!), keeper: keeperNow() }, { home: deps.home, wallet, secrets: rowSecrets(deps.home, agent) }));
       } catch (error) {
         log("decisions.write.failed", { reason: errorLine(error) });
       }
