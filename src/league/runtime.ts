@@ -979,6 +979,12 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         if (book.launched || book.unresolved.some((u) => u.kind === "launch")) return log("launch.skipped", { id: approved.id, why: book.launched ? "this agent has launched its coin" : "a launch's outcome is not known yet" });
         const prepared = await executor.prepareLaunch({ ...approved.launch!, quote: approved.launch!.quote });
         if (!prepared.ok) return failed(approved, "prepare", prepared.reason);
+        // Run 26 (item 3): a launch is expected to send no BNB; one that does is guarded against the cap like a buy.
+        if (prepared.value.call.value !== 0n) {
+          log("launch.value", { id: approved.id, valueWei: prepared.value.call.value });
+          const again = guard({ ...input, launchValueWei: prepared.value.call.value });
+          if (!again.ok) return refused(approved, again);
+        }
         const sent = await sendRecorded(approved, "launch", { coin: prepared.value.predicted, quote: prepared.value.quote, symbol: approved.launch!.symbol }, `launch ${approved.launch!.symbol}`, prepared.value.call);
         if (!sent.ok && unknownOutcome(sent.stage)) {
           return unresolvedSend(approved, sent.txHash ?? null, "launch", { coin: prepared.value.predicted, quote: prepared.value.quote, symbol: approved.launch!.symbol }, `${sent.stage}: ${sent.reason}`);

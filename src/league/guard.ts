@@ -86,6 +86,11 @@ export type GuardInput = {
   warmup: WarmupState | null;
   /** A buy's price impact once it is quoted (L10); absent before quoting. */
   impactPct?: number;
+  /**
+   * Run 26 (item 3, the v5.1.4 review): a launch's prepared transaction's BNB value, once prepared. A launch sends 0
+   * today; one that would send BNB (a buy folded into the launch) is at work like a buy and checked against L3.
+   */
+  launchValueWei?: bigint;
 };
 
 export type GuardVerdict =
@@ -135,7 +140,13 @@ export function guard(input: GuardInput): GuardVerdict {
 
   if (intent.kind === "launch") {
     if (inWarmup && input.warmup!.launches >= 1) return refuse("W", "warm-up allows one launch, and this script has made it", true);
-    return approve(intent);
+    // Run 26 (item 3): a launch that sends BNB puts it at work: it must fit the cap like a buy (L3).
+    const value = input.launchValueWei ?? 0n;
+    if (value > 0n) {
+      const atWork = book.exposureWei + input.othersAtWorkWei;
+      if (atWork + value > bnbToWei(limits.maxAtWorkBnb)) return refuse("L3", `${bnb(atWork)} is at work in open positions; this launch sends ${bnb(value)} more, past the ${limits.maxAtWorkBnb} BNB cap`);
+    }
+    return approve(intent, value > 0n ? value : null);
   }
 
   // L15: only Feast coins.
