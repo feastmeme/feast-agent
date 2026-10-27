@@ -12,6 +12,7 @@ import { auditRefusal } from "./audit/verdict.ts";
 import { BawError, type Signer } from "./baw.ts";
 import { bookView, clearPause, emptyBook, markArmed, parseBook, positionOf, recordBuy, recordClaim, recordFailure, recordGas, recordRefusal, recordSell, serializeBook, withEquity, type Book } from "./book.ts";
 import { DEFAULT_MAINNET_RPC, LeagueChain } from "./chain.ts";
+import { appendDecision, decisionRow, KEEPER_OFF, keeperOf, resultOfJournal, resultOfOutcome, sendDecisions, strategyOf, writeKeeper, type DecisionAction, type DecisionKeeper, type DecisionSource } from "./decisions.ts";
 import { ENTRY_AGENT } from "./enter/constants.ts";
 import { activeWaits } from "./doors.ts";
 import { autopilotLine } from "./enter/copy.ts";
@@ -257,6 +258,22 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         log("note.failed", { by: "trade", reason: errorLine(error) });
       }
     };
+    /** Task 1018: the floor keeper's switch as every decision row says it (set below, with the switch itself). */
+    let keeperNow: () => DecisionKeeper = () => KEEPER_OFF;
+    /** When the floor keeper last wrote a row: its holds are at most one an ask interval. */
+    let keeperRowAt = Number.NEGATIVE_INFINITY;
+    /**
+     * Task 1018: one decision onto the ring the heartbeat uploads (`decisions.ts`), with the strategy's kind, the
+     * keeper's switch, the release and the host. Nothing about it can fail or hold up the loop: an error is logged.
+     */
+    const decide = (d: { at: number; source: DecisionSource; action: DecisionAction; reason: string; result: string }) => {
+      try {
+        if (d.source === "keeper") keeperRowAt = clock();
+        appendDecision(deps.home, deps.name, decisionRow({ ...d, strategy: strategyOf(deps.home, agent!), keeper: keeperNow() }, { home: deps.home, wallet }));
+      } catch (error) {
+        log("decisions.write.failed", { reason: errorLine(error) });
+      }
+    };
     const sessionSay = (reading: { connected: boolean; view: SessionView | null }) => {
       const step = sessionStep(session, reading, clock());
       session = step.memory;
@@ -471,6 +488,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       }
       enqueue(result.intents);
       save();
+      return result.intents;
     };
 
     // --- one intent, start to finish -----------------------------------------------------
@@ -488,6 +506,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         done(outcome);
       }
       if (requested.has(intent.id)) outcomes.set(intent.id, outcome);
+      // Task 1018: a floor-keeper trade (a prompt agent's autopilot preset), with the preset's own reason.
+      if (agent!.track === "prompt" && intent.source === "preset" && (intent.kind === "buy" || intent.kind === "sell")) decide({ at: intent.createdAt, source: "keeper", action: intent.kind, reason: intent.reason, result: resultOfOutcome(outcome) });
     };
     const report = (intentId: string) => {
       const requestId = requested.get(intentId);
@@ -1183,6 +1203,8 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
      * authenticated read of its own standing, `/api/league?me=<wallet>` with its notes session's bearer token, which the
      * site records as seen (one write per seat per 10 minutes), so the seat never greys while this process lives. Never
      * awaited; its answer is not read; the token is never logged. No notes session: said once, and nothing is sent.
+     * Task 1018: once the read has settled, the same beat uploads up to 3 of the decision rows the site has not taken
+     * (`decisions.ts`), with the same token and the same headers; a failure there is logged and left for the next beat.
      */
     const SEEN_EVERY_MS = 9 * 60_000;
     let nextSeen = 0;
@@ -1192,14 +1214,16 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       if (deps.only || seenAsking || now < nextSeen) return;
       nextSeen = now + SEEN_EVERY_MS;
       const token = liveToken(deps.home);
+      const site = (deps.site ?? siteFromEnv()).replace(/\/+$/, "");
+      const decisions = (f: typeof fetch) => sendDecisions({ home: deps.home, name: deps.name, site, fetch: f, token, now: clock(), log }).catch(() => undefined);
       if (!token) {
+        void decisions(deps.fetch ?? fetch);
         log("seen.skipped", { why: "no notes session" });
         // Said once a run; the next run says it again if it is still missing.
         if (!seenToldNoSession) notify("notes", "feast.meme cannot see this agent alive without its notes session: run `FL note --login` (one signature, no gas) so its seat does not grey");
         seenToldNoSession = true;
         return;
       }
-      const site = (deps.site ?? siteFromEnv()).replace(/\/+$/, "");
       const f = withHealth(withHostHeaders(deps.fetch ?? fetch, [site]), healthOf());
       seenAsking = true;
       void f(`${site}/api/league?view=today&limit=1&me=${wallet.toLowerCase()}`, { headers: { accept: "application/json", authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) })
@@ -1208,6 +1232,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
           if (r.status !== 200) log("seen.failed", { status: r.status });
         })
         .catch((error: unknown) => log("seen.failed", { reason: (error as Error).name === "TimeoutError" ? "no answer in time" : "no answer" }))
+        .then(() => decisions(f))
         .finally(() => (seenAsking = false));
     };
 
@@ -1215,6 +1240,20 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
     let autopilotOn = false;
     /** Why the floor keeper is on (null while off): its switch says each change once (addendum 7). */
     let autopilotWhy: KeeperWhy | null = null;
+    keeperNow = () => keeperOf(autopilotOn, autopilotWhy);
+    /** Task 1018: the switch on disk at each change (and off at the start), for the rows `FL answer` writes from its own process. */
+    let keeperKept: string | null = null;
+    const keepKeeper = () => {
+      const k = keeperNow();
+      if (`${k.on}:${k.mode}` === keeperKept) return;
+      keeperKept = `${k.on}:${k.mode}`;
+      try {
+        writeKeeper(deps.home, deps.name, k, clock());
+      } catch (error) {
+        log("decisions.write.failed", { reason: errorLine(error) });
+      }
+    };
+    keepKeeper();
     /**
      * The loop's rest between passes (task 975, addendum 3). A rest that ends more than 10 minutes late means the
      * machine slept (or the process was suspended): nothing traded meanwhile. It is logged and told once, so
@@ -1239,12 +1278,17 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       log("ask.pack", { pack: pack.digest, chars: pack.text.length, coins: pack.ids.size, requests: gathered.requests });
       const host = hostShown(ask.with);
       const row = (fields: Partial<JournalRow> & { result: string }): JournalRow => ({ at: new Date(startedAt).toISOString(), pack: pack.digest, promptSha: input.prompt.sha256, action: "none", coin: null, symbol: null, amountBnb: null, fraction: null, reason: "", ...fields });
+      // The journal's row, and the same round as a decision row (task 1018): no decision came out → `none`.
+      const journal = (r: JournalRow) => {
+        appendJournal(deps.home, deps.name, r);
+        decide({ at: startedAt, source: "runtime-ask", action: r.action === "hold" || r.action === "buy" || r.action === "sell" ? r.action : "none", reason: r.reason, result: resultOfJournal(r.result) });
+      };
       const failed = (cause: string) => {
         askState = { ...askState, streak: askState.streak + 1, cause: askState.streak === 0 ? cause : askState.cause, promptSha: input.prompt.sha256, last: { at: startedAt, action: "none", reason: "", result: `error: ${cause}` } };
         // The takeover is said once, by the floor keeper's own switch, with the streak's first cause (addendum 7).
         if (askState.streak === 2) askState = { ...askState, floorKeeperSince: clock() };
         writeAskState(deps.home, deps.name, askState);
-        appendJournal(deps.home, deps.name, row({ result: `error: ${cause}` }));
+        journal(row({ result: `error: ${cause}` }));
         log("ask", { pack: pack.digest, result: "error", cause, streak: askState.streak });
       };
       const call = await (deps.askHost ?? callHost)({ with: ask.with as Exclude<typeof ask.with, "none">, pack: pack.text, home: deps.home, name: deps.name, model: ask.model, baseUrl: ask.baseUrl ?? null, keyEnv: ask.keyEnv ?? null, fetch: deps.fetch });
@@ -1257,7 +1301,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
       const finish = (result: string) => {
         askState = { ...askState, last: { at: startedAt, action: d.action, reason: d.reason, result } };
         writeAskState(deps.home, deps.name, askState);
-        appendJournal(deps.home, deps.name, row({ ...decided, result }));
+        journal(row({ ...decided, result }));
         log("ask", { pack: pack.digest, action: d.action, coin: d.coin, amountBnb: d.amountBnb, fraction: d.fraction, result });
       };
       if (d.action === "hold") return finish("hold");
@@ -1372,6 +1416,7 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
         }
         autopilotWhy = why;
       }
+      keepKeeper();
       // Task 975, addendum 4: the ask, once the host has been silent an interval since its last trade and the last ask.
       // The first ask waits for the market's first read (at most 2 minutes from the start), so its pack has coins in it.
       const marketRead = !feed || feed.mode !== "snapshot" || feed.held() !== null || now - startedAt > 2 * 60_000;
@@ -1463,7 +1508,9 @@ export async function runAgent(deps: RuntimeDeps): Promise<RunOutcome> {
             const board = needBoard() && (agent.track !== "prompt" || autopilotOn);
             if (feed && board) await feed.prepareBoard(now);
             const snapshot = await market.snapshot({ now, balanceWei, limits: agent.limits, book, marks, warmup: warmup(), watch: watchList(), feast, needBoard: board, stale: feed?.stale() ?? null });
-            await runStrategy("onTick", snapshot);
+            const made = await runStrategy("onTick", snapshot);
+            // Task 1018: a keeper pass that decides nothing says so, at most once an ask interval, so a keeper-only seat shows up.
+            if (agent.track === "prompt" && autopilotOn && made.length === 0 && now - keeperRowAt >= everyMs()) decide({ at: now, source: "keeper", action: "hold", reason: `${agent.preset}: nothing to trade this pass`, result: "ok: hold" });
           } else save();
           tickFails = 0;
           beat(clock());

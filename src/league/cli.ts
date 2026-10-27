@@ -15,6 +15,7 @@ import { AUDIT_RULES } from "./audit/static.ts";
 import { auditFile, auditRefusal, recordModelVerdict } from "./audit/verdict.ts";
 import { BawError, BawSigner, execRunner } from "./baw.ts";
 import { aliveLine, markStarting, readAlive, startingNow } from "./alive.ts";
+import { appendHostAnswer, decisionResult, resultOfOutcome, type DecisionAction } from "./decisions.ts";
 import { manualBeat, readManual, recordManual, settleBeats } from "./manual.ts";
 import { keepSupport, supportLine, supportUrl } from "./support.ts";
 import { fit, logTail, saveReport, scrub, sendReport, type ReportBundle } from "./report.ts";
@@ -137,10 +138,11 @@ const HELP = `feast-league — run a Feast agent with your Binance Agentic Walle
                                   variable --ask-key-env names, or stored once with FL ask-key <name>)
   model <name> <model|default>    change the model the agent's AI is asked with (default: the host's own default)
   ask-key <name>                  read the endpoint's key on stdin and keep it for the agent (mode 0600; never shown)
-  answer <name> '<json>' [--why "<one line>"]
+  answer <name> '<json>' [--why "<one line>"] [--reason "<one line>"]
                                   a host with no headless CLI answers the last FL ask <name> --print by hand (within 10 min):
                                   the same check as an asked AI's, then the trade through FL buy's or FL sell's road; the
-                                  answer's why (or --why) becomes the trade's public note
+                                  answer's why (or --why) becomes the trade's public note; --reason (else the answer's
+                                  own reason) is the round's one line on feast.meme, a hold's too, at most 140 characters
   every <name> <minutes>          change how often the agent is asked
   ask <name> [--print] [--json]   one ask now, into the running agent; --print: the exact pack it would send, nothing sent
   quote --coin <0x…|FEAST> --bnb <n> [--sell] [--fraction f] [--json]
@@ -302,6 +304,8 @@ async function main(argv: string[]): Promise<number> {
       review: { type: "boolean", default: false },
       detach: { type: "boolean", default: false },
       why: { type: "string" },
+      // Task 1018: FL answer's one line for the round, a hold's too.
+      reason: { type: "string" },
       foreground: { type: "boolean", default: false },
       all: { type: "boolean", default: false },
       wait: { type: "string" },
@@ -873,20 +877,34 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       const checked = validateAnswer(parseAnswerText(need(args[1], "the answer: one JSON object in the pack's schema")), { ids: new Map(printed.ids), maxBuyBnb: printed.maxBuyBnb });
+      const answeredAt = Date.now();
+      // Task 1018: the round as a decision row, onto the ring the running runtime's heartbeat uploads; a ring that cannot be
+      // written never fails the answer. An answer not taken is a round where no decision came out, as an asked AI's is.
+      const decided = (d: { action: DecisionAction; reason: string; result: string }) => {
+        try {
+          appendHostAnswer(home, agent, { at: answeredAt, ...d }, statusOf(home, name).running);
+        } catch {
+          // The trade's outcome stands; only feast.meme's view of this round is missing.
+        }
+      };
       if (!checked.ok) {
+        decided({ action: "none", reason: values.reason ?? "", result: decisionResult("failed", `invalid answer: ${checked.why}`) });
         print(json, { ok: false, refused: checked.why, pack: printed.digest }, () => `not taken: ${checked.why} (pack ${printed.digest})`);
         return 2;
       }
       const d = checked.decision;
-      appendJsonl(agentPaths(home, name).log, { at: new Date().toISOString(), event: "answer.taken", pack: printed.digest, action: d.action, coin: d.coin, amountBnb: d.amountBnb, fraction: d.fraction });
+      // --reason, else the answer's own reason, is the round's one line on feast.meme (a hold's too).
+      const reason = values.reason ?? d.reason;
+      appendJsonl(agentPaths(home, name).log, { at: new Date(answeredAt).toISOString(), event: "answer.taken", pack: printed.digest, action: d.action, coin: d.coin, amountBnb: d.amountBnb, fraction: d.fraction, reason });
       if (d.action === "hold") {
+        decided({ action: "hold", reason, result: decisionResult("ok", "hold") });
         print(json, { ok: true, action: "hold", pack: printed.digest }, () => `hold: nothing traded (pack ${printed.digest})`);
         return 0;
       }
       // Task 1020: --why, else the answer's own why, becomes the trade's public note.
       const why = values.why ?? d.why;
       const request = d.action === "buy" ? { kind: "buy" as const, coin: d.coin!, bnb: d.amountBnb!, reason: `answer: ${d.reason}`, why } : { kind: "sell" as const, coin: d.coin!, fraction: d.fraction!, reason: `answer: ${d.reason}`, why };
-      return manualTrade(home, name, agent, request, json, values["no-wait"] === true);
+      return manualTrade(home, name, agent, request, json, values["no-wait"] === true, (result) => decided({ action: d.action, reason, result }));
     }
     case "data": {
       beat(args[0]);
@@ -1165,25 +1183,31 @@ function readPrinted(home: string, name: string): { at: number; digest: string; 
   return got as never;
 }
 
-/** FL buy's and FL sell's road (and FL answer's): the early refusals, then the running agent's inbox or a one-shot. */
-async function manualTrade(home: string, name: string, agent: AgentConfig, request: IntentRequest, json: boolean, noWait: boolean): Promise<number> {
+/**
+ * FL buy's and FL sell's road (and FL answer's): the early refusals, then the running agent's inbox or a one-shot.
+ * `said` (FL answer's, task 1018) hears what became of it as a decision row's result.
+ */
+async function manualTrade(home: string, name: string, agent: AgentConfig, request: IntentRequest, json: boolean, noWait: boolean, said?: (result: string) => void): Promise<number> {
   // A trade by the user's own agent holds back the autopilot (task 963): the runtime writes it down when the guard
   // lets it through (task 975, ruling C6), so a refused one does not count.
   // The limits that need no wallet are checked before anything is asked of the wallet.
   const early = refuseEarly(home, agent, request);
   if (early) {
     appendJsonl(agentPaths(home, name).log, { at: new Date().toISOString(), event: "intent.refused", source: "manual", limit: early.limit, message: early.message, before: "any wallet call" });
+    said?.(resultOfOutcome({ outcome: "refused", limit: early.limit, message: early.message }));
     print(json, { ok: false, refused: early }, () => `refused by ${early.limit}: ${early.message} (nothing was asked of the wallet)`);
     return 2;
   }
   if (statusOf(home, name).running) {
     const sent = sendRequest(home, name, request);
     if (noWait) {
+      said?.(decisionResult("ok", "queued for the running agent; its outcome is not waited for"));
       print(json, { ok: true, queued: true, requestId: sent.requestId }, () => `queued for the running agent "${name}"; FL status ${name}`);
       return 0;
     }
     const outcome = await waitForOutcome(home, name, sent);
     const line = outcomeLine(outcome, name);
+    said?.(resultOfOutcome(outcome));
     recordManual(home, name, `${request.kind}: ${line.text}`);
     print(json, { ok: line.code === 0, requestId: sent.requestId, outcome }, () => line.text);
     return line.code;
@@ -1196,6 +1220,7 @@ async function manualTrade(home: string, name: string, agent: AgentConfig, reque
   const run = await runAgent({ home, name, signer: signerFor(home, name), rpcUrl: rpc(), only: [request], onlyIds: [requestId] });
   const outcome = run.exit === "finished" ? await waitForOutcome(home, name, { requestId, from }, { timeoutMs: 1_000, pollMs: 100 }) : null;
   const line = outcome ? outcomeLine(outcome, name) : { code: run.exit === "finished" ? (0 as const) : (2 as const), text: `${name}: ${run.exit} — ${run.reason}` };
+  said?.(outcome ? resultOfOutcome(outcome) : decisionResult(run.exit === "finished" ? "ok" : run.exit === "refused" ? "refused" : "failed", run.reason));
   recordManual(home, name, `${request.kind}: ${line.text}`);
   print(json, { ok: line.code === 0, requestId, outcome, exit: run.exit, reason: run.reason }, () => line.text);
   return line.code;
