@@ -153,7 +153,7 @@ export function canonicalJson(value: unknown): string {
 }
 
 const personas = new Map<string, PersonaKey | null>();
-/** The default's style when the text is one of its twelve renderings (six styles, en and zh) for this agent's Agent ID. */
+/** The default's style when the text is one of its fourteen renderings (seven styles, en and zh; any pit) for this agent's Agent ID. */
 function defaultOf(home: string, name: string, text: string, sha: string): PersonaKey | null {
   let recorded: string | null = null;
   try {
@@ -181,7 +181,7 @@ function defaultOf(home: string, name: string, text: string, sha: string): Perso
 /**
  * `strategy.kind` and `strategy.sha8`: a script → `script` and the script file's bytes; a preset → `preset:<name>` and
  * its canonical parameters; a prompt → `default` (with its style) when it is the shipped default word for word, in
- * either language and any of the six styles, with `<id>` this agent's Agent ID; else `custom`. The prompt's sha256 is
+ * either language and any of the seven styles, with `<id>` this agent's Agent ID (and any pit); else `custom`. The prompt's sha256 is
  * the one the pack reads.
  */
 export function strategyOf(home: string, agent: Pick<AgentConfig, "name" | "track" | "preset" | "script" | "prompt" | "params">): DecisionStrategy {

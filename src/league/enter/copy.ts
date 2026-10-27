@@ -2,7 +2,7 @@ import { short, utc8, type Lang } from "../register/copy.ts";
 import { LEAGUE_CHAIN_ID, LEAGUE_DOMAIN, shownName, ZERO_ADDRESS } from "../register/message.ts";
 import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES } from "../prompt/constants.ts";
 import { utc8Day } from "../season-gate.ts";
-import { PERSONA_TEXT, type PersonaKey } from "./strategy.ts";
+import { DEFAULT_STRATEGY_VERSION, PERSONA_TEXT, type PersonaKey } from "./strategy.ts";
 
 /**
  * Every word `FL enter` shows a person, in English and Chinese (task 961). The
@@ -266,6 +266,11 @@ export function autopilotLine(autopilot: AutopilotShown, lang: Lang): string {
  * The agent is a background process on this machine (task 975, addendum 3, the owner's words): asleep or stopped, it
  * trades nothing and is eaten at the dinner. The "You're in" line and `FL status` say it.
  */
+/** Run 26 (the default v1.2/v1.3's closing ask, the owner's 09:1x ruling): what the wallet needs to last. */
+export function fundsLine(lang: Lang): string {
+  return lang === "zh" ? "钱包至少要有 0.03 BNB 才活得过第二顿。" : "The wallet needs at least 0.03 BNB to live past the second dinner.";
+}
+
 export function awakeLine(lang: Lang): string {
   return lang === "zh"
     ? "赛季期间保持这台电脑不休眠（或放到服务器 / 云电脑上跑）：它一睡，你的 agent 就停，开饭时会被吃掉。"
@@ -304,7 +309,7 @@ export function tradeNowLine(autopilot: AutopilotShown, promptFile: string, lang
     : `The season is on. Decide and trade now by ${promptFile}; with no autopilot backup, nothing trades while you are quiet but the hard stop-loss.`;
 }
 
-/** `persona` (task 1020): the default's style, when the strategy is the season-1 default v1.1 (copied now, or a copy left as it was). */
+/** `persona` (task 1020): the default's style, when the strategy is the season-1 default (copied now, or a copy left as it was). */
 export type StrategyShown = { kind: "default"; path: string; persona?: PersonaKey | null } | { kind: "existing"; path: string; persona?: PersonaKey | null } | { kind: "given"; path: string };
 
 export function strategyLine(view: StrategyShown, name: string, lang: Lang): string {
@@ -312,8 +317,8 @@ export function strategyLine(view: StrategyShown, name: string, lang: Lang): str
   const style = view.kind !== "given" && view.persona ? (zh ? `；风格：${view.persona}（${PERSONA_TEXT[view.persona].zh}）` : `; style: ${view.persona} (${PERSONA_TEXT[view.persona].en})`) : "";
   if (view.kind === "default")
     return zh
-      ? `策略：第一季默认策略 v1.1，已复制到 ${view.path}${style}；随时可以改，改完运行 \`FL start ${name} --prompt ${view.path}\` 会给出新卡片。`
-      : `Strategy: the season-1 default strategy, copied to ${view.path} (v1.1)${style}; edit it any time, then \`FL start ${name} --prompt ${view.path}\` shows the new card.`;
+      ? `策略：第一季默认策略 ${DEFAULT_STRATEGY_VERSION}，已复制到 ${view.path}${style}；随时可以改，改完运行 \`FL start ${name} --prompt ${view.path}\` 会给出新卡片。`
+      : `Strategy: the season-1 default strategy, copied to ${view.path} (${DEFAULT_STRATEGY_VERSION})${style}; edit it any time, then \`FL start ${name} --prompt ${view.path}\` shows the new card.`;
   if (view.kind === "existing") return zh ? `策略：你的 strategy.md（已有的，没有改动）：${view.path}${style}` : `Strategy: your strategy.md (existing, left as it is): ${view.path}${style}`;
   return zh ? `策略：你的 ${view.path}` : `Strategy: your ${view.path}`;
 }
@@ -637,11 +642,12 @@ function doneRunningLine(name: string, opens: OpensShown, lang: Lang, autopilot?
   const after = zh
     ? `如果它停了，运行 \`FL start ${name}\`。改了 strategy.md 之后，\`FL start ${name} --prompt strategy.md\` 会给出新卡片，需要你说「好」。`
     : `If it stops, run \`FL start ${name}\`. A changed strategy.md needs \`FL start ${name} --prompt strategy.md\`, its new card and your yes.`;
+  const funds = `${zh ? "" : " "}${fundsLine(lang)}`;
   // The season on: the line ends by telling the host to trade now (addendum 2).
-  if (opens.kind === "open") return zh ? `你已报名，「${name}」正在运行。${backup}${after}${tradeNowLine(autopilot ?? null, promptFile, lang)}` : `You're in, and ${name} is running. ${backup}${after} ${tradeNowLine(autopilot ?? null, promptFile, lang)}`;
+  if (opens.kind === "open") return zh ? `你已报名，「${name}」正在运行。${backup}${after}${funds}${tradeNowLine(autopilot ?? null, promptFile, lang)}` : `You're in, and ${name} is running. ${backup}${after}${funds} ${tradeNowLine(autopilot ?? null, promptFile, lang)}`;
   const when =
     opens.kind === "at" ? (zh ? `它等待赛季开始，从${opensText(opens, lang)}起交易` : `it waits for the season and trades from ${opensText(opens, lang)}`) : zh ? "它等待赛季开始，feast.meme 宣布开赛后才交易" : "it waits for the season and trades once feast.meme announces the start";
-  return zh ? `你已报名，「${name}」正在运行：${when}。${backup}${after}` : `You're in, and ${name} is running: ${when}. ${backup}${after}`;
+  return zh ? `你已报名，「${name}」正在运行：${when}。${backup}${after}${funds}` : `You're in, and ${name} is running: ${when}. ${backup}${after}${funds}`;
 }
 
 /**
@@ -684,7 +690,7 @@ export function doneManual(name: string, opens: OpensShown, lang: Lang, already 
     ? `手动模式下没有任何东西会自己交易：没有 autopilot，没有保底交易员，也没有止损盯盘。每个联赛日的达标线（${ACTIVITY_FLOOR_TRADES} 笔交易、${ACTIVITY_FLOOR_BNB} BNB）要你自己完成，否则它会在晚饭时被吃掉。`
     : `In manual mode nothing trades on its own: no autopilot, no floor keeper and no stop-loss watcher. Make the day's floor yourself (${ACTIVITY_FLOOR_TRADES} trades and ${ACTIVITY_FLOOR_BNB} BNB each league day), or it gets eaten at the dinner.`;
   const loop = zh ? `在一台一直开着的机器上，\`FL start ${name}\` 会把它切换到运行循环。` : `On a machine that stays on, \`FL start ${name}\` switches it to the loop.`;
-  return [head, ...how, honest, when, loop].join("\n");
+  return [head, ...how, honest, fundsLine(lang), when, loop].join("\n");
 }
 
 /** Run 21: `FL enter --manual` while the loop runs this agent: stop it first. */

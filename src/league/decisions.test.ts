@@ -342,11 +342,11 @@ describe("strategy.kind and sha8: never the text", () => {
     }
   });
 
-  it("each of the six styles, in either language, is the default; another Agent ID's default is custom", () => {
+  it("each of the seven styles, in either language, is the default; another Agent ID's default is custom", () => {
     const dir = tempDir();
     const home = join(dir, "home");
     const en = defaultStrategyVariants("maplegrin");
-    expect(en).toHaveLength(6);
+    expect(en).toHaveLength(7);
     PERSONAS.forEach((persona, i) => {
       expect(strategyOf(home, promptAgent(dir, en[i]!))).toMatchObject({ kind: "default", persona });
       expect(strategyOf(home, promptAgent(dir, defaultStrategy("maplegrin", "zh", persona)))).toMatchObject({ kind: "default", persona });

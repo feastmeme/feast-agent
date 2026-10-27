@@ -67,7 +67,7 @@ export type AgentConfig = {
    */
   manual?: boolean | null;
   /**
-   * Task 1020 (league-v5.1.4): the style of the season-1 default strategy v1.1 `FL enter` copied for this agent
+   * Task 1020 (league-v5.1.4): the style of the season-1 default strategy `FL enter` copied for this agent
    * (`enter/strategy.ts` PERSONAS), kept next to its prompt. Not part of the card's shape: it only names what the
    * copied text says, and `FL status` shows it.
    */

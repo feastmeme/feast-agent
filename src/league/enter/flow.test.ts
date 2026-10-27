@@ -195,7 +195,7 @@ describe("FL enter: one card, one yes, the Register signature", () => {
       "Registered: seat 7, and a founding seat (#7 of 100). maplegrin.ai is in Season 1.",
       "Notes session open for maplegrin.ai, season 1: your agent's notes reach feast.meme.",
       'started "maplegrin" in the background (pid 4242); FL status maplegrin',
-      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. Autopilot backup is on: if you make no trade for 30 minutes, it trades by the steady preset; \`--no-autopilot\` turns it off. Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The wallet needs at least 0.03 BNB to live past the second dinner.`,
     ]);
     expect(readSession(w.home)).toMatchObject({ token: "tok-1", season: 1, agentId: ID });
   });
@@ -487,6 +487,23 @@ describe("FL enter: the agent's name, the strategy, the start", () => {
     expect(loadAgent(own.home, ID)?.persona ?? null).toBeNull();
   });
 
+  it("run 26: the default copied names the page's pit (never its whole address) and picks its style with the seats taken", async () => {
+    const pit = { coin: `0x${"0".repeat(36)}be11`, symbol: "PITCOIN", name: "Pit Coin", quote: `0x${"0".repeat(36)}bc0b`, poolId: `0x${"ab".repeat(32)}` };
+    const small = world({ page: { league: leagueWire({ seats: { taken: 12, cap: 1000, founding: 12, foundingCap: 100, foundingPending: 0, waitlist: 0 }, pit }) } });
+    await small.run();
+    const text = readFileSync(join(small.cwd, "strategy.md"), "utf8");
+    const persona = personaOf(ID, 12);
+    expect(text).toBe(defaultStrategy(ID, "en", persona, "PITCOIN 0x0000…BE11"));
+    expect(text).toContain("The league's pit is the coin PITCOIN 0x0000…BE11, named in every pack's first line");
+    expect(text.toLowerCase()).not.toContain(pit.coin);
+    expect(loadAgent(small.home, ID)?.persona).toBe(persona);
+    // No pit on the page (an older site): the template's own words; a full arena: the six-way style.
+    const none = world({ page: { league: leagueWire({ seats: { taken: 60, cap: 1000, founding: 60, foundingCap: 100, foundingPending: 0, waitlist: 0 } }) } });
+    await none.run({ lang: "zh" });
+    expect(readFileSync(join(none.cwd, "strategy.md"), "utf8")).toBe(defaultStrategy(ID, "zh", personaOf(ID), null));
+    expect(readFileSync(join(none.cwd, "strategy.md"), "utf8")).toContain("擂台币 （待发），");
+  });
+
   it("an existing strategy.md is used as it is, never overwritten", async () => {
     const w = world();
     writeFileSync(join(w.cwd, "strategy.md"), "Mine: buy only what moves.\n");
@@ -770,7 +787,7 @@ describe("task 975: FL enter plans the autopilot backup by default", () => {
     expect(card.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: "none" } });
     const out = await w.run({ yes: true });
     expect(lastLine(out.text)).toBe(
-      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. ${ON_EN} Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes.`,
+      `You're in, and maplegrin is running: it waits for the season and trades from ${OPENS}. ${ON_EN} Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The wallet needs at least 0.03 BNB to live past the second dinner.`,
     );
     expect(out.data.autopilot).toEqual({ preset: "steady", idleMinutes: 30, ask: { every: 5, with: "none" } });
   });
@@ -813,7 +830,7 @@ describe("task 975, addendum 1: entering once the season is on, and the signing 
     const out = await w.run({ yes: true });
     // Addendum 2: once the season is on, the line ends by telling the host to trade now.
     expect(lastLine(out.text)).toBe(
-      `You're in, and maplegrin is running. ${ON_EN} Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.`,
+      `You're in, and maplegrin is running. ${ON_EN} Nobody is asked on a timer: to decide with your AI, run \`FL ask maplegrin --print\`, answer the pack with one JSON object, and hand it over with \`FL answer maplegrin '<the JSON object>'\`. Keep this machine awake for the season (or run it on a server or cloud computer); if it sleeps, your agent stops and gets eaten. If it stops, run \`FL start maplegrin\`. A changed strategy.md needs \`FL start maplegrin --prompt strategy.md\`, its new card and your yes. The wallet needs at least 0.03 BNB to live past the second dinner. The season is on. Decide and trade now by strategy.md; if you go quiet for 30 minutes, autopilot (steady) takes over.`,
     );
   });
 

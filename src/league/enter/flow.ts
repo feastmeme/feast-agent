@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { getAddress, type Address, type Hex } from "viem";
 
 import { confirmAgent, loadAgent, saveAgent, type AgentConfig, type PlanInput } from "../agent.ts";
@@ -17,7 +17,7 @@ import { agentIdUnreadable, noAgentIdCard, noAnswerLine, previewMismatch, refusa
 import { readWallet, submit, type FlowDeps, type Prepared, type WalletRead } from "../register/flow.ts";
 import { AGENT_ID, joinSignature, nextIssuedAt } from "../register/message.ts";
 import { bindDeadline, bindSignatureRecovers, REFERRALS_CHAIN_ID, type BindFields, type ReferralDeps } from "../register/referral.ts";
-import type { KeptAgent, LeagueSite } from "../register/site.ts";
+import type { KeptAgent, LeagueRead, LeagueSite } from "../register/site.ts";
 import { runAgent, statusOf, type RunOutcome } from "../runtime.ts";
 import { tradingOpens } from "../season-gate.ts";
 import { sessionView } from "../session.ts";
@@ -31,7 +31,8 @@ import { AVATAR_MAX_BYTES, ENTRY_AGENT, PENDING_MAX_AGE_MS } from "./constants.t
 import * as copy from "./copy.ts";
 import { composeMeme, hostPicture, type Meme } from "./meme.ts";
 import { parseRef } from "./ref.ts";
-import { ensureStrategy, type PersonaKey } from "./strategy.ts";
+import { DEFAULT_STRATEGY_VERSION, ensureStrategy, type PersonaKey } from "./strategy.ts";
+import { pitLabel } from "../pit.ts";
 
 /**
  * `FL enter --name <id>.ai [--prompt strategy.md] [--meme "<concept>" …] [--no-start]` (tasks 961, 963, 968): one
@@ -295,6 +296,13 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
   // --- the trading agent: planned now, so its card is under the entry's ---------------------------------
   type Planned = { name: string; agent: AgentConfig; card: string; shape: string; needsYes: boolean; strategy: copy.StrategyShown; autopilot: copy.AutopilotShown };
   let planned = null as Planned | null;
+  /** The league read the plan copies the default with (run 26): set right before the plan, null when the page did not answer. */
+  let entryLeague = null as LeagueRead | null;
+  /** `GET /api/league` once per entry: the plan's read and the closing lines' are the same read. */
+  let leagueRead0: Promise<LeagueRead | null> | null = null;
+  const leagueOnce = () => (leagueRead0 ??= deps.site.league("today", null).catch(() => null));
+  /** The plan still to come copies the default: no --prompt, and no strategy.md in the folder yet. */
+  const copiesDefault = () => startWanted && !planned && input.prompt === undefined && !existsSync(resolve(deps.cwd ?? process.cwd(), "strategy.md"));
   const plan = (): Planned | EnterResult => {
     const name = agentName!;
     let strategy: copy.StrategyShown;
@@ -305,8 +313,10 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
       promptPath = input.prompt;
       strategy = { kind: "given", path: input.prompt };
     } else {
-      const file = ensureStrategy(deps.cwd ?? process.cwd(), given, lang);
-      if (file.copied) log("enter.strategy", { copied: "season-1 default v1.1", persona: file.persona });
+      // Run 26: the style is picked with the seats the league read shows taken, and the template names its pit.
+      const pit = entryLeague?.pit ? pitLabel(entryLeague.pit) : null;
+      const file = ensureStrategy(deps.cwd ?? process.cwd(), given, lang, { seatsTaken: entryLeague?.seats?.taken ?? null, pit });
+      if (file.copied) log("enter.strategy", { copied: `season-1 default ${DEFAULT_STRATEGY_VERSION}`, persona: file.persona, pit: pit !== null });
       promptPath = file.path;
       persona = file.persona;
       strategy = file.copied ? { kind: "default", path: file.path, persona: file.persona } : { kind: "existing", path: file.path, persona: file.persona };
@@ -467,6 +477,8 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
 
   // --- entered, and nothing to launch: the start alone, with no signature -------------------------------------
   if (entered && !composed) {
+    // Run 26: a plan that copies the default reads the league first, for its seats and its pit (else no read is added).
+    if (copiesDefault()) entryLeague = await leagueOnce();
     const refused = planOnce();
     if (refused) return refused;
     const head = copy.alreadyEntered({ agentId: given, coin: record!.bodyCoin, notes: record!.notes ?? null, season: record!.registered?.season ?? null, seat: record!.registered?.seat ?? null }, lang);
@@ -475,7 +487,7 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (!planned) return end(0, true, "entered", [head, ...refLate(), ...(input.memeOnly ? [] : [copy.doneLine(lang)])], { agentId: given, bodyCoin: record!.bodyCoin, notes: record!.notes ?? null });
     if (manual && statusOf(deps.home, planned.name).running) return end(2, false, "running", [head, copy.manualWhileRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
     if (statusOf(deps.home, planned.name).running && !planned.needsYes) return end(0, true, "entered", [head, ...refLate(), copy.alreadyRunning(planned.name, lang)], { agentId: given, agent: planned.name, running: true });
-    const rerunRead = await deps.site.league("today", null).catch(() => null);
+    const rerunRead = await leagueOnce();
     keepSupport(deps.home, rerunRead);
     const opens = tradingOpens(rerunRead);
     const upgrade = upgradeSentence(versionView(rerunRead?.latestRuntime, now()), lang);
@@ -525,6 +537,10 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     if (still) return end(1, false, "unresolved", copy.pendingOutcome(still.kind, lang), { kind: still.kind, txHash: still.txHash });
   }
 
+  // The season: the page says which, and when trading opens; a page that does not answer leaves it at 1, unknown. Read
+  // before the plan (run 26): the default it copies takes its style's arena and its pit from this read.
+  const leagueRead = await leagueOnce();
+  entryLeague = leagueRead;
   const refused = planOnce();
   if (refused) return refused;
 
@@ -538,8 +554,6 @@ export async function enter(deps: EnterDeps, input: EnterInput): Promise<EnterRe
     }
   };
 
-  // The season: the page says which, and when trading opens; a page that does not answer leaves it at 1, unknown.
-  const leagueRead = await deps.site.league("today", null).catch(() => null);
   keepSupport(deps.home, leagueRead);
   const season = leagueRead?.season.number ?? 1;
   const opens = tradingOpens(leagueRead);

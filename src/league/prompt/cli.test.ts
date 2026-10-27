@@ -232,7 +232,7 @@ describe("task 1020: FL status names the default strategy's style", () => {
     saveAgent(home, { ...confirmAgent(planned.agent), persona: "hunter" });
     const data = JSON.parse((await run(["status", "demo", "--json", "--no-league"], env)).stdout) as Record<string, unknown>;
     expect(data.persona).toBe("hunter");
-    expect((await run(["status", "demo", "--no-league"], env)).stdout).toContain("style: hunter (the season-1 default strategy v1.1, as FL enter copied it)");
+    expect((await run(["status", "demo", "--no-league"], env)).stdout).toContain("style: hunter (the season-1 default strategy, as FL enter copied it)");
     saveAgent(home, confirmAgent(planned.agent));
     expect((await run(["status", "demo", "--no-league"], env)).stdout).not.toContain("style:");
   }, 60_000);

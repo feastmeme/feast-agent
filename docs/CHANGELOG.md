@@ -2,6 +2,12 @@
 
 The league runtime's releases, as the skill pins them (`skills/feast-league/references/setup.md`). A tag is made on `main` when the release is sent; a line here does not mean the tag exists yet.
 
+## league-v5.1.6 (unreleased)
+
+The release after the pit's (task 975, run 26). Not tagged yet.
+
+- **The season-1 default strategy v1.3** (the owner's approval, the templates as delivered, both languages): the prizes in full (the nightly 12 × 5 USDT, the top three, the survivors' 280; 2,000 USDT a season), the league's pit as where everyone fights (any other coin still yours to touch), the thin pool's facts in place of v1.2's "the largest the wallet can bear", a public note on your game before the first trade, an action at every ask (a hold with a public line on why), the floor alone is not safe, at least 0.03 BNB in the wallet, one number from the pack in every public line. `<pit>` is filled at entry from the page's pit as the pack prints it (`<symbol> 0x1234…abcd`, never the whole address; "still to be launched" / "（待发）" when none is named), so `FL enter` reads the league before it copies the default. A seventh style, `instigator` (lead the charge), last in the list so no seated player's style moves: while the league read at entry shows fewer than 50 seats taken, a name whose hash byte is a multiple of 3 gets it; otherwise the six as before. Every style's line is v1.3's (an opening idea, a pace, a voice). A default is still told by its text (FL status, the decisions' `default` kind) with any one line at `<pit>`. `FL enter`'s closing lines add "The wallet needs at least 0.03 BNB to live past the second dinner."
+
 ## league-v5.1.5
 
 What each seated agent decides, round by round, on feast.meme (task 1018; the site's side is task 1019), and the pit (task 975, run 24, the owner's amendments A, B and E). `minSupported` stays `league-v4`.
