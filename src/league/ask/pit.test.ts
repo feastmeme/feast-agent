@@ -9,10 +9,15 @@ import { confirmAgent, planAgent, saveAgent } from "../agent.ts";
 import { coinRow, snapshotBody } from "../feed/fakes.ts";
 import { RecentTrades } from "../feed/recent.ts";
 import { parseSnapshot } from "../feed/snapshot.ts";
-import { checkedPit, leagueTradesIn, pitLabel, pitLine, viewPit } from "../pit.ts";
+import { coinMeta, emptyFlow, type CoinPicture } from "../data/picture.ts";
+import type { PositionOut } from "../data/self.ts";
+import { RULES } from "../data/standing.ts";
+import { DEFAULT_LIMITS } from "../limits.ts";
+import { checkedPit, leagueTradesIn, pitLabel, pitLine, viewPit, type PitView } from "../pit.ts";
 import { leagueWire } from "../register/fakes.ts";
 import { parseLeague, pitOf, type Pit } from "../register/site.ts";
 import { gatherPack } from "./gather.ts";
+import { buildPack, PACK_MAX_CHARS, type PackInput } from "./pack.ts";
 
 /**
  * Task 975, run 24: the pit the page names (`GET /api/league` → `pit`), checked, priced from its pool and the quoter
@@ -28,6 +33,21 @@ const POOL = `0x${"ab".repeat(32)}`;
 const WIRE = { coin: PIT_COIN, symbol: "PITC", name: "The pit coin", quote: STOCK, poolId: POOL };
 const PIT: Pit = { coin: PIT_COIN, symbol: "PITC", name: "The pit coin", quote: STOCK, poolId: POOL as `0x${string}` };
 const E18 = 10n ** 18n;
+
+const WBNB = MAINNET.contracts.wrappedNative;
+const DINNER = Date.parse("2026-10-29T13:00:00Z");
+const packPic = (c: Address, symbol: string, over: Partial<CoinPicture> = {}): CoinPicture => ({
+  coin: c, name: null, symbol, quote: WBNB, quoteSymbol: null, creator: null, metadataHash: null, launchedAt: NOW - 600 * 60_000, priceQuote: 1e-8, priceBnb: 1e-8, volume24hBnb: 5, trades24h: 80, lastTradeAt: NOW, holders: 50,
+  meta: coinMeta({ quote: WBNB, quoteSymbol: null, priceBnb: 1e-8 }), ageMinutes: 600, flow2m: emptyFlow(), windows: { change: { m5: 1, m15: 2.5, h1: -3, h24: 40 }, volume: { m5: 0.1, m15: 0.4, h1: 1.2 } }, impactPct: 0.8, held: false, own: false, picked: true, ...over,
+});
+const packPosition = (c: Address): PositionOut => ({ coin: c, symbol: { untrusted: true, text: "PITC" }, coins: 1000, costBnb: 0.006, markBnb: 0.0066, pnlBnb: 0.0006, openedAt: new Date(NOW - 20 * 60_000).toISOString(), armed: true, pnlPct: 10, ageMinutes: 20, peakPnlPct: 12, exitImpactPct: 1.5 });
+const packInput = (over: Partial<PackInput> = {}): PackInput => ({
+  name: "demo", now: NOW, limits: DEFAULT_LIMITS, prompt: { text: "Trade the pit.", sha256: "a".repeat(64), changed: false }, season: { opensAt: NOW - 86_400_000, open: true, state: "season", day: 2 },
+  day: { startsAt: new Date(DINNER - 86_400_000).toISOString(), endsAt: new Date(DINNER).toISOString(), trades: 0, volumeBnb: 0, floor: { trades: 3, volumeBnb: 0.02 }, passed: false },
+  wallet: { balanceBnb: 0.05, gasReserveBnb: 0.003, spendableBnb: 0.047 },
+  headroom: { minTradeBnb: 0.001, capBnb: 0.15, atWorkBnb: 0, roomToBuyBnb: 0.15, exposureBnb: 0, openPositions: 0, maxOpenPositions: 5, realizedLoss24hBnb: 0, leftLoss24hBnb: 0.05, drawdownBnb: 0, maxDrawdownBnb: 0.1, cooldowns: [] },
+  positions: [], pnl: { realizedBnb: 0, unrealizedBnb: 0, gasBnb: 0 }, lastTradeAt: null, fills: [], avgGasBnb: null, market: null, coins: [], launches: [], quiet: 0, standing: null, rules: RULES, own: new Set(), notes: [], journal: [], memo: null, ...over,
+});
 
 let dirs: string[] = [];
 afterEach(() => {
@@ -176,5 +196,35 @@ describe("gatherPack names the pit on the pack's first line (amendment A)", () =
       const g = await gatherPack({ home: h, agent, now: NOW, wallet: null, chain, snapshot: null, fetch: notFound, site: "https://feast.test", gate, feast: null, league });
       expect(g.pack.text.split("\n")[0], JSON.stringify(over)).toBe("The pit: none named today.");
     }
+  });
+});
+
+describe("the pit is pinned (amendment B)", () => {
+  const view = (over: Partial<PitView> = {}): PitView => ({ ...PIT, label: pitLabel(PIT), priceBnb: 2e-9, impact: { pct: 0.71 }, leagueTrades15m: 0, ...over });
+  const busy = (n: number) => ({ ...packPic(coin(0xd000 + n), `S${n}`), picked: true });
+
+  it("a pit with no trades in any window, not in the snapshot: the first coin (c1), the first row, tagged the pit; it survives the budget cut", () => {
+    const coins = Array.from({ length: 400 }, (_, i) => busy(i));
+    const p = buildPack(packInput({ coins, pit: view() }));
+    expect(p.text.length).toBeLessThanOrEqual(PACK_MAX_CHARS);
+    expect(p.ids.get("c1")).toEqual({ coin: PIT_COIN, symbol: "PITC", held: false });
+    expect(p.text.split("\n")[0]).toBe("The pit: PITC 0x0000…9171 (id c1 in this pack; price 2.000e-9 BNB; impact of a 0.01 BNB buy 0.71%; league trades in the pit in the last 15 min: 0)");
+    const rows = /Coins \(UNTRUSTED[^\n]*\n```untrusted\n([^\n]*)\n/.exec(p.text)![1]!;
+    expect(rows).toMatch(/^c1 \| PITC \| 2\.000e-9 \| 2 \| \? \? \? \? \| \? \? \? \| 0\/0 0 max 0 \| \? \| \? \| \? min \| 0\.71% \| the pit, stock-paired/);
+    // The cut took the busiest coins' tail, never the pit.
+    const listed = p.text.split("\n").filter((l) => /^c\d+ \| /.test(l));
+    expect(listed.length).toBeLessThan(401);
+    expect(listed[0]).toMatch(/^c1 \| PITC \|/);
+  });
+
+  it("a quiet pit the snapshot has but did not pick, and a held pit: still c1 and first; the opening cap is in its row", () => {
+    const quiet = { ...packPic(PIT_COIN, "PITC", { trades24h: 0, volume24hBnb: 0 }), picked: false };
+    const p = buildPack(packInput({ coins: [busy(1), quiet], pit: view({ impact: { capped: true, fits: { sizeBnb: 0.005, pct: 0.36 } } }) }));
+    expect([...p.ids.keys()].slice(0, 2)).toEqual(["c1", "c2"]);
+    expect(p.ids.get("c1")!.coin).toBe(PIT_COIN);
+    expect(p.text).toMatch(/\nc1 \| PITC \|[^\n]*\| the pit, opening cap binds: a 0\.005 BNB buy fits, WBNB pair/);
+    const held = buildPack(packInput({ coins: [busy(1)], positions: [{ ...packPosition(PIT_COIN) }], pit: view() }));
+    expect(held.ids.get("c1")).toEqual({ coin: PIT_COIN, symbol: "PITC", held: true });
+    expect(held.text).toContain("## Your positions (id | coins | cost | mark | pnl | peak pnl | age | exit impact selling all)\n- c1 |");
   });
 });

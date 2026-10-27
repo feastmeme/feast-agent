@@ -10,7 +10,7 @@ import type { Limits } from "../limits.ts";
 import { ACTIVITY_FLOOR_BNB, ACTIVITY_FLOOR_TRADES } from "../prompt/constants.ts";
 import type { DayView } from "../prompt/floor.ts";
 import { cleanWhy, WHY_MAX } from "../notes/trade.ts";
-import { pitLine, type PitView } from "../pit.ts";
+import { pitLine, pitPicture, type PitView } from "../pit.ts";
 import { utc8 } from "../register/copy.ts";
 import { signInWarning } from "../session.ts";
 
@@ -134,7 +134,11 @@ export function buildPack(input: PackInput): Pack {
   const ids: Pack["ids"] = new Map();
   const idOf = new Map<string, string>();
   const held = new Set(input.positions.map((p) => p.coin.toLowerCase()));
-  const picked = input.coins.filter((c) => c.picked || held.has(c.coin.toLowerCase()));
+  // Run 24, amendment B: the pit is pinned: the first coin (c1) and the first row, whatever the inclusion rules say,
+  // from the snapshot's row when it has one, else from what the chain said of it; the budget never cuts it.
+  const pitKey = input.pit ? input.pit.coin.toLowerCase() : null;
+  const pitRow = input.pit ? input.coins.find((c) => c.coin.toLowerCase() === pitKey) ?? pitPicture(input.pit, held.has(pitKey!), input.own.has(pitKey!)) : null;
+  const picked = [...(pitRow ? [pitRow] : []), ...input.coins.filter((c) => c.coin.toLowerCase() !== pitKey && (c.picked || held.has(c.coin.toLowerCase())))];
   const add = (coin: Address, symbol: string | null) => {
     const k = coin.toLowerCase();
     if (idOf.has(k)) return idOf.get(k)!;
@@ -143,7 +147,8 @@ export function buildPack(input: PackInput): Pack {
     idOf.set(k, id);
     return id;
   };
-  // Positions first (they get the low ids), then the picked coins.
+  // The pit first (amendment B), then the positions (they get the low ids), then the picked coins.
+  if (pitRow) add(pitRow.coin, pitRow.symbol);
   for (const p of input.positions) add(p.coin, p.symbol.text);
   for (const c of picked) add(c.coin, c.symbol);
   const cap = maxBuyBnb(input);
@@ -153,7 +158,8 @@ export function buildPack(input: PackInput): Pack {
   const strategy = input.prompt.text === null ? "(the strategy file cannot be read)" : input.prompt.text.length > STRATEGY_MAX_CHARS ? `${input.prompt.text.slice(0, STRATEGY_MAX_CHARS)}\n(… cut at ${STRATEGY_MAX_CHARS} characters)` : input.prompt.text;
   const coinRow = (c: CoinPicture) => {
     const w = c.windows;
-    const tags = [input.own.has(c.coin.toLowerCase()) || c.own ? "your own coin" : null, held.has(c.coin.toLowerCase()) ? "held" : null, c.meta.type === "bnb" ? "WBNB pair" : `stock-paired (${shown(c.meta.quoteSymbol, 12)}${c.meta.underlyingTicker ? `, underlying ${shown(c.meta.underlyingTicker, 12)}` : ""})`, c.meta.openingCapBinding === true ? `opening cap: at most ${bnb(c.meta.openingCapBnb)} BNB a wallet` : null].filter(Boolean).join(", ");
+    const pitCapped = c.coin.toLowerCase() === pitKey && input.pit?.impact && "capped" in input.pit.impact ? input.pit.impact : null;
+    const tags = [c.coin.toLowerCase() === pitKey ? "the pit" : null, pitCapped ? `opening cap binds${pitCapped.fits ? `: a ${pitCapped.fits.sizeBnb} BNB buy fits` : ""}` : null, input.own.has(c.coin.toLowerCase()) || c.own ? "your own coin" : null, held.has(c.coin.toLowerCase()) ? "held" : null, c.meta.type === "bnb" ? "WBNB pair" : `stock-paired (${shown(c.meta.quoteSymbol, 12)}${c.meta.underlyingTicker ? `, underlying ${shown(c.meta.underlyingTicker, 12)}` : ""})`, c.meta.openingCapBinding === true ? `opening cap: at most ${bnb(c.meta.openingCapBnb)} BNB a wallet` : null].filter(Boolean).join(", ");
     return `${idOf.get(c.coin.toLowerCase())} | ${shown(c.symbol)} | ${c.priceBnb === null ? "?" : c.priceBnb.toPrecision(4)} | ${bnb(c.meta.marketCapBnb)} | ${pct(w?.change.m5)} ${pct(w?.change.m15)} ${pct(w?.change.h1)} ${pct(w?.change.h24)} | ${bnb(w?.volume.m15)} ${bnb(w?.volume.h1)} ${bnb(c.volume24hBnb)} | ${c.flow2m.buys}/${c.flow2m.sells} ${bnb(c.flow2m.netBnb)} max ${bnb(c.flow2m.largestBnb)} | ${c.trades24h ?? "?"} | ${c.holders ?? "?"} | ${c.ageMinutes ?? "?"} min | ${c.impactPct === null ? "?" : `${c.impactPct}%`} | ${tags}`;
   };
   const st = input.standing;
@@ -251,7 +257,7 @@ export function buildPack(input: PackInput): Pack {
   const launchAt = launchLines.length > 0 ? sections.indexOf(launchLines[0]!) : -1;
   const inLaunches = (i: number) => launchAt >= 0 && i >= launchAt && i < launchAt + launchLines.length;
   const kept = () => {
-    const cut = new Set(picked.slice(keep).map((c) => c.coin.toLowerCase()));
+    const cut = new Set(picked.slice(keep).map((c) => c.coin.toLowerCase()).filter((k) => k !== pitKey));
     return sections.filter((line, i) => !picked.some((c) => cut.has(c.coin.toLowerCase()) && line === coinRow(c)) && (launches || !inLaunches(i))).join("\n");
   };
   while (text.length > PACK_MAX_CHARS && (keep > 3 || launches)) {

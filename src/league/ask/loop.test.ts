@@ -72,6 +72,33 @@ async function run(home: string, c: ReturnType<typeof fakeClock>, feed: FakeFeed
   return runAgent({ home, name: "demo", signer: w.signer, chain: w.chain, fetch: feed.fetch, site: SITE, indexer: INDEXER, now: c.now, sleep: c.sleep, random: seeded(1), noJitter: true, loopMs: 15_000, pollMs: 30_000, maxRuntimeMs: until - c.now(), out: () => {}, askHost: askHost as never });
 }
 
+describe("the pit in the ask loop (run 24, amendments A and B)", () => {
+  it("a pit the page names, with no trades and no row in the snapshot, is the pack's first line and its first coin, c1, in every pack; the AI's buy of c1 fills", async () => {
+    const { home } = setup(5);
+    const c = fakeClock(T0);
+    const PIT = coin(0x9171);
+    const rows = COINS.map((k, i) => coinRow(k, { symbol: SYMBOLS[i], volume24hBnb: 9 - i, trades24h: 90 - i, launchedAt: "2026-10-20T00:00:00.000Z" }));
+    const feed = new FakeFeed(c.now, () => ({ status: 200, body: snapshotBody({ coins: rows }), etag: '"d2"' }));
+    const pit = { coin: PIT, symbol: "PITC", name: "The pit", quote: getAddress("0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"), poolId: `0x${"ab".repeat(32)}` };
+    feed.other = (url) => (url.origin === SITE && url.pathname === "/api/league" ? { status: 200, body: leagueWire({ state: "season", season: { number: 1, day: 2, countdownTo: new Date(DINNER).toISOString() }, pit }) } : null);
+    const w = marketWorld({ coins: [OWN, ...COINS, PIT].map((k, i) => ({ coin: k, symbol: i === 0 ? "MAPLEFEED" : i <= COINS.length ? SYMBOLS[i - 1]! : "PITC" })), now: c.now });
+    recordHostAction(home, "demo", "buy", T0);
+    const packs: string[] = [];
+    await run(home, c, feed, w, T0 + 11 * MIN, async ({ pack }) => {
+      packs.push(pack);
+      return packs.length === 1 ? answer({ action: "buy", coin: "c1", amountBnb: 0.004, reason: "the pit", memo: "" }) : answer({ reason: "hold" });
+    });
+    expect(packs.length).toBe(2);
+    for (const pack of packs) {
+      expect(pack.split("\n")[0]).toMatch(/^The pit: PITC 0x0000…9171 \(id c1 in this pack; price \S+ BNB; impact of a 0\.01 BNB buy [^;]+; league trades in the pit in the last 15 min: \d+\)$/);
+      expect(idOf(pack, "PITC")).toBe("c1");
+    }
+    expect(lines(home).filter((l) => l.event === "buy.filled").map((l) => String(l.coin).toLowerCase())).toEqual([PIT.toLowerCase()]);
+    // The second pack: the pit held, still c1 and first; this wallet's own trade in it may be counted when the tail had it.
+    expect(heldId(packs[1]!)).toBe("c1");
+  }, 60_000);
+});
+
 describe("the ask loop", () => {
   it("asks once an interval of the host's silence has passed; a host trade resets the timer; the asks' own trades never do", async () => {
     const { home } = setup(5);

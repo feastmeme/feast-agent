@@ -1,6 +1,6 @@
 import type { Address } from "viem";
 
-import { IMPACT_SIZE_BNB } from "./data/picture.ts";
+import { coinMeta, emptyFlow, IMPACT_SIZE_BNB, type CoinPicture } from "./data/picture.ts";
 import { clean } from "./enter/copy.ts";
 import { RECENT_WINDOW_MS } from "./feed/recent.ts";
 import { plainReason } from "./feed/snapshot.ts";
@@ -136,4 +136,35 @@ export function pitLine(pit: PitView | null | undefined, id: string | null): str
   if (!pit) return "The pit: none named today.";
   const price = pit.priceBnb === null ? "?" : pit.priceBnb.toPrecision(4);
   return `The pit: ${pit.label} (${id ? `id ${id} in this pack` : "not in this pack's coins list"}; price ${price} BNB; impact of a 0.01 BNB buy ${impactText(pit.impact)}; league trades in the pit in the last 15 min: ${pit.leagueTrades15m})`;
+}
+
+/**
+ * The pit's coin row when the snapshot has none (amendment B: the pit is pinned, outside the 30-minute and 15-minute
+ * inclusion rules): what the chain said of it, every market figure the snapshot would give unknown.
+ */
+export function pitPicture(pit: PitView, held: boolean, own: boolean): CoinPicture {
+  return {
+    coin: pit.coin,
+    name: pit.name,
+    symbol: pit.symbol,
+    quote: pit.quote,
+    quoteSymbol: null,
+    creator: null,
+    metadataHash: null,
+    launchedAt: null,
+    priceQuote: null,
+    priceBnb: pit.priceBnb,
+    volume24hBnb: null,
+    trades24h: null,
+    lastTradeAt: null,
+    holders: null,
+    meta: coinMeta({ quote: pit.quote, quoteSymbol: null, priceBnb: pit.priceBnb }),
+    ageMinutes: null,
+    flow2m: emptyFlow(),
+    windows: null,
+    impactPct: pit.impact && "pct" in pit.impact ? pit.impact.pct : null,
+    held,
+    own,
+    picked: true,
+  };
 }
