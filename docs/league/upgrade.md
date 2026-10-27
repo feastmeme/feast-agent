@@ -59,7 +59,7 @@ node tools/release-sign.mjs keygen --out <a 0700 folder OUTSIDE any repository>
 ```
 
 - `feast-release.key` (mode 0600) stays in that folder, with one offline backup. It never enters a repository: `*.key` is ignored, and the tool refuses a folder inside the repository.
-- The printed public key goes into `src/league/upgrade/release-key.ts`. It must be there in the release before the one that is to be auto-installed: a runtime checks with the key it already has.
+- The printed public key goes into `src/league/upgrade/release-key.ts`. It must be there in the release before the one that is to be auto-installed: a runtime checks with the key it already has. It is there from `league-v5.1.6` on (made 2026-10-26, outside any repository): every release after it must be signed, or `FL upgrade` refuses it.
 
 Each release, in a clean checkout of the commit to tag:
 

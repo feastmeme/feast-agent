@@ -783,7 +783,9 @@ describe("task 975, run 23: FL upgrade, the notices, the opt-in auto-upgrade (le
   });
   it("upgrade.md: the four rails, emergencies through minSupported, the pointer's shape, the key kept outside the repository, the agent.md sentence", () => {
     for (const w of ["**(a) Signed.**", "**(b) Canary-passed.**", "**(c) A safe point.**", "**(d) FL doctor passes after the upgrade.**", "**Emergencies do not come this way.**", '"autoUpgradeFrom"', '"badVersions"', "It never enters a repository", "node tools/release-sign.mjs keygen --out", "When FL status or a notice says an update is out, run `FL upgrade`"]) expect(up, w).toContain(w);
-    expect(read("src/league/upgrade/release-key.ts")).toContain("export const RELEASE_PUBLIC_KEY: string | null = null;");
+    // Run 26 (amendment G): the coordinator's public key is in; the private half never is.
+    expect(read("src/league/upgrade/release-key.ts")).toContain("export const RELEASE_PUBLIC_KEY: string | null = `-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA3SYIcKpmwWNWhjwfAaev5tcCmEX0a9+6NSVL1aZkW9M=\n-----END PUBLIC KEY-----\n`;");
+    expect(read("src/league/upgrade/release-key.ts")).not.toMatch(/PRIVATE KEY/);
     expect(read(".gitignore")).toMatch(/^\*\.key$/m);
   });
   it("SKILL: FL upgrade with the player's yes; the auto-upgrade never turned on without it", () => {

@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -11,6 +11,7 @@ import { autoUpgradeDecision, CANARY_MS, nearestDinner, openAboveDust, safePoint
 import { installedTag, upgrade, type AgentControl, type Running, type UpgradeDeps } from "./engine.ts";
 import { buildManifest, manifestBytes, MANIFEST_PATH, SIGNATURE_PATH, verifySignature, verifyTree } from "./manifest.ts";
 import { realUpgradeDeps } from "./real.ts";
+import { RELEASE_PUBLIC_KEY } from "./release-key.ts";
 
 /**
  * Task 975, run 23: `FL upgrade` and the opt-in auto-upgrade, on fixture releases in temporary folders (a release is a
@@ -365,7 +366,9 @@ describe("FL upgrade and the notices, through the binary (a site of the test's o
     return { url, close: () => new Promise<void>((r) => server.close(() => r())) };
   }
 
-  it("--check says what it would do; FL upgrade does it (unsigned: this runtime ships no key yet); twice is once", async () => {
+  it("--check says what it would do; with the release key shipped (amendment G), FL upgrade refuses an unsigned release and leaves the runtime as it was", async () => {
+    // Run 26: this runtime carries the coordinator's public key now; a release with no signature, or another key's, is
+    // never installed. The signed road is the engine's tests' (a test key: this lane never signs with the real one).
     const base = temp("cli");
     tree(join(base, "src", "feast-agent-league-v5.1.5"), "league-v5.1.5", { sign: "none" });
     execFileSync("tar", ["czf", join(base, "release.tgz"), "-C", join(base, "src"), "feast-agent-league-v5.1.5"]);
@@ -378,18 +381,12 @@ describe("FL upgrade and the notices, through the binary (a site of the test's o
       expect(check.stdout).toContain("this runtime: league-v5.1.4");
       expect(check.stdout).toContain("feast.meme's newest: league-v5.1.5, oldest supported league-v4");
       expect(check.stdout).toContain("FL upgrade would install it");
-      expect(check.stdout).toContain("auto-upgrade (when on, at a safe point): this runtime carries no release key: auto-upgrade needs a signed release");
-      expect(installedTag(pointer)).toBe("league-v5.1.4");
+      expect(check.stdout).not.toContain("this runtime carries no release key");
       const up = await cli(["upgrade"], env);
-      expect(up.code).toBe(0);
-      expect(up.stdout).toContain("upgraded league-v5.1.4 → league-v5.1.5 (checked against the release's manifest; unsigned: no release key yet); restarted: no agent was running");
-      expect(installedTag(pointer)).toBe("league-v5.1.5");
-      const again = await cli(["upgrade"], env);
-      expect(again.stdout.trim().split("\n")[0]).toBe("already on league-v5.1.5, the newest release: nothing to do");
-      // Auto never takes an unsigned release.
-      const auto = await cli(["upgrade", "--auto"], { ...env, FEAST_LEAGUE_RUNTIME: tree(join(base, "fl2", "runtime"), "league-v5.1.4") });
-      expect(auto.code).toBe(2);
-      expect(auto.stdout).toContain("not upgraded: this runtime carries no release key: auto-upgrade needs a signed release");
+      expect(up.code).not.toBe(0);
+      expect(up.stdout).toContain("the release's signature does not verify with this runtime's release key");
+      expect(installedTag(pointer)).toBe("league-v5.1.4");
+      expect(existsSync(join(base, "fl", "runtimes", "league-v5.1.5"))).toBe(false);
     } finally {
       await s.close();
     }
@@ -422,3 +419,18 @@ describe("FL upgrade and the notices, through the binary (a site of the test's o
     }
   }, 180_000);
 });
+
+describe("run 26, amendment G: the shipped release key", () => {
+  it("parses as an Ed25519 public key (SPKI PEM), and is a public key only", () => {
+    expect(RELEASE_PUBLIC_KEY).not.toBeNull();
+    const key = createPublicKey(RELEASE_PUBLIC_KEY!);
+    expect(key.type).toBe("public");
+    expect(key.asymmetricKeyType).toBe("ed25519");
+    expect(key.export({ type: "spki", format: "der" }).length).toBe(44);
+    expect(RELEASE_PUBLIC_KEY).not.toMatch(/PRIVATE/);
+    // A signature by any other key does not verify with it.
+    const other = generateKeyPairSync("ed25519");
+    expect(verifySignature(Buffer.from("manifest"), sign(null, Buffer.from("manifest"), other.privateKey).toString("base64"), RELEASE_PUBLIC_KEY!)).toBe(false);
+  });
+});
+
