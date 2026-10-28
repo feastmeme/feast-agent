@@ -287,16 +287,16 @@ describe("run 19: FL doctor", () => {
 });
 
 describe("run 19: an agent's name may be typed as its Agent ID", () => {
-  it("FL status helloagent.ai is FL status helloagent; a bad name says the rule", async () => {
+  it("FL status maplegrin.ai is FL status maplegrin; a bad name says the rule", async () => {
     const { prompt, home, env } = setup();
-    const planned = planAgent({ name: "helloagent", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
+    const planned = planAgent({ name: "maplegrin", promptPath: prompt, preset: "steady", ask: { every: 5, with: "none", model: null } });
     if (!planned.ok) throw new Error(planned.errors.join("; "));
     saveAgent(home, confirmAgent(planned.agent));
-    const plain = await run(["status", "helloagent", "--no-league"], env);
-    const dotted = await run(["status", "helloagent.ai", "--no-league"], env);
+    const plain = await run(["status", "maplegrin", "--no-league"], env);
+    const dotted = await run(["status", "maplegrin.ai", "--no-league"], env);
     expect(dotted.code).toBe(0);
     expect(dotted.stdout).toBe(plain.stdout);
-    const bad = await run(["status", "Hello Agent", "--no-league"], env);
+    const bad = await run(["status", "Maple Grin", "--no-league"], env);
     expect(bad.stderr).toContain('an agent FL enter started is named by its Agent ID without ".ai"');
   }, 60_000);
 });

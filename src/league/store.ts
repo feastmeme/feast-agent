@@ -34,7 +34,7 @@ export function checkAgentName(name: string): string {
   return name;
 }
 
-/** Run 19: `helloagent.ai` names the agent `helloagent` (the Agent ID as the player sees it, typed where its name goes). */
+/** Run 19: `maplegrin.ai` names the agent `maplegrin` (the Agent ID as the player sees it, typed where its name goes). */
 export function agentNameOf(raw: string): string {
   const v = raw.trim();
   return /\.ai$/i.test(v) && NAME.test(v.slice(0, -3)) ? v.slice(0, -3) : v;
