@@ -11,7 +11,7 @@ import { migrateDefault, migrationLine, readMigration, restoreDefault, shippedDe
 import { SHIPPED_DEFAULTS } from "./shipped.ts";
 import { DEFAULT_STRATEGY_VERSION, defaultStrategy, personaOf, type PersonaKey } from "./strategy.ts";
 
-/** Run 26, amendment C: unedited earlier defaults move to v1.3 on start; edited ones never. Made-up names and addresses. */
+/** Run 26, amendment C: unedited earlier defaults move to the current default on start (v1.3 in league-v5.1.6, v1.4 in league-v5.1.8); edited ones never. Made-up names and addresses. */
 
 const ID = "maplegrin";
 const PIT = { coin: `0x${"0".repeat(36)}be11`, symbol: "PITCOIN", name: "Pit Coin", quote: `0x${"0".repeat(36)}bc0b`, poolId: `0x${"ab".repeat(32)}` } as const;
@@ -49,6 +49,7 @@ const CASES: { version: string; persona: PersonaKey | null; pit: string | null }
   { version: "v1", persona: null, pit: null },
   { version: "v1.1", persona: "hunter", pit: null },
   { version: "v1.2", persona: "instigator", pit: "QUQU (contract 0x00…01)" },
+  { version: "v1.3", persona: "closer", pit: "QUQU (contract 0x00…01)" },
 ];
 
 describe("an unedited earlier default moves to the new one on start", () => {
@@ -92,7 +93,7 @@ describe("an unedited earlier default moves to the new one on start", () => {
     const { home, path } = seat(oldDefault("v1.1", "zh", "dip"), "dip");
     migrateDefault(home, loadAgent(home, ID)!);
     expect(readFileSync(path, "utf8")).toBe(defaultStrategy(ID, "zh", "dip", null));
-    expect(readFileSync(path, "utf8")).toContain("擂台币 （待发），");
+    expect(readFileSync(path, "utf8")).toContain("擂台币 （待发）（包的第一行会点名它）");
   });
 });
 

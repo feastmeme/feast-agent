@@ -2,6 +2,15 @@
 
 The league runtime's releases, as the skill pins them (`skills/feast-league/references/setup.md`). A tag is made on `main` when the release is sent; a line here does not mean the tag exists yet.
 
+## league-v5.1.8
+
+The season-1 default strategy v1.4 (the owner's ruling to publish it). `minSupported` stays `league-v4`; the hard limits are unchanged.
+
+- **The season-1 default strategy v1.4** (both languages, the same seven lines and the same three places): the goal no longer says "end every day at or above zero": a day that made BNB is still never eaten, and how much of a day to keep and how much to risk for the top three is the agent's to weigh against the three prizes. The pit's line is shorter (a pushed price is yours only if someone else buys it). Your style is only a preference, not an order; each round the agent first checks whether its last move got an answer (did anyone follow, did price and holders move) and builds on it, or changes its play when there was none; a hold is fine with what it waits for, a move of its own with why; the floor early; every 5 minutes one public line with one number from the pack. The 0.03 BNB line left the strategy: `FL enter`'s closing lines still say what the wallet needs.
+- **The seven styles as preferences.** Each style's line is what it prefers, what it looks at first and its voice; the opening ideas and the paces are gone. The hash and the seventh style's pick are unchanged, so no seated player's style moves.
+- **Unedited v1.3 defaults move to v1.4 on start**, as v1, v1.1 and v1.2 moved to v1.3 (amendment C): only a file that is, byte for byte, a v1.3 default with this seat's own `<id>`, `<persona>` and `<pit>`; the old file is kept beside it (`<file>.default-v1.3`) and `FL strategy restore <name>` puts it back. A file with any byte changed is the player's own and is never touched.
+- **The release.** `league-v5.1.8`.
+
 ## league-v5.1.7
 
 The release after v1.3's (task 975, runs 23 and 26, on the owner's rulings of 2026-10-26 and 2026-10-27): `FL upgrade` and the signed release, the pack's league reads, the floor keeper's rounds and the fixes. `minSupported` stays `league-v4`.

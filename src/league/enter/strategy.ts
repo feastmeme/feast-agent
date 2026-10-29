@@ -7,14 +7,14 @@ import type { Lang } from "../register/copy.ts";
 
 /**
  * The season-1 default strategy (the owner's rulings of 2026-10-24 04:5x and 05:2x; v1.1, task 1020; v1.3, task 975
- * run 26, the owner's approval of v1.3): seven short lines that `FL enter` copies to the player's `strategy.md` when no
+ * run 26, the owner's approval of v1.3; v1.4, the owner's ruling to publish it, per the v1.4 notes): seven short lines that `FL enter` copies to the player's `strategy.md` when no
  * `--prompt` is given, with `<id>` replaced by the bare Agent ID, `<persona>` by one of seven styles and `<pit>` by the
  * league's pit as the page names it at entry, so the player can edit it. It never overwrites a `strategy.md` that is
  * there. The copied text is the player's from then on: it is not sent anywhere. The template is a data file
  * (`docs/prompts/default-s1*.md`): a new version is the two files, the title below and the styles' lines.
  */
 
-export const DEFAULT_STRATEGY_VERSION = "v1.3";
+export const DEFAULT_STRATEGY_VERSION = "v1.4";
 export const DEFAULT_STRATEGY_TITLE = { en: `Season-1 default strategy ${DEFAULT_STRATEGY_VERSION}`, zh: `第一季默认策略 ${DEFAULT_STRATEGY_VERSION}` } as const;
 
 /**
@@ -26,35 +26,35 @@ export type PersonaKey = (typeof PERSONAS)[number];
 /** The six the hash picks from in a full arena, in their v1.1 order. */
 const SIX = PERSONAS.slice(0, 6) as readonly PersonaKey[];
 
-/** Each style's line in v1.3 (the notes' §五): an opening idea, a pace and a voice; a suggestion, not a rule. */
+/** Each style's line in v1.4 (the v1.4 notes' §四): a preference, what to look at first and a voice; a preference, not an order. */
 export const PERSONA_TEXT: Record<PersonaKey, Record<Lang, string>> = {
   momentum: {
-    en: "Ride the flow. Opening idea: buy the pit's pullbacks while the inflow is still strong, and sell the moment it fades. Pace: several rounds a day, busiest in the middle of the day once the first fight is on. Talk like: \"the flow is still here, one more round\".",
-    zh: "追涨。起手思路：流入还强时买擂台币的回调，流一弱就卖。频率：一天几轮，白天中段、第一架打起来之后最忙。口吻像「流还在，再来一轮」。",
+    en: "Ride the flow: you prefer inflow, look first at the last 2 minutes' buys and sells and the 15-minute volume, and like it fast in and out. Talk like: \"the flow is still here, one more round\".",
+    zh: "追涨：偏好流入，先看最近 2 分钟买卖和 15 分钟量，爱快进快出。口吻像「流还在，再来一轮」。",
   },
   dip: {
-    en: "Buy the dip. Opening idea: buy the pit at its deepest pullback of the last 15 minutes while people still trade it, and sell into the bounce. Pace: one round after each small peak, a few a day. Talk like: \"you dump, I catch\".",
-    zh: "抄底。起手思路：在擂台币最近 15 分钟回撤最深、但仍有人交易时买进，反弹就卖。频率：每个小高潮过后一轮，一天几轮。口吻像「你们砸，我接」。",
+    en: "Buy the dip: you prefer pullbacks, look first at who is dumping and whether anyone still buys, and like taking what others drop. Talk like: \"you dump, I catch\".",
+    zh: "抄底：偏好回撤，先看谁在砸、还有没有人买，爱接别人不要的。口吻像「你们砸，我接」。",
   },
   contrarian: {
-    en: "Fade the crowd. Opening idea: at the top of each rise sell to the ones piling in, and buy back when they dump. Pace: one round per wave, patient between waves, never a whole day on the bench. Talk like: \"sold it to you who chased\".",
-    zh: "反向。起手思路：每波涨势的顶上卖给往里冲的人，大家砸的时候买回来。频率：每波一轮，波与波之间耐心等，但不整天干坐。口吻像「卖给追高的你们了」。",
+    en: "Fade the crowd: you prefer the crowd's excess, look first at where everyone piles in, and like standing on the other side. Talk like: \"sold it to you who chased\".",
+    zh: "反向：偏好人群的过头，先看大家往哪挤，爱站在对面。口吻像「卖给追高的你们了」。",
   },
   follower: {
-    en: "Follow the leaders. Opening idea: when a top-ranked agent buys the pit, buy right behind it and get out before it does. Pace: move when they move; if they are quiet for an hour, open a round of your own. Talk like: \"in behind number one\".",
-    zh: "跟强者。起手思路：排名靠前的 agent 一买擂台币你就紧跟着买，赶在他们前面出。频率：他们动你就动；他们一小时没动，你就自己开一轮。口吻像「跟着第一名进了」。",
+    en: "Follow the leaders: you prefer a direction others have tested, look first at what the top seats are doing in the league's trades, and like the second bite. Talk like: \"in behind number one\".",
+    zh: "跟强者：偏好别人验证过的方向，先看联赛成交里排名靠前的在做什么，爱吃第二口。口吻像「跟着第一名进了」。",
   },
   hunter: {
-    en: "Hunt the drop zone. Opening idea: the agents in danger must act before dinner, so take your place in the pit before they move and sell into their buying. Pace: a few rounds in the day to stay sharp, the main one in the stretch before the final rush. Talk like: \"you have to move before dinner, I am already seated\".",
-    zh: "打淘汰区。起手思路：淘汰区的 agent 开饭前必须动，你先在擂台里站好位，等他们买的时候卖给他们。频率：白天几轮保持手感，主战在收官冲刺之前那一段。口吻像「你们开饭前必须动，我已经坐好了」。",
+    en: "Hunt the drop zone: you prefer the moments others are forced to move, look first at who is in tonight's drop zone and whether they have moved, and like working the hour before dinner. Talk like: \"you have to move before dinner, I am already seated\".",
+    zh: "打淘汰区：偏好别人被迫动的时刻，先看今晚谁在淘汰区、他们动没动，爱在开饭前做文章。口吻像「你们开饭前必须动，我已经坐好了」。",
   },
   closer: {
-    en: "Strike late. Opening idea: do most of your fighting in the last two hours before dinner, when the others are forced to move. Pace: light during the day (a few real rounds, not just the floor), heavy in the last two hours. Talk like: \"last two hours, now we fight\".",
-    zh: "开饭前发力。起手思路：开饭前最后两小时集中开打，那时别人被迫动。频率：白天轻（真打几轮，不只是保命单），最后两小时重。口吻像「最后两小时，开打」。",
+    en: "Strike late: you prefer the close, look first at the dinner countdown, light in the day and heavy in the last two hours. Talk like: \"last two hours, now we fight\".",
+    zh: "开饭前发力：偏好收官，先看开饭倒计时，白天轻、最后两小时重。口吻像「最后两小时，开打」。",
   },
   instigator: {
-    en: "Lead the charge. Opening idea: when the pit is quiet (few holders so far, little bought in the last 15 minutes, fewer than 3 league trades), go in first, say so, and sell to the ones who follow. Pace: the earliest and the most often; never sit out a quiet pit. Talk like: \"in first, the rest is on you\".",
-    zh: "带头。起手思路：擂台安静时（持币人还少、最近 15 分钟没什么人买、联赛不到 3 笔），你先进，公开说你先进了，卖给跟进的人。频率：最早、最勤，安静的擂台也不干坐。口吻像「我先进了，后面的自己看」。",
+    en: "Lead the charge: you prefer the first move, look first at whether the pit is quiet and whether anyone follows, and like going in first and saying so. Talk like: \"in first, the rest is on you\".",
+    zh: "带头：偏好先手，先看擂台安不安静、有没有人跟，爱第一个进并公开说。口吻像「我先进了，后面的自己看」。",
   },
 };
 

@@ -11,26 +11,26 @@ import { DEFAULT_STRATEGY_TITLE, NO_PIT, PERSONAS, PERSONA_TEXT, SMALL_ARENA_SEA
 
 // owner ruling 2026-10-26: cap = capital at work (0.15, sells free room); no per-trade / hourly / daily volume limits
 
-/** Task 1020: the season-1 default strategy and its styles (v1.1: six; run 26, v1.3: seven, and the pit). Made-up Agent IDs. */
+/** Task 1020: the season-1 default strategy and its styles (v1.1: six; run 26, v1.3: seven, and the pit; v1.4: the styles as preferences). Made-up Agent IDs. */
 
 const FIXTURE_PIT = "PITCOIN 0x0000…be11";
 
 describe("the default's seven styles", () => {
   it("PERSONAS is in the ruling's order, the seventh last", () => {
     expect(PERSONAS).toEqual(["momentum", "dip", "contrarian", "follower", "hunter", "closer", "instigator"]);
-    expect(DEFAULT_STRATEGY_TITLE).toEqual({ en: "Season-1 default strategy v1.3", zh: "第一季默认策略 v1.3" });
+    expect(DEFAULT_STRATEGY_TITLE).toEqual({ en: "Season-1 default strategy v1.4", zh: "第一季默认策略 v1.4" });
   });
 
   it("each style renders in both languages, in place of <persona>, with the Agent ID in place of <id> and the pit in place of <pit>", () => {
     for (const persona of PERSONAS) {
       const en = defaultStrategy("maplegrin", "en", persona, FIXTURE_PIT);
       const zh = defaultStrategy("maplegrin", "zh", persona, FIXTURE_PIT);
-      expect(en.split("\n")[0]).toBe("# Season-1 default strategy v1.3");
-      expect(zh.split("\n")[0]).toBe("# 第一季默认策略 v1.3");
+      expect(en.split("\n")[0]).toBe("# Season-1 default strategy v1.4");
+      expect(zh.split("\n")[0]).toBe("# 第一季默认策略 v1.4");
       expect(en).toContain(`\nYour style: ${PERSONA_TEXT[persona].en}\n`);
       expect(zh).toContain(`\n你的风格：${PERSONA_TEXT[persona].zh}\n`);
-      expect(en).toContain(`the coin ${FIXTURE_PIT}, named`);
-      expect(zh).toContain(`擂台币 ${FIXTURE_PIT}，`);
+      expect(en).toContain(`the coin ${FIXTURE_PIT} (the pack's first line names it)`);
+      expect(zh).toContain(`擂台币 ${FIXTURE_PIT}（包的第一行会点名它）`);
       for (const text of [en, zh]) {
         expect(text).toContain("maplegrin.ai");
         expect(text).not.toMatch(/<id>|<persona>|<pit>/);
@@ -40,8 +40,8 @@ describe("the default's seven styles", () => {
   });
 
   it("no pit at entry: en 'still to be launched', zh '（待发）'", () => {
-    expect(defaultStrategy("maplegrin", "en", "dip")).toContain("the coin still to be launched, named");
-    expect(defaultStrategy("maplegrin", "zh", "dip")).toContain("擂台币 （待发），");
+    expect(defaultStrategy("maplegrin", "en", "dip")).toContain("the coin still to be launched (the pack's first line names it)");
+    expect(defaultStrategy("maplegrin", "zh", "dip")).toContain("擂台币 （待发）（包的第一行会点名它）");
     expect(NO_PIT).toEqual({ en: "still to be launched", zh: "（待发）" });
   });
 

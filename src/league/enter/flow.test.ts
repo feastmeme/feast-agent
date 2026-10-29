@@ -494,14 +494,14 @@ describe("FL enter: the agent's name, the strategy, the start", () => {
     const text = readFileSync(join(small.cwd, "strategy.md"), "utf8");
     const persona = personaOf(ID, 12);
     expect(text).toBe(defaultStrategy(ID, "en", persona, "PITCOIN 0x0000…BE11"));
-    expect(text).toContain("The league's pit is the coin PITCOIN 0x0000…BE11, named in every pack's first line");
+    expect(text).toContain("The pit is the coin PITCOIN 0x0000…BE11 (the pack's first line names it)");
     expect(text.toLowerCase()).not.toContain(pit.coin);
     expect(loadAgent(small.home, ID)?.persona).toBe(persona);
     // No pit on the page (an older site): the template's own words; a full arena: the six-way style.
     const none = world({ page: { league: leagueWire({ seats: { taken: 60, cap: 1000, founding: 60, foundingCap: 100, foundingPending: 0, waitlist: 0 } }) } });
     await none.run({ lang: "zh" });
     expect(readFileSync(join(none.cwd, "strategy.md"), "utf8")).toBe(defaultStrategy(ID, "zh", personaOf(ID), null));
-    expect(readFileSync(join(none.cwd, "strategy.md"), "utf8")).toContain("擂台币 （待发），");
+    expect(readFileSync(join(none.cwd, "strategy.md"), "utf8")).toContain("擂台币 （待发）（包的第一行会点名它）");
   });
 
   it("an existing strategy.md is used as it is, never overwritten", async () => {
